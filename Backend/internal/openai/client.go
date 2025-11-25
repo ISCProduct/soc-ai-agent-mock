@@ -26,7 +26,7 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 		model = os.Getenv("OPENAI_MODEL")
 	}
 	if model == "" {
-		model = "gpt-5.1"
+		model = "gpt-4o-mini"
 	}
 
 	cli := openai.NewClient(key)
@@ -58,8 +58,7 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 					Content: input,
 				},
 			},
-			MaxTokens:   600,
-			Temperature: 0.2,
+			MaxCompletionTokens: 600,
 		})
 		cancel()
 

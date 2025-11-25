@@ -1,33 +1,50 @@
-/Backend/.env
-/database/soc@002dai/
-/database/mysql_upgrade_history
-/database/ib_buffer_pool
-/database/auto.cnf
-/database/mysql/
-/database/client-cert.pem
-/database/mysql.sock
-/database/sys/
-/database/mysql.ibd
-/database/ca.pem
-/database/performance_schema/
-/database/binlog.000001
-/database/binlog.000005
-/database/binlog.000004
-/database/server-key.pem
-/database/#innodb_redo/
-/database/ca-key.pem
-/database/ibtmp1
-/database/#ib_16384_1.dblwr
-/database/#innodb_temp/
-/database/binlog.000003
-/database/ibdata1
-/database/server-cert.pem
-/database/public_key.pem
-/database/client-key.pem
-/database/binlog.index
-/database/#ib_16384_0.dblwr
-/database/private_key.pem
-/database/binlog.000002
-/database/binlog.000006
-/database/undo_002
-/database/undo_001
+# Environment files
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Database
+database/
+*.sql
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build
+bin/
+dist/
+build/
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# Backend specific
+Backend/.env
+Backend/bin/
+Backend/server.pid
+
+# MySQL
+mysql/logs/
+/Backend/CURL_EXAMPLES.md
+/DOCKER_QUICK_START.md
+/DOCKER_README.md
+/DOCKER_SECURITY.md
+/DOCKER_SETUP.md
+/Backend/README_CHAT_API.md
+/Backend/test_api.sh
+/Backend/internal/models/seed.go

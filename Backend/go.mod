@@ -3,7 +3,6 @@ module Backend
 go 1.25
 
 require (
-	github.com/go-gormigrate/gormigrate/v2 v2.1.5
 	github.com/joho/godotenv v1.5.1
 	github.com/sashabaranov/go-openai v1.41.2
 	gorm.io/driver/mysql v1.6.0
