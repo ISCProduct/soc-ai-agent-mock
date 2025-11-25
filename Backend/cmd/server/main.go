@@ -38,6 +38,12 @@ func main() {
 	}
 	log.Println("Database migration completed")
 
+	// 初期データ投入
+	if err := models.SeedData(db); err != nil {
+		log.Fatalf("Failed to seed data: %v", err)
+	}
+	log.Println("Database seeding completed")
+
 	// OpenAI クライアント初期化
 	aiClient, err := openai.NewFromEnv("")
 	if err != nil {
