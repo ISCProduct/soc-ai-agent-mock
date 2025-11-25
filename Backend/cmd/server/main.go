@@ -51,19 +51,23 @@ func main() {
 	}
 
 	// リポジトリ層の初期化
+	userRepo := repositories.NewUserRepository(db)
 	questionWeightRepo := repositories.NewQuestionWeightRepository(db)
 	chatMessageRepo := repositories.NewChatMessageRepository(db)
 	userWeightScoreRepo := repositories.NewUserWeightScoreRepository(db)
 
 	// サービス層の初期化
+	authService := services.NewAuthService(userRepo)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 
 	// コントローラー層の初期化
+	authController := controllers.NewAuthController(authService)
 	chatController := controllers.NewChatController(chatService)
 	questionController := controllers.NewQuestionController(questionService)
 
 	// ルーティング設定
+	routes.SetupAuthRoutes(authController)
 	routes.SetupChatRoutes(chatController, questionController)
 
 	// ヘルスチェックエンドポイント
