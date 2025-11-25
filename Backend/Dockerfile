@@ -1,35 +1,39 @@
+# Build stage
 FROM golang:1.25-alpine AS builder
-RUN apk add --no-cache git build-base
 
 WORKDIR /app
 
-# 依存関係だけ先にコピーしてキャッシュを効かせる
+# Install build dependencies
+RUN apk add --no-cache git build-base
+
+# Copy go mod files
 COPY go.mod go.sum ./
 RUN go mod download
 
-# ソースをコピーしてビルド
+# Copy source code
 COPY . .
 
+# Build the server application
 ENV CGO_ENABLED=0
 ENV GOOS=linux
 ENV GOARCH=amd64
+RUN go build -ldflags="-s -w" -o /app/bin/server ./cmd/server
 
-# デフォルトの main パッケージを ./cmd/cli に設定
-ARG MAIN=./cmd/cli
-RUN go build -ldflags="-s -w" -o /usr/local/bin/app ${MAIN}
-
-# 実行ステージもgolang-alpineに変更
+# Runtime stage
 FROM golang:1.25-alpine
-RUN apk add --no-cache ca-certificates git build-base
-RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
-COPY --from=builder /usr/local/bin/app /usr/local/bin/app
-# ソースコードと依存関係もコピー
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates git build-base tzdata
+
+# Copy binary and source (for migrations)
+COPY --from=builder /app/bin/server /app/server
 COPY --from=builder /app /app
 
-USER app
-ENV PORT=80
+# Expose port
 EXPOSE 80
 
-ENTRYPOINT ["/usr/local/bin/app"]
+# Run the application
+CMD ["/app/server"]
+

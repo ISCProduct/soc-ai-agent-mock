@@ -1,33 +1,55 @@
 services:
+  # Backend API Server
   app:
     build:
       context: ./Backend
-      dockerfile: Dockerfile
-    container_name: soc-ai-aget
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: soc-ai-agent-backend
     ports:
-      - "80:80"
+      - "${HOST_PORT:-80}:80"
     volumes:
-      - ./Backend:/app
+      # 開発環境のみマウント（.env で ENABLE_HOT_RELOAD=true の場合）
+      - ${BACKEND_MOUNT:-/dev/null}:${BACKEND_MOUNT_TARGET:-/dev/null}
     env_file:
-      - ./Backend/.env
-    environment:
-      DB_HOST: soc-ai-db
-      DB_PORT: "3306"
-      DB_USER: docker
-      DB_PASS: soc-ai
-      DB_NAME: soc-ai
+      - ${ENV_FILE:-./Backend/.env}
     depends_on:
-      - db
+      db:
+        condition: service_started
+    networks:
+      - soc-ai-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
 
+  # MySQL Database
   db:
-    image: mysql:latest
+    image: mysql:8.0
     container_name: soc-ai-db
     ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: docker
-      MYSQL_DATABASE: soc-ai
-      MYSQL_USER: docker
-      MYSQL_PASSWORD: soc-ai
+      - "${DB_HOST_BIND:-127.0.0.1}:3306:3306"
+    env_file:
+      - ${ENV_FILE:-./Backend/.env}
     volumes:
-      - ./database:/var/lib/mysql
+      - ${DB_VOLUME_TYPE:-mysql_data}:/var/lib/mysql
+      - ${MYSQL_CONF_DIR:-./mysql/conf.d}:/etc/mysql/conf.d:ro
+    networks:
+      - soc-ai-network
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  soc-ai-network:
+    driver: bridge
+
+
+
