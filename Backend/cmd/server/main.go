@@ -50,6 +50,9 @@ func main() {
 		log.Fatalf("Failed to initialize OpenAI client: %v", err)
 	}
 
+	// OAuth設定読み込み
+	oauthConfig := config.LoadOAuthConfig()
+
 	// リポジトリ層の初期化
 	userRepo := repositories.NewUserRepository(db)
 	questionWeightRepo := repositories.NewQuestionWeightRepository(db)
@@ -58,16 +61,18 @@ func main() {
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
+	oauthService := services.NewOAuthService(userRepo, oauthConfig)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 
 	// コントローラー層の初期化
 	authController := controllers.NewAuthController(authService)
+	oauthController := controllers.NewOAuthController(oauthService)
 	chatController := controllers.NewChatController(chatService)
 	questionController := controllers.NewQuestionController(questionService)
 
 	// ルーティング設定
-	routes.SetupAuthRoutes(authController)
+	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 
 	// ヘルスチェックエンドポイント

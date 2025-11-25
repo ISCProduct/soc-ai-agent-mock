@@ -34,11 +34,12 @@ type LoginRequest struct {
 
 // AuthResponse 認証レスポンス
 type AuthResponse struct {
-	UserID  uint   `json:"user_id"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	IsGuest bool   `json:"is_guest"`
-	Token   string `json:"token,omitempty"` // 将来的なトークン認証用
+	UserID    uint   `json:"user_id"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	IsGuest   bool   `json:"is_guest"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Token     string `json:"token,omitempty"` // 将来的なトークン認証用
 }
 
 // Register 新規ユーザー登録
@@ -110,10 +111,11 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:  user.ID,
-		Email:   user.Email,
-		Name:    user.Name,
-		IsGuest: user.IsGuest,
+		UserID:    user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		IsGuest:   user.IsGuest,
+		AvatarURL: user.AvatarURL,
 	}, nil
 }
 
@@ -138,10 +140,11 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:  user.ID,
-		Email:   user.Email,
-		Name:    user.Name,
-		IsGuest: user.IsGuest,
+		UserID:    user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		IsGuest:   user.IsGuest,
+		AvatarURL: user.AvatarURL,
 	}, nil
 }
 
