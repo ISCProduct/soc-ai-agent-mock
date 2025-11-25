@@ -43,6 +43,22 @@ services:
         max-size: "${LOG_MAX_SIZE:-10m}"
         max-file: "${LOG_MAX_FILE:-3}"
 
+# frontend
+  frontend: # サービス名を追加
+    build:
+      context: ./frontend # ./frontend をルートとして使用（従来の構造を維持）
+      dockerfile: ${DOCKERFILE:-Dockerfile} # Dockerfile名もデフォルト設定を使用
+    container_name: soc-ai-agent-frontend
+    restart: 'always'
+    ports:
+      - "3000:3000"
+    env_file:
+      - ${ENV_FILE:-./Backend/.env}
+    depends_on:
+      app:
+        condition: service_started
+    networks:
+      - soc-ai-network
 volumes:
   mysql_data:
     driver: local
