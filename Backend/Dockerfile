@@ -1,4 +1,3 @@
-# dockerfile
 FROM golang:1.25-alpine AS builder
 RUN apk add --no-cache git build-base
 
@@ -19,12 +18,15 @@ ENV GOARCH=amd64
 ARG MAIN=./cmd/cli
 RUN go build -ldflags="-s -w" -o /usr/local/bin/app ${MAIN}
 
-FROM alpine:3.18
-RUN apk add --no-cache ca-certificates
+# 実行ステージもgolang-alpineに変更
+FROM golang:1.25-alpine
+RUN apk add --no-cache ca-certificates git build-base
 RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 COPY --from=builder /usr/local/bin/app /usr/local/bin/app
+# ソースコードと依存関係もコピー
+COPY --from=builder /app /app
 
 USER app
 ENV PORT=80

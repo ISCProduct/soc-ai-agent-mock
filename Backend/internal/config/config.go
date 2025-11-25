@@ -8,11 +8,12 @@ import (
 )
 
 type Config struct {
-	DBUser string
-	DBPass string
-	DBHost string
-	DBPort string
-	DBName string
+	DBUser     string
+	DBPass     string
+	DBHost     string
+	DBPort     string
+	DBName     string
+	ServerPort string
 }
 
 func LoadConfig() (*Config, error) {
@@ -22,9 +23,10 @@ func LoadConfig() (*Config, error) {
 		DBUser: get("DB_USER", "app_user"),
 		DBPass: get("DB_PASS", "app_pass"),
 		// 明示的に IPv4 のループバックをデフォルトにする
-		DBHost: get("DB_HOST", "127.0.0.1"),
-		DBPort: get("DB_PORT", "3306"),
-		DBName: get("DB_NAME", "app_db"),
+		DBHost:     get("DB_HOST", "127.0.0.1"),
+		DBPort:     get("DB_PORT", "3306"),
+		DBName:     get("DB_NAME", "app_db"),
+		ServerPort: get("SERVER_PORT", "80"),
 	}
 
 	return cfg, nil
