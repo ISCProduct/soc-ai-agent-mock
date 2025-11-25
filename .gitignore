@@ -47,12 +47,7 @@ mysql/logs/
 /DOCKER_SETUP.md
 /Backend/README_CHAT_API.md
 /Backend/test_api.sh
-/Backend/README_AUTH_API.md
-/Backend/README_OAUTH.md
-/Backend/CURL_EXAMPLES_AUTH.md
-/Backend/CURL_EXAMPLES_OAUTH.md
-/Backend/QUICKSTART_OAUTH.md
-/Backend/README_OAUTH_SETUP.md
-/Backend/setup_oauth.py
-/Backend/setup_oauth.sh
-/Backend/test_auth_api.sh
+
+# Frontend
+/frontend/node_modules
+/frontend/.next
