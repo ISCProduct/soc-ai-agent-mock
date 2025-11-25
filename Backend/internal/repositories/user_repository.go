@@ -53,3 +53,15 @@ func (r *UserRepository) UpdateUser(user *models.User) error {
 func (r *UserRepository) DeleteUser(id uint) error {
 	return r.db.Delete(&models.User{}, id).Error
 }
+
+// GetUserByOAuth OAuth情報でユーザー取得
+func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
+	var user models.User
+	if err := r.db.Where("oauth_provider = ? AND oauth_id = ?", provider, oauthID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}

@@ -47,3 +47,6 @@ mysql/logs/
 /DOCKER_SETUP.md
 /Backend/README_CHAT_API.md
 /Backend/test_api.sh
+/Backend/README_AUTH_API.md
+/Backend/README_OAUTH.md
+/Backend/CURL_EXAMPLES_AUTH.md
