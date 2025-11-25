@@ -31,3 +31,8 @@
 /database/binlog.000006
 /database/undo_002
 /database/undo_001
+/Backend/CURL_EXAMPLES.md
+/Backend/README_CHAT_API.md
+/Backend/test_api.sh
+/Backend/bin/server
+/Backend/bin/seed
