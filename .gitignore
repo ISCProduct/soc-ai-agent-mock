@@ -47,4 +47,3 @@ mysql/logs/
 /DOCKER_SETUP.md
 /Backend/README_CHAT_API.md
 /Backend/test_api.sh
-/Backend/internal/models/seed.go
