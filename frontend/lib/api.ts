@@ -1,5 +1,3 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:80"
-
 export interface ChatRequest {
     user_id: number
     session_id: string
@@ -33,7 +31,7 @@ export interface ChatHistory {
 }
 
 export async function sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/chat`, {
+    const response = await fetch('/api/chat', {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -49,7 +47,7 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
 }
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
-    const response = await fetch(`${API_BASE_URL}/api/chat/history?session_id=${sessionId}`)
+    const response = await fetch(`/api/chat/history?session_id=${sessionId}`)
 
     if (!response.ok) {
         throw new Error(`History API error: ${response.statusText}`)
@@ -59,7 +57,7 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
 }
 
 export async function getUserScores(userId: number, sessionId: string) {
-    const response = await fetch(`${API_BASE_URL}/api/chat/scores?user_id=${userId}&session_id=${sessionId}`)
+    const response = await fetch(`/api/chat/scores?user_id=${userId}&session_id=${sessionId}`)
 
     if (!response.ok) {
         throw new Error(`Scores API error: ${response.statusText}`)
@@ -70,7 +68,7 @@ export async function getUserScores(userId: number, sessionId: string) {
 
 export async function getRecommendations(userId: number, sessionId: string, limit = 5) {
     const response = await fetch(
-        `${API_BASE_URL}/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
+        `/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
     )
 
     if (!response.ok) {

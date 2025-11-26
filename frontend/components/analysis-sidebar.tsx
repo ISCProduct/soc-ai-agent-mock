@@ -12,6 +12,8 @@ import {
   LinearProgress,
   Divider,
   Chip,
+  Avatar,
+  IconButton,
 } from '@mui/material'
 import {
   CheckCircle,
@@ -21,7 +23,9 @@ import {
   TrendingUp,
   Speed,
   EmojiEvents,
+  Logout,
 } from '@mui/icons-material'
+import { User } from '@/lib/auth'
 
 const DRAWER_WIDTH = 280
 
@@ -33,7 +37,12 @@ interface AnalysisStep {
   progress?: number
 }
 
-export function AnalysisSidebar() {
+interface AnalysisSidebarProps {
+  user: User
+  onLogout: () => void
+}
+
+export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
   const analysisSteps: AnalysisStep[] = [
     {
       id: 'backend',
@@ -83,6 +92,32 @@ export function AnalysisSidebar() {
       }}
     >
       <Box sx={{ p: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 1 }}>
+          <Avatar sx={{ bgcolor: user.is_guest ? 'grey.500' : 'primary.main' }}>
+            {user.name.charAt(0).toUpperCase()}
+          </Avatar>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="subtitle2" noWrap sx={{ fontWeight: 600 }}>
+              {user.name}
+            </Typography>
+            {user.is_guest && (
+              <Chip label="ゲスト" size="small" sx={{ height: 18, fontSize: '0.7rem' }} />
+            )}
+            {user.oauth_provider && (
+              <Chip 
+                label={user.oauth_provider} 
+                size="small" 
+                sx={{ height: 18, fontSize: '0.7rem', textTransform: 'capitalize' }} 
+              />
+            )}
+          </Box>
+          <IconButton size="small" onClick={onLogout} title="ログアウト">
+            <Logout fontSize="small" />
+          </IconButton>
+        </Box>
+
+        <Divider sx={{ mb: 2 }} />
+
         <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
           分析進捗
         </Typography>

@@ -1,7 +1,7 @@
 import './globals.css'
-import { Analytics } from '@vercel/analytics/next'
 import type { Metadata } from 'next'
 import { MuiProvider } from '@/components/mui-provider'
+import { Analytics } from '@vercel/analytics/react'
 
 export const metadata: Metadata = {
   title: 'IT企業エージェント',
@@ -18,8 +18,8 @@ export default function RootLayout({
       <body style={{ margin: 0, padding: 0 }}>
         <MuiProvider>
           {children}
-          <Analytics />
         </MuiProvider>
+        <Analytics />
       </body>
     </html>
   )

@@ -53,12 +53,15 @@ func (c *OAuthController) GoogleCallback(w http.ResponseWriter, r *http.Request)
 
 	resp, err := c.oauthService.HandleGoogleCallback(r.Context(), code)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// エラー時はフロントエンドにリダイレクトしてエラーを表示
+		http.Redirect(w, r, "http://localhost:3000?error="+err.Error(), http.StatusTemporaryRedirect)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// 認証成功時はユーザー情報をクエリパラメータとしてフロントエンドに渡してリダイレクト
+	userData, _ := json.Marshal(resp)
+	redirectURL := "http://localhost:3000/auth/callback?provider=google&code=" + code + "&user=" + base64.URLEncoding.EncodeToString(userData)
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
 // GitHubLogin GitHub OAuth認証開始
@@ -93,12 +96,15 @@ func (c *OAuthController) GitHubCallback(w http.ResponseWriter, r *http.Request)
 
 	resp, err := c.oauthService.HandleGitHubCallback(r.Context(), code)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// エラー時はフロントエンドにリダイレクトしてエラーを表示
+		http.Redirect(w, r, "http://localhost:3000?error="+err.Error(), http.StatusTemporaryRedirect)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// 認証成功時はユーザー情報をクエリパラメータとしてフロントエンドに渡してリダイレクト
+	userData, _ := json.Marshal(resp)
+	redirectURL := "http://localhost:3000/auth/callback?provider=github&code=" + code + "&user=" + base64.URLEncoding.EncodeToString(userData)
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
 // generateStateToken CSRF対策用のランダムなstateトークンを生成

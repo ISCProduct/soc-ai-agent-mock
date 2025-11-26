@@ -6,7 +6,7 @@ services:
       dockerfile: ${DOCKERFILE:-Dockerfile}
     container_name: soc-ai-agent-backend
     ports:
-      - "${HOST_PORT:-80}:80"
+      - "${HOST_PORT:-8080}:8080"
     volumes:
       # 開発環境のみマウント（.env で ENABLE_HOT_RELOAD=true の場合）
       - ${BACKEND_MOUNT:-/dev/null}:${BACKEND_MOUNT_TARGET:-/dev/null}

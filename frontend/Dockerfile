@@ -26,6 +26,7 @@ FROM node:20-alpine AS runner
 
 # プロダクション環境を指定
 ENV NODE_ENV production
+ENV NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
 WORKDIR /app
 
 # セキュリティ向上のため、非rootユーザーを使用（Next.jsの推奨設定）
