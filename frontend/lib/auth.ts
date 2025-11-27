@@ -28,7 +28,13 @@ export interface User {
   avatar_url?: string
 }
 
-export interface AuthResponse extends User {
+export interface AuthResponse {
+  user_id: number | string
+  email: string
+  name: string
+  is_guest: boolean
+  oauth_provider?: string
+  avatar_url?: string
   token?: string
 }
 
@@ -87,7 +93,7 @@ export const authService = {
 
   saveAuth(authResponse: AuthResponse) {
     const user: User = {
-      user_id: authResponse.user_id,
+      user_id: typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id,
       email: authResponse.email,
       name: fixMojibake(authResponse.name),
       is_guest: authResponse.is_guest,
