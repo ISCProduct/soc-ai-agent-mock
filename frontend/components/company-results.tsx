@@ -106,7 +106,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       },
     },
     {
-      id: "3",
+      id: 3,
       name: "クラウドテック株式会社",
       industry: "クラウド・インフラ",
       location: "東京都港区",
@@ -118,7 +118,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["インフラ構築", "クラウド移行"],
     },
     {
-      id: "4",
+      id: 4,
       name: "株式会社セキュアネット",
       industry: "セキュリティ・コンサルティング",
       location: "東京都新宿区",
@@ -130,7 +130,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["セキュリティ診断", "コンサルティング"],
     },
     {
-      id: "5",
+      id: 5,
       name: "データアナリティクス株式会社",
       industry: "データ分析・BI",
       location: "東京都品川区",
@@ -142,7 +142,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["データ分析", "BI開発"],
     },
     {
-      id: "6",
+      id: 6,
       name: "モバイルアプリ開発株式会社",
       industry: "モバイルアプリ開発",
       location: "東京都渋谷区",
@@ -154,7 +154,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["アプリ開発", "受託開発"],
     },
     {
-      id: "7",
+      id: 7,
       name: "エンタープライズシステムズ株式会社",
       industry: "社内システム開発",
       location: "神奈川県横浜市",
@@ -166,7 +166,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["社内システム", "業務システム"],
     },
     {
-      id: "8",
+      id: 8,
       name: "株式会社ゲームテクノロジー",
       industry: "ゲーム開発",
       location: "東京都中野区",
@@ -178,7 +178,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["ゲーム開発", "自社サービス"],
     },
     {
-      id: "9",
+      id: 9,
       name: "フィンテック株式会社",
       industry: "金融×IT",
       location: "東京都千代田区",
@@ -190,7 +190,7 @@ const generateITCompanies = (userData: UserData): Company[] => {
       projectTypes: ["金融システム", "フィンテック"],
     },
     {
-      id: "10",
+      id: 10,
       name: "株式会社AIリサーチラボ",
       industry: "AI研究開発",
       location: "東京都文京区",
