@@ -18,7 +18,11 @@ export default function Home() {
   }, [])
 
   const handleAuthSuccess = (authResponse: AuthResponse) => {
-    setUser(authResponse)
+    // Normalize types from backend
+    setUser({
+      ...authResponse,
+      user_id: Number((authResponse as any).user_id),
+    })
   }
 
   const handleLogout = () => {
