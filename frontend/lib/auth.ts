@@ -1,5 +1,24 @@
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
 
+function fixMojibake(s: string): string {
+  // Detect common mojibake patterns (Ã, å followed by other Latin-1 chars)
+  return /[Ãå][^\s]/.test(s) ? (() => {
+    try {
+      // Interpret the current UTF-16 code units as Latin-1 bytes and decode as UTF-8
+      const bytes = new Uint8Array([...s].map(c => c.charCodeAt(0)))
+      return new TextDecoder('utf-8').decode(bytes)
+    } catch {
+      try {
+        // Fallback legacy method
+        // @ts-ignore
+        return decodeURIComponent(escape(s))
+      } catch {
+        return s
+      }
+    }
+  })() : s
+}
+
 export interface User {
   user_id: number
   email: string
@@ -70,7 +89,7 @@ export const authService = {
     const user: User = {
       user_id: authResponse.user_id,
       email: authResponse.email,
-      name: authResponse.name,
+      name: fixMojibake(authResponse.name),
       is_guest: authResponse.is_guest,
       oauth_provider: authResponse.oauth_provider,
       avatar_url: authResponse.avatar_url,
