@@ -29,8 +29,15 @@ function OAuthCallbackContent() {
 
       try {
         // Base64デコードしてユーザー情報を取得
-        const userDataString = atob(userParam)
-        const userData = JSON.parse(userDataString)
+        // Properly handle URL-safe Base64 and UTF-8
+        const normalized = userParam.replace(/-/g, '+').replace(/_/g, '/')
+        const binary = atob(normalized)
+        const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+        const userDataString = new TextDecoder('utf-8').decode(bytes)
+        const userDataRaw = JSON.parse(userDataString)
+        // Fallback repair for mojibake in name
+        const fixMojibake = (s: string) => /[Ãå][^\s]/.test(s) ? decodeURIComponent(escape(s)) : s
+        const userData = { ...userDataRaw, name: fixMojibake(userDataRaw.name) }
         
         // ローカルストレージに保存
         localStorage.setItem('user', JSON.stringify(userData))
