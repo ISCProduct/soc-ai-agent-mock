@@ -52,3 +52,12 @@ func (r *ChatMessageRepository) FindRecentBySessionID(sessionID string, limit in
 
 	return messages, err
 }
+
+// GetUsedQuestionIDs セッションで既に使用した質問IDを取得
+func (r *ChatMessageRepository) GetUsedQuestionIDs(sessionID string) ([]uint, error) {
+	var questionIDs []uint
+	err := r.db.Model(&models.ChatMessage{}).
+		Where("session_id = ? AND role = ? AND question_weight_id > 0", sessionID, "assistant").
+		Pluck("question_weight_id", &questionIDs).Error
+	return questionIDs, err
+}

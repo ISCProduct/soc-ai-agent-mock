@@ -1,9 +1,11 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { RotateCcw, Building2, MapPin, Users, TrendingUp, Award, Code, Briefcase, Target } from "lucide-react"
+import { RotateCcw, Building2, MapPin, Users, TrendingUp, Award, Code, Briefcase, Target, Eye } from "lucide-react"
+import { CompanyDetailModal } from "@/components/company-detail-modal"
 
 type UserData = {
   jobType?: string
@@ -19,7 +21,7 @@ type UserData = {
 }
 
 type Company = {
-  id: string
+  id: number
   name: string
   industry: string
   location: string
@@ -29,33 +31,79 @@ type Company = {
   tags: string[]
   techStack: string[]
   projectTypes: string[]
+  salary: string
+  benefits: string[]
+  culture: string[]
+  founded: string
+  website: string
+  size: string
+  parentCompany?: string
+  subsidiaries?: string[]
+  partnerships?: string[]
+  capitalStructure?: {
+    shareholders: { name: string; percentage: number }[]
+  }
 }
 
 const generateITCompanies = (userData: UserData): Company[] => {
   const companies: Company[] = [
     {
-      id: "1",
+      id: 1,
       name: "株式会社テックイノベーション",
       industry: "Webサービス・AI開発",
       location: "東京都渋谷区",
       employees: "150名",
-      description: "自社AIプロダクトを開発するベンチャー企業。最新技術を活用した開発環境で急成長中。",
+      size: "ベンチャー企業（100-300名）",
+      description: "自社AIプロダクトを開発するベンチャー企業。最新技術を活用した開発環境で急成長中。機械学習エンジニアとして最前線で活躍できる環境を提供しています。",
       matchScore: 0,
       tags: ["リモートワーク", "フレックス", "技術力重視"],
       techStack: ["Python", "TypeScript", "React", "AWS"],
       projectTypes: ["自社サービス", "AI開発"],
+      salary: "400-650万円",
+      benefits: ["リモートワーク可", "フレックスタイム", "書籍購入補助", "資格取得支援", "最新機器貸与"],
+      culture: ["技術第一", "フラットな組織", "挑戦を推奨", "成果主義"],
+      founded: "2018年",
+      website: "https://tech-innovation.example.com",
+      parentCompany: undefined,
+      subsidiaries: ["TI Lab株式会社", "TI Consulting"],
+      partnerships: ["Google Cloud", "AWS", "Microsoft Azure"],
+      capitalStructure: {
+        shareholders: [
+          { name: "創業者グループ", percentage: 45 },
+          { name: "ベンチャーキャピタルA", percentage: 30 },
+          { name: "事業会社B", percentage: 15 },
+          { name: "従業員持株会", percentage: 10 },
+        ],
+      },
     },
     {
-      id: "2",
+      id: 2,
       name: "日本システムソリューションズ株式会社",
       industry: "SIer・受託開発",
       location: "東京都千代田区",
       employees: "2500名",
-      description: "大手企業向けシステム開発を手がける老舗SIer。充実した研修制度と安定した環境。",
+      size: "大手企業（1000名以上）",
+      description: "大手企業向けシステム開発を手がける老舗SIer。充実した研修制度と安定した環境で、エンジニアとしての基礎をしっかり学べます。",
       matchScore: 0,
       tags: ["大手企業", "研修充実", "福利厚生"],
       techStack: ["Java", "Oracle", "Spring"],
       projectTypes: ["受託開発", "社内システム"],
+      salary: "350-550万円",
+      benefits: ["住宅手当", "家族手当", "退職金制度", "社員食堂", "保養所"],
+      culture: ["安定重視", "チームワーク", "長期キャリア形成", "教育重視"],
+      founded: "1985年",
+      website: "https://nss.example.co.jp",
+      parentCompany: "日本テクノロジーグループ",
+      subsidiaries: ["NSS北海道", "NSS関西", "NSS九州"],
+      partnerships: ["Oracle", "SAP", "IBM"],
+      capitalStructure: {
+        shareholders: [
+          { name: "日本テクノロジーグループ", percentage: 60 },
+          { name: "機関投資家", percentage: 25 },
+          { name: "自社株", percentage: 10 },
+          { name: "その他", percentage: 5 },
+        ],
+      },
     },
     {
       id: "3",
@@ -226,9 +274,21 @@ const generateITCompanies = (userData: UserData): Company[] => {
 
 export function CompanyResults({ userData, onReset }: { userData: UserData; onReset: () => void }) {
   const companies = generateITCompanies(userData)
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
+  const [isDetailOpen, setIsDetailOpen] = useState(false)
+
+  const handleShowDetail = (company: Company) => {
+    setSelectedCompany(company)
+    setIsDetailOpen(true)
+  }
 
   return (
     <div className="max-w-5xl mx-auto">
+      <CompanyDetailModal
+        company={selectedCompany}
+        isOpen={isDetailOpen}
+        onClose={() => setIsDetailOpen(false)}
+      />
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-foreground mb-3 text-balance">
           あなたに適した企業を10社に絞り込みました
@@ -397,7 +457,15 @@ export function CompanyResults({ userData, onReset }: { userData: UserData; onRe
                 ))}
               </div>
 
-              <Button className="w-full md:w-auto">詳細を見る</Button>
+              <div className="flex gap-2">
+                <Button className="flex-1 md:flex-initial" onClick={() => handleShowDetail(company)}>
+                  <Eye className="w-4 h-4 mr-2" />
+                  詳細を表示
+                </Button>
+                <Button variant="outline" className="flex-1 md:flex-initial">
+                  応募する
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}

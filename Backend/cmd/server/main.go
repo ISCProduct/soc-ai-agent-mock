@@ -73,11 +73,12 @@ func main() {
 	questionWeightRepo := repositories.NewQuestionWeightRepository(db)
 	chatMessageRepo := repositories.NewChatMessageRepository(db)
 	userWeightScoreRepo := repositories.NewUserWeightScoreRepository(db)
+	aiGeneratedQuestionRepo := repositories.NewAIGeneratedQuestionRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo)
+	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 
 	// コントローラー層の初期化

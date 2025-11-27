@@ -9,6 +9,9 @@ export interface ChatRequest {
 export interface ChatResponse {
     response: string
     question_weight_id?: number
+    is_complete: boolean
+    total_questions: number
+    answered_questions: number
     current_scores?: Array<{
         id: number
         user_id: number

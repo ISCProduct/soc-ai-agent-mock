@@ -42,7 +42,6 @@ export default function Home() {
         sx={{
           flexGrow: 1,
           height: '100vh',
-          overflow: 'hidden',
         }}
       >
         <MuiChat />

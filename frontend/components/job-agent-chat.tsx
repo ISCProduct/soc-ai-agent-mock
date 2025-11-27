@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Send, Bot, User, CheckCircle2, Circle } from "lucide-react"
 import { CompanyResults } from "@/components/company-results"
+import { AnalysisLoading } from "@/components/analysis-loading"
 import { sendChatMessage, getChatHistory, type ChatResponse } from "@/lib/api"
 
 type Message = {
@@ -118,25 +119,62 @@ const analysisPhases = [
 ]
 
 export function JobAgentChat() {
-  const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`)
+  const [sessionId] = useState(() => {
+    // セッションIDをlocalStorageから取得または新規作成
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('chat_session_id')
+      if (stored) {
+        return stored
+      }
+    }
+    const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chat_session_id', newId)
+    }
+    return newId
+  })
   const [userId] = useState(1)
   const [industryId] = useState(1)
   const [jobCategoryId] = useState(1)
   const [useBackend, setUseBackend] = useState(true)
   const [isLoadingFromBackend, setIsLoadingFromBackend] = useState(false)
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      role: "agent",
-      content: conversationFlow.jobType.message,
-      options: conversationFlow.jobType.options,
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // localStorageからメッセージ履歴を復元
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('chat_messages')
+      if (stored) {
+        try {
+          return JSON.parse(stored)
+        } catch (e) {
+          console.error('Failed to parse stored messages:', e)
+        }
+      }
+    }
+    return [
+      {
+        id: "1",
+        role: "agent",
+        content: conversationFlow.jobType.message,
+        options: conversationFlow.jobType.options,
+      },
+    ]
+  })
   const [inputValue, setInputValue] = useState("")
   const [currentStep, setCurrentStep] = useState<string>("jobType")
   const [userData, setUserData] = useState<UserData>({})
-  const [isComplete, setIsComplete] = useState(false)
+  const [isComplete, setIsComplete] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chat_is_complete') === 'true'
+    }
+    return false
+  })
+  const [isAnalyzing, setIsAnalyzing] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chat_is_analyzing') === 'true'
+    }
+    return false
+  })
   const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -146,6 +184,10 @@ export function JobAgentChat() {
 
   useEffect(() => {
     scrollToBottom()
+    // メッセージが更新されたらlocalStorageに保存
+    if (typeof window !== 'undefined' && messages.length > 0) {
+      localStorage.setItem('chat_messages', JSON.stringify(messages))
+    }
   }, [messages, isTyping])
 
   useEffect(() => {
@@ -229,6 +271,17 @@ export function JobAgentChat() {
           ])
           setIsTyping(false)
           setIsLoadingFromBackend(false)
+
+          // 質問終了判定
+          if (response.is_complete) {
+            console.log("[v0] Analysis complete. Starting loading phase...")
+            setTimeout(() => {
+              setIsAnalyzing(true)
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('chat_is_analyzing', 'true')
+              }
+            }, 1000)
+          }
         }, 500)
 
         if (response.current_scores && response.current_scores.length > 0) {
@@ -284,6 +337,21 @@ export function JobAgentChat() {
   }
 
   const handleReset = () => {
+    // localStorageをクリア
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('chat_session_id')
+      localStorage.removeItem('chat_messages')
+      localStorage.removeItem('chat_user_data')
+      localStorage.removeItem('chat_is_complete')
+      localStorage.removeItem('chat_is_analyzing')
+    }
+    
+    // 新しいセッションID生成
+    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chat_session_id', newSessionId)
+    }
+    
     setMessages([
       {
         id: "1",
@@ -295,7 +363,20 @@ export function JobAgentChat() {
     setCurrentStep("jobType")
     setUserData({})
     setIsComplete(false)
+    setIsAnalyzing(false)
     setInputValue("")
+    
+    // ページをリロード
+    window.location.reload()
+  }
+
+  const handleAnalysisComplete = () => {
+    setIsAnalyzing(false)
+    setIsComplete(true)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chat_is_analyzing', 'false')
+      localStorage.setItem('chat_is_complete', 'true')
+    }
   }
 
   const getCurrentPhase = () => {
@@ -310,6 +391,10 @@ export function JobAgentChat() {
   const isPhaseCompleted = (phaseId: number) => {
     const currentPhaseId = getCurrentPhase()
     return phaseId < currentPhaseId
+  }
+
+  if (isAnalyzing) {
+    return <AnalysisLoading onComplete={handleAnalysisComplete} />
   }
 
   if (isComplete) {

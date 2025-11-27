@@ -102,7 +102,14 @@ export const authService = {
 
   getStoredUser(): User | null {
     const user = localStorage.getItem('user')
-    return user ? JSON.parse(user) : null
+    if (!user) return null
+    try {
+      const parsed: User = JSON.parse(user)
+      // Repair potential mojibake stored earlier
+      return { ...parsed, name: fixMojibake(parsed.name) }
+    } catch {
+      return null
+    }
   },
 
   getStoredToken(): string | null {

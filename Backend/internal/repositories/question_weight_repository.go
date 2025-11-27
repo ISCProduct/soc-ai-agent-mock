@@ -77,6 +77,34 @@ func (r *QuestionWeightRepository) GetRandomQuestion(industryID, jobCategoryID u
 	return &qw, err
 }
 
+// GetRandomQuestionExcluding 既に使用した質問を除外してランダムに取得
+func (r *QuestionWeightRepository) GetRandomQuestionExcluding(industryID, jobCategoryID uint, excludeIDs []uint) (*models.QuestionWeight, error) {
+	var qw models.QuestionWeight
+	query := r.db.Where("(industry_id = ? OR industry_id = 0 OR industry_id IS NULL) AND "+
+		"(job_category_id = ? OR job_category_id = 0 OR job_category_id IS NULL) AND "+
+		"is_active = ?", industryID, jobCategoryID, true)
+
+	if len(excludeIDs) > 0 {
+		query = query.Where("id NOT IN ?", excludeIDs)
+	}
+
+	err := query.Order("RAND()").First(&qw).Error
+	return &qw, err
+}
+
+// GetRandomQuestionByCategory カテゴリを指定して質問を取得（既出を除外）
+func (r *QuestionWeightRepository) GetRandomQuestionByCategory(category string, excludeIDs []uint) (*models.QuestionWeight, error) {
+	var qw models.QuestionWeight
+	query := r.db.Where("weight_category = ? AND is_active = ?", category, true)
+
+	if len(excludeIDs) > 0 {
+		query = query.Where("id NOT IN ?", excludeIDs)
+	}
+
+	err := query.Order("RAND()").First(&qw).Error
+	return &qw, err
+}
+
 // hashQuestion 質問文をハッシュ化
 func hashQuestion(question string) string {
 	hash := sha256.Sum256([]byte(question))

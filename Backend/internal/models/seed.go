@@ -29,6 +29,11 @@ func SeedData(db *gorm.DB) error {
 		return err
 	}
 
+	// 詳細な質問データ
+	if err := seedDetailedQuestions(db); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -231,4 +236,246 @@ func seedIndustryJobCategories(db *gorm.DB) error {
 	}
 
 	return db.Create(&relations).Error
+}
+
+func seedDetailedQuestions(db *gorm.DB) error {
+	var count int64
+	db.Model(&QuestionWeight{}).Count(&count)
+	if count >= 30 {
+		return nil // 既に詳細な質問がある場合はスキップ
+	}
+
+	questions := []QuestionWeight{
+		// 技術志向
+		{
+			Question:       "プログラミングを学んだことはありますか？学んだきっかけや、どのような言語・技術に興味を持ちましたか？",
+			WeightCategory: "技術志向",
+			WeightValue:    8,
+			Description:    "技術への興味と学習経験を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "技術的な課題や問題に直面したとき、どのようにアプローチしますか？具体的な例があれば教えてください。",
+			WeightCategory: "技術志向",
+			WeightValue:    9,
+			Description:    "技術的問題解決へのアプローチを評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "最近読んだ技術記事や興味を持った新技術はありますか？それについて簡単に説明してください。",
+			WeightCategory: "技術志向",
+			WeightValue:    7,
+			Description:    "技術への継続的関心を評価",
+			IsActive:       true,
+		},
+
+		// コミュニケーション能力
+		{
+			Question:       "グループディスカッションやミーティングで、自分の意見をどのように伝えていますか？",
+			WeightCategory: "コミュニケーション能力",
+			WeightValue:    8,
+			Description:    "意見表明のスキルを評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "相手に複雑なことを説明する必要があった経験はありますか？どのように工夫しましたか？",
+			WeightCategory: "コミュニケーション能力",
+			WeightValue:    9,
+			Description:    "説明力と伝達スキルを評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "意見が対立したとき、どのように相手の意見を聞き、理解しようとしますか？",
+			WeightCategory: "コミュニケーション能力",
+			WeightValue:    8,
+			Description:    "傾聴力と対話能力を評価",
+			IsActive:       true,
+		},
+
+		// リーダーシップ
+		{
+			Question:       "グループやチームで、自分から率先して動いたり、メンバーをまとめたりした経験はありますか？",
+			WeightCategory: "リーダーシップ",
+			WeightValue:    9,
+			Description:    "主体性とリーダー経験を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "チームの目標達成のために、どのような工夫や働きかけをしたことがありますか？",
+			WeightCategory: "リーダーシップ",
+			WeightValue:    8,
+			Description:    "目標達成への貢献度を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "メンバーのモチベーションが下がっているとき、どのように対応しますか？",
+			WeightCategory: "リーダーシップ",
+			WeightValue:    8,
+			Description:    "メンバーサポート能力を評価",
+			IsActive:       true,
+		},
+
+		// チームワーク
+		{
+			Question:       "チームプロジェクトで、あなたはどのような役割を担当することが多いですか？その理由は？",
+			WeightCategory: "チームワーク",
+			WeightValue:    7,
+			Description:    "チーム内での役割認識を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "チームメンバーと協力して成果を出した経験について教えてください。",
+			WeightCategory: "チームワーク",
+			WeightValue:    8,
+			Description:    "協働経験と成果を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "チーム内で苦手なメンバーがいた場合、どのように接しますか？",
+			WeightCategory: "チームワーク",
+			WeightValue:    7,
+			Description:    "協調性と人間関係構築力を評価",
+			IsActive:       true,
+		},
+
+		// 問題解決力
+		{
+			Question:       "複雑な課題に直面したとき、どのように問題を整理し、解決策を考えますか？",
+			WeightCategory: "問題解決力",
+			WeightValue:    9,
+			Description:    "論理的思考と問題分析力を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "予期せぬトラブルが発生したとき、どのように対処しましたか？具体例を教えてください。",
+			WeightCategory: "問題解決力",
+			WeightValue:    8,
+			Description:    "トラブル対応力を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "問題の原因を特定するために、どのような手順や方法を使いますか？",
+			WeightCategory: "問題解決力",
+			WeightValue:    8,
+			Description:    "分析手法と論理性を評価",
+			IsActive:       true,
+		},
+
+		// 創造性・発想力
+		{
+			Question:       "今までで最も創造的だと思うアイデアや提案は何ですか？どのように思いつきましたか？",
+			WeightCategory: "創造性・発想力",
+			WeightValue:    8,
+			Description:    "アイデア創出力を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "既存のやり方ではうまくいかないとき、どのような新しいアプローチを試みますか？",
+			WeightCategory: "創造性・発想力",
+			WeightValue:    8,
+			Description:    "柔軟な発想と挑戦姿勢を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "何か新しいことを始めたり、独自の工夫をしたりした経験はありますか？",
+			WeightCategory: "創造性・発想力",
+			WeightValue:    7,
+			Description:    "革新性と独創性を評価",
+			IsActive:       true,
+		},
+
+		// 計画性・実行力
+		{
+			Question:       "大きな目標を達成するために、どのように計画を立て、実行しますか？",
+			WeightCategory: "計画性・実行力",
+			WeightValue:    8,
+			Description:    "計画立案と実行力を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "複数のタスクを同時に進める必要があるとき、どのように優先順位をつけますか？",
+			WeightCategory: "計画性・実行力",
+			WeightValue:    8,
+			Description:    "タスク管理能力を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "計画通りに進まなかったとき、どのように対応しますか？",
+			WeightCategory: "計画性・実行力",
+			WeightValue:    7,
+			Description:    "柔軟な対応力を評価",
+			IsActive:       true,
+		},
+
+		// 学習意欲・成長志向
+		{
+			Question:       "最近、自分から進んで学んだことは何ですか？なぜそれを学ぼうと思いましたか？",
+			WeightCategory: "学習意欲・成長志向",
+			WeightValue:    9,
+			Description:    "自主的学習姿勢を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "フィードバックや批判を受けたとき、どのように受け止め、活かしますか？",
+			WeightCategory: "学習意欲・成長志向",
+			WeightValue:    8,
+			Description:    "成長マインドセットを評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "失敗から学んだことや、それをどう次に活かしたかについて教えてください。",
+			WeightCategory: "学習意欲・成長志向",
+			WeightValue:    8,
+			Description:    "失敗からの学習能力を評価",
+			IsActive:       true,
+		},
+
+		// ストレス耐性・粘り強さ
+		{
+			Question:       "プレッシャーのかかる状況で、どのように自分を保ちますか？",
+			WeightCategory: "ストレス耐性・粘り強さ",
+			WeightValue:    8,
+			Description:    "ストレス対処法を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "困難な状況でも諦めずに取り組んだ経験はありますか？何が原動力でしたか？",
+			WeightCategory: "ストレス耐性・粘り強さ",
+			WeightValue:    9,
+			Description:    "粘り強さと動機づけを評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "うまくいかないことが続いたとき、どのように気持ちを切り替えますか？",
+			WeightCategory: "ストレス耐性・粘り強さ",
+			WeightValue:    7,
+			Description:    "レジリエンスを評価",
+			IsActive:       true,
+		},
+
+		// ビジネス思考・目標志向
+		{
+			Question:       "仕事やプロジェクトにおいて、どのような成果を出すことを重視しますか？",
+			WeightCategory: "ビジネス思考・目標志向",
+			WeightValue:    8,
+			Description:    "成果志向を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "顧客や利用者の視点で考えたり、行動したりした経験はありますか？",
+			WeightCategory: "ビジネス思考・目標志向",
+			WeightValue:    8,
+			Description:    "顧客志向を評価",
+			IsActive:       true,
+		},
+		{
+			Question:       "将来、どのような価値を社会や組織に提供したいと考えていますか？",
+			WeightCategory: "ビジネス思考・目標志向",
+			WeightValue:    7,
+			Description:    "キャリアビジョンと価値観を評価",
+			IsActive:       true,
+		},
+	}
+
+	return db.Create(&questions).Error
 }
