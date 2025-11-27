@@ -18,7 +18,7 @@ export default function Home() {
   }, [])
 
   const handleAuthSuccess = (authResponse: AuthResponse) => {
-    setUser(authResponse)
+    setUser({ ...authResponse, user_id: Number(authResponse.user_id) })
   }
 
   const handleLogout = () => {
