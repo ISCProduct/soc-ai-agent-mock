@@ -61,3 +61,21 @@ func (r *ChatMessageRepository) GetUsedQuestionIDs(sessionID string) ([]uint, er
 		Pluck("question_weight_id", &questionIDs).Error
 	return questionIDs, err
 }
+
+// GetUserSessions ユーザーのチャットセッション一覧を取得
+func (r *ChatMessageRepository) GetUserSessions(userID uint) ([]models.ChatSession, error) {
+	var sessions []models.ChatSession
+	err := r.db.Raw(`
+		SELECT 
+			session_id,
+			user_id,
+			MIN(created_at) as started_at,
+			MAX(created_at) as last_message_at,
+			COUNT(*) as message_count
+		FROM chat_messages
+		WHERE user_id = ?
+		GROUP BY session_id, user_id
+		ORDER BY last_message_at DESC
+	`, userID).Scan(&sessions).Error
+	return sessions, err
+}

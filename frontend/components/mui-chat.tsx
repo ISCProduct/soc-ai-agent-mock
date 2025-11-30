@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Box,
   Paper,
@@ -15,27 +16,20 @@ import {
   Card,
   CardContent,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material'
 import { Send, SmartToy, Person, Refresh, Business, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
-import { sendMessage, getChatHistory } from '@/lib/api'
+import { sendChatMessage, getChatHistory, getUserScores, ChatRequest, ChatResponse } from '@/lib/api'
+import { authService } from '@/lib/auth'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
-}
-
-interface Company {
-  id: string
-  name: string
-  industry: string
-  location: string
-  employees: string
-  description: string
-  matchScore: number
-  tags: string[]
-  techStack: string[]
 }
 
 // ローディングメッセージコンポーネント
@@ -47,7 +41,7 @@ function TypingIndicator() {
         AIが考えています
       </Typography>
       <Box sx={{ display: 'flex', gap: 0.5 }}>
-        {[0, 0.16, 0.32].map((delay, i) => (
+        {[0, 0.16, 0.32].map((delay: any, i: any) => (
           <Box
             key={i}
             sx={{
@@ -69,195 +63,18 @@ function TypingIndicator() {
   )
 }
 
-// 企業情報表示コンポーネント
-function CompanyResults({ onReset }: { onReset: () => void }) {
-  const companies: Company[] = [
-    {
-      id: '1',
-      name: '株式会社テックイノベーション',
-      industry: 'Webサービス・AI開発',
-      location: '東京都渋谷区',
-      employees: '150名',
-      description: '自社AIプロダクトを開発するベンチャー企業。最新技術を活用した開発環境で急成長中。',
-      matchScore: 95,
-      tags: ['リモートワーク', 'フレックス', '技術力重視'],
-      techStack: ['Python', 'TypeScript', 'React', 'AWS'],
-    },
-    {
-      id: '2',
-      name: '日本システムソリューションズ株式会社',
-      industry: 'SIer・受託開発',
-      location: '東京都千代田区',
-      employees: '2500名',
-      description: '大手企業向けシステム開発を手がける老舗SIer。充実した研修制度と安定した環境。',
-      matchScore: 88,
-      tags: ['大手企業', '研修充実', '福利厚生'],
-      techStack: ['Java', 'Oracle', 'Spring'],
-    },
-    {
-      id: '3',
-      name: 'クラウドテック株式会社',
-      industry: 'クラウド・インフラ',
-      location: '東京都港区',
-      employees: '300名',
-      description: 'クラウドインフラの設計・構築を専門とする企業。AWS/Azure/GCPの認定資格取得支援あり。',
-      matchScore: 85,
-      tags: ['インフラ特化', '資格支援', '技術研修'],
-      techStack: ['AWS', 'Kubernetes', 'Terraform'],
-    },
-    {
-      id: '4',
-      name: 'データアナリティクス株式会社',
-      industry: 'データ分析・BI',
-      location: '東京都品川区',
-      employees: '120名',
-      description: 'ビッグデータ分析とBIツール開発を行う企業。データサイエンティストとして成長できる。',
-      matchScore: 82,
-      tags: ['データ分析', '成長企業', 'リモート可'],
-      techStack: ['Python', 'SQL', 'Tableau', 'Spark'],
-    },
-    {
-      id: '5',
-      name: 'フィンテック株式会社',
-      industry: '金融×IT',
-      location: '東京都千代田区',
-      employees: '250名',
-      description: '金融業界向けのITソリューションを提供。高い技術力と金融知識を身につけられる。',
-      matchScore: 80,
-      tags: ['金融IT', '高給与', '成長分野'],
-      techStack: ['Java', 'Python', 'Blockchain'],
-    },
-  ]
-
-  return (
-    <Box sx={{ 
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-      backgroundColor: '#fff',
-    }}>
-      {/* ヘッダー部分 */}
-      <Box sx={{ 
-        p: 3, 
-        borderBottom: '1px solid #e0e0e0',
-        backgroundColor: '#fff',
-        flexShrink: 0,
-      }}>
-        <Box sx={{ textAlign: 'center' }}>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
-            🎉 分析完了！あなたに適した企業を5社に絞り込みました
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            4段階の分析に基づいて、最適なIT企業をマッチングしました
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* スクロール可能なコンテンツエリア */}
-      <Box sx={{ 
-        flexGrow: 1,
-        overflowY: 'auto',
-        p: 3,
-        backgroundColor: '#fafafa',
-      }}>
-        <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
-          <Stack spacing={3}>
-            {companies.map((company, index) => (
-              <Card key={company.id} elevation={3} sx={{ border: '2px solid', borderColor: 'primary.light' }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40, fontWeight: 'bold' }}>
-                        {index + 1}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="h6" fontWeight="bold">
-                          {company.name}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {company.industry}
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="h4" color="primary.main" fontWeight="bold">
-                        {company.matchScore}%
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        マッチ度
-                      </Typography>
-                    </Box>
-                  </Box>
-
-                  <Typography variant="body2" sx={{ mb: 2 }}>
-                    {company.description}
-                  </Typography>
-
-                  <Stack direction="row" spacing={2} sx={{ mb: 2, flexWrap: 'wrap' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocationOn fontSize="small" color="action" />
-                      <Typography variant="body2" color="text.secondary">
-                        {company.location}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <People fontSize="small" color="action" />
-                      <Typography variant="body2" color="text.secondary">
-                        {company.employees}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <TrendingUpIcon fontSize="small" color="action" />
-                      <Typography variant="body2" color="text.secondary">
-                        {company.industry}
-                      </Typography>
-                    </Box>
-                  </Stack>
-
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-                      技術スタック:
-                    </Typography>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {company.techStack.map((tech, i) => (
-                        <Chip key={i} label={tech} size="small" color="primary" variant="outlined" />
-                      ))}
-                    </Stack>
-                  </Box>
-
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {company.tags.map((tag, i) => (
-                      <Chip key={i} label={tag} size="small" />
-                    ))}
-                  </Stack>
-
-                  <Box sx={{ mt: 2 }}>
-                    <Button variant="contained" fullWidth>
-                      詳細を見る
-                    </Button>
-                  </Box>
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-
-          <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
-            <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={onReset}>
-              最初からやり直す
-            </Button>
-          </Box>
-        </Box>
-      </Box>
-    </Box>
-  )
-}
-
 export function MuiChat() {
+  const router = useRouter()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [showResults, setShowResults] = useState(false)
+  const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [sessionId, setSessionId] = useState('')
+  const [userId, setUserId] = useState<number>(0)
+  const [questionCount, setQuestionCount] = useState(0)
+  const [totalQuestions, setTotalQuestions] = useState(15)
+  const [mounted, setMounted] = useState(false)
+  const [showCompletionModal, setShowCompletionModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -269,29 +86,82 @@ export function MuiChat() {
   }, [messages, isLoading])
 
   useEffect(() => {
-    // ローカルストレージから復元
-    const savedMessages = localStorage.getItem('chatMessages')
-    const savedShowResults = localStorage.getItem('showResults')
+    setMounted(true)
     
-    if (savedMessages) {
+    const initializeChat = async () => {
+      // ユーザー情報を初期化
+      const user = authService.getStoredUser()
+      const currentUserId = user ? user.user_id : 1
+      setUserId(currentUserId)
+      
+      // セッションIDの生成または復元（sessionStorageのみ使用）
+      let storedSessionId = sessionStorage.getItem('chatSessionId')
+      if (!storedSessionId) {
+        storedSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
+        sessionStorage.setItem('chatSessionId', storedSessionId)
+      }
+      setSessionId(storedSessionId)
+      
+      // バックエンドからチャット履歴を取得
       try {
-        const parsed = JSON.parse(savedMessages)
-        setMessages(parsed.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        })))
+        console.log('[MUI Chat] Loading history for session:', storedSessionId)
+        const history = await getChatHistory(storedSessionId)
+        console.log('[MUI Chat] History loaded:', history?.length, 'messages')
+        
+        if (history && history.length > 0) {
+          // 履歴が存在する場合は復元
+          const restoredMessages: Message[] = history.map((msg) => ({
+            id: String(msg.id),
+            role: msg.role,
+            content: msg.content,
+            timestamp: new Date(msg.created_at),
+          }))
+          setMessages(restoredMessages)
+          setQuestionCount(history.filter(msg => msg.role === 'user').length)
+          
+          // スコアを取得して分析完了状態を判定
+          const scores = await getUserScores(currentUserId, storedSessionId)
+          console.log('[MUI Chat] Scores loaded:', scores?.length)
+          if (scores && scores.length > 0) {
+            setAnalysisComplete(true)
+          }
+        } else {
+          // 履歴がない場合: バックエンドでセッションを開始
+          console.log('[MUI Chat] No history found, starting new session')
+          const initialResponse = await sendChatMessage({
+            user_id: currentUserId,
+            session_id: storedSessionId,
+            message: 'START_SESSION',
+            industry_id: 1,
+            job_category_id: 1,
+          })
+          
+          const initialMessage: Message = {
+            id: '0',
+            role: 'assistant',
+            content: initialResponse.response,
+            timestamp: new Date(),
+          }
+          setMessages([initialMessage])
+        }
       } catch (error) {
-        console.log('[MUI Chat] Failed to parse saved messages:', error)
+        console.error('[MUI Chat] Failed to load history:', error)
+        // エラー時は初回メッセージを表示
+        const initialMessage: Message = {
+          id: '0',
+          role: 'assistant',
+          content: 'こんにちは！IT業界への就職をサポートする適性診断AIです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は**AIが動的に生成**するため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者',
+          timestamp: new Date(),
+        }
+        setMessages([initialMessage])
       }
     }
     
-    if (savedShowResults === 'true') {
-      setShowResults(true)
-    }
+    initializeChat()
   }, [])
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || isLoading || !sessionId || !userId) return
 
     const userMessage: Message = {
       id: String(Date.now()),
@@ -300,40 +170,59 @@ export function MuiChat() {
       timestamp: new Date(),
     }
 
-    setMessages((prev) => {
-      const newMessages = [...prev, userMessage]
-      // ユーザーメッセージもローカルストレージに保存
-      localStorage.setItem('chatMessages', JSON.stringify(newMessages))
-      return newMessages
-    })
+    setMessages((prev) => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
 
     try {
-      const response = await sendMessage(input)
+      // バックエンドのAI機能を活用
+      const chatRequest: ChatRequest = {
+        user_id: userId,
+        session_id: sessionId,
+        message: input,
+        industry_id: 1, // IT業界
+        job_category_id: 1, // 開発職
+      }
+      
+      const response: ChatResponse = await sendChatMessage(chatRequest)
+      
       const assistantMessage: Message = {
         id: String(Date.now() + 1),
         role: 'assistant',
-        content: response.message || 'エラーが発生しました',
+        content: response.response || 'エラーが発生しました',
         timestamp: new Date(),
       }
+      
       setMessages((prev) => {
         const newMessages = [...prev, assistantMessage]
         
-        // ローカルストレージに保存
-        localStorage.setItem('chatMessages', JSON.stringify(newMessages))
+        // 質問カウントの更新
+        const newCount = response.answered_questions ?? questionCount + 1
+        setQuestionCount(newCount)
+        setTotalQuestions(response.total_questions ?? 15)
         
         // 進捗状況を親コンポーネントに通知
         window.dispatchEvent(new CustomEvent('chatProgress', { 
-          detail: { messageCount: newMessages.length } 
+          detail: { 
+            messageCount: newMessages.length,
+            questionCount: newCount,
+            totalQuestions: response.total_questions ?? 15,
+          } 
         }))
         
-        // 20メッセージ（10往復）で企業情報表示
-        if (newMessages.length >= 20) {
+        // **重要: バックエンドのis_completeのみを信頼**
+        // バックエンドがtrueを返した時は分析完了状態にする
+        console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
+        if (response.is_complete === true) {
+          console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
           setTimeout(() => {
-            setShowResults(true)
-            localStorage.setItem('showResults', 'true')
+            setAnalysisComplete(true)
+            setShowCompletionModal(true)
           }, 1000)
+        } else {
+          console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
+          // 明示的にfalseを設定
+          setAnalysisComplete(false)
         }
         
         return newMessages
@@ -344,7 +233,7 @@ export function MuiChat() {
         id: String(Date.now() + 1),
         role: 'assistant',
         content:
-          'バックエンドとの接続に失敗しました。後ほど再試行してください。',
+          'バックエンドとの接続に失敗しました。後ほど再試行してください。\n\nエラー: ' + (error as Error).message,
         timestamp: new Date(),
       }
       setMessages((prev) => [...prev, errorMessage])
@@ -354,14 +243,39 @@ export function MuiChat() {
   }
 
   const handleReset = () => {
+    // すべての状態をクリア
     setMessages([])
-    setShowResults(false)
-    // ローカルストレージをクリア
-    localStorage.removeItem('chatMessages')
-    localStorage.removeItem('showResults')
+    setAnalysisComplete(false)
+    setQuestionCount(0)
+    setTotalQuestions(15)
+    
+    // セッションIDも新しく生成
+    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
+    setSessionId(newSessionId)
+    sessionStorage.setItem('chatSessionId', newSessionId)
+    
+    // 初回メッセージを再設定
+    const initialMessage: Message = {
+      id: '0',
+      role: 'assistant',
+      content: 'こんにちは！IT業界への就職をサポートする適性診断AIです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は**AIが動的に生成**するため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者',
+      timestamp: new Date(),
+    }
+    setMessages([initialMessage])
+    localStorage.setItem('chatMessages', JSON.stringify([initialMessage]))
+    
     window.dispatchEvent(new CustomEvent('chatProgress', { 
-      detail: { messageCount: 0 } 
+      detail: { messageCount: 1, questionCount: 0, totalQuestions: 15 } 
     }))
+  }
+
+  const handleViewResults = () => {
+    setShowCompletionModal(false)
+    router.push(`/results?user_id=${userId}&session_id=${sessionId}`)
+  }
+
+  const handleContinueChat = () => {
+    setShowCompletionModal(false)
   }
 
   const jobOptions = [
@@ -371,19 +285,66 @@ export function MuiChat() {
     'まだ決めていない',
   ]
 
-  if (showResults) {
-    return <CompanyResults onReset={handleReset} />
+  if (!mounted) {
+    return null
   }
 
   return (
-    <Box
-      sx={{
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#fff',
-      }}
-    >
+    <>
+      {/* 分析完了モーダル */}
+      <Dialog
+        open={showCompletionModal}
+        onClose={handleContinueChat}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            p: 2,
+          }
+        }}
+      >
+        <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
+          <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+            🎉 分析が完了しました！
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2, pb: 2 }}>
+          <Typography variant="body1" sx={{ textAlign: 'center', mb: 2 }}>
+            あなたの適性を分析し、最適な企業をマッチングしました。
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+            結果ページで詳細な企業情報を確認できます。
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', gap: 2, pb: 2 }}>
+          <Button
+            onClick={handleContinueChat}
+            variant="outlined"
+            size="large"
+            sx={{ minWidth: 140 }}
+          >
+            チャットを続ける
+          </Button>
+          <Button
+            onClick={handleViewResults}
+            variant="contained"
+            size="large"
+            sx={{ minWidth: 140 }}
+          >
+            結果を見る
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Box
+        sx={{
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: '#fff',
+        }}
+      >
       <Box
         sx={{
           p: 2,
@@ -395,7 +356,8 @@ export function MuiChat() {
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          4段階の分析を実施中 - {Math.min(4, Math.ceil(messages.length / 5))}/4 段階完了
+          AI適性診断 - {questionCount}/{totalQuestions} 問完了 
+          {questionCount > 0 && ` (${Math.round((questionCount / totalQuestions) * 100)}%)`}
         </Typography>
       </Box>
 
@@ -540,46 +502,68 @@ export function MuiChat() {
           backgroundColor: '#fff',
         }}
       >
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <TextField
-            fullWidth
-            placeholder="メッセージを入力..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                handleSend()
-              }
-            }}
-            disabled={isLoading}
-            variant="outlined"
-            size="small"
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                borderRadius: 2,
-              },
-            }}
-          />
-          <IconButton
-            color="primary"
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            sx={{
-              bgcolor: '#1976d2',
-              color: '#fff',
-              '&:hover': {
-                bgcolor: '#1565c0',
-              },
-              '&.Mui-disabled': {
-                bgcolor: '#e0e0e0',
-              },
-            }}
-          >
-            <Send />
-          </IconButton>
-        </Box>
+        {analysisComplete ? (
+          <Box sx={{ textAlign: 'center' }}>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={() => setShowCompletionModal(true)}
+              sx={{
+                py: 2,
+                px: 4,
+                fontSize: '1.1rem',
+                fontWeight: 'bold',
+              }}
+            >
+              🎉 分析完了！結果を見る
+            </Button>
+            <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
+              あなたに最適な企業をマッチングしました
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <TextField
+              fullWidth
+              placeholder="メッセージを入力..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              disabled={isLoading}
+              variant="outlined"
+              size="small"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                },
+              }}
+            />
+            <IconButton
+              color="primary"
+              onClick={handleSend}
+              disabled={!input.trim() || isLoading}
+              sx={{
+                bgcolor: '#1976d2',
+                color: '#fff',
+                '&:hover': {
+                  bgcolor: '#1565c0',
+                },
+                '&.Mui-disabled': {
+                  bgcolor: '#e0e0e0',
+                },
+              }}
+            >
+              <Send />
+            </IconButton>
+          </Box>
+        )}
       </Box>
-    </Box>
+      </Box>
+    </>
   )
 }

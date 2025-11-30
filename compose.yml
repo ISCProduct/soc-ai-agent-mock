@@ -50,6 +50,8 @@ services:
       dockerfile: ${DOCKERFILE:-Dockerfile} # Dockerfile名もデフォルト設定を使用
     container_name: soc-ai-agent-frontend
     restart: 'always'
+    # volumes:
+    #   - ./frontend:/app  # 本番ビルド時は不要（開発時のみ）
     ports:
       - "3000:3000"
     env_file:

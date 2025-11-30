@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
-import { CheckCircle2, Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { CheckCircle2, Loader2, ArrowRight } from "lucide-react"
 
 type AnalysisLoadingProps = {
   onComplete: () => void
@@ -19,11 +20,12 @@ const analysisSteps = [
 export function AnalysisLoading({ onComplete }: AnalysisLoadingProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [completedSteps, setCompletedSteps] = useState<number[]>([])
+  const [isFullyComplete, setIsFullyComplete] = useState(false)
 
   useEffect(() => {
     if (currentStep >= analysisSteps.length) {
       setTimeout(() => {
-        onComplete()
+        setIsFullyComplete(true)
       }, 500)
       return
     }
@@ -35,7 +37,7 @@ export function AnalysisLoading({ onComplete }: AnalysisLoadingProps) {
     }, step.duration)
 
     return () => clearTimeout(timer)
-  }, [currentStep, onComplete])
+  }, [currentStep])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/20 p-4">
@@ -120,6 +122,25 @@ export function AnalysisLoading({ onComplete }: AnalysisLoadingProps) {
             />
           </div>
         </div>
+
+        {isFullyComplete && (
+          <div className="pt-4 border-t">
+            <div className="text-center space-y-4">
+              <div className="flex items-center justify-center gap-2 text-green-600">
+                <CheckCircle2 className="w-6 h-6" />
+                <p className="text-lg font-semibold">分析が完了しました！</p>
+              </div>
+              <Button 
+                size="lg" 
+                onClick={onComplete}
+                className="w-full"
+              >
+                結果を見る
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   )

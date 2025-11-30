@@ -5,178 +5,74 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Send, Bot, User, CheckCircle2, Circle } from "lucide-react"
+import { Progress } from "@/components/ui/progress"
+import { Send, Bot, User } from "lucide-react"
 import { CompanyResults } from "@/components/company-results"
 import { AnalysisLoading } from "@/components/analysis-loading"
-import { sendChatMessage, getChatHistory, type ChatResponse } from "@/lib/api"
+import { sendChatMessage, getChatHistory, getUserScores, type ChatResponse } from "@/lib/api"
 
 type Message = {
   id: string
   role: "agent" | "user"
   content: string
-  options?: string[]
 }
 
-type UserData = {
-  jobType?: string
-  qualifications?: string
-  programmingConfidence?: string
-  programmingLanguages?: string
-  interestField?: string
-  projectType?: string
-  salaryExpectation?: string
-  workStyle?: string
-  careerGoal?: string
-  companySize?: string
+type UserScore = {
+  category: string
+  score: number
+  reason: string
 }
-
-type FlowStep = {
-  message: string
-  hint: string
-  options?: string[]
-  next: string
-}
-
-const conversationFlow: Record<string, FlowStep> = {
-  jobType: {
-    message:
-        "こんにちは！IT業界専門のキャリアエージェントです。4万社余りのIT企業の中から、あなたに最適な企業を選定いたします。\n\nまず、どのような職種を希望されますか？",
-    hint: "IT業界には様々な職種があります。開発系、インフラ系、それとも両方に興味がありますか？",
-    options: ["開発系エンジニア", "インフラエンジニア", "両方に興味がある", "まだ決めていない"],
-    next: "qualifications",
-  },
-  qualifications: {
-    message: "{previous}ですね。では、現在までに合格した資格を教えてください。",
-    hint: "ITパスポート、基本情報技術者試験、応用情報技術者試験など、お持ちの資格をお聞かせください。",
-    next: "programmingConfidence",
-  },
-  programmingConfidence: {
-    message: "ありがとうございます。プログラミングは得意ですか？",
-    hint: "正直にお答えください。あなたのレベルに合った企業をご紹介します。",
-    options: ["とても得意です", "ある程度できます", "あまり自信がありません", "これから学びたい"],
-    next: "programmingLanguages",
-  },
-  programmingLanguages: {
-    message: "承知しました。今までに学習したプログラミング言語を教えてください。",
-    hint: "Java、Python、JavaScript、C++など、学習経験のある言語をお聞かせください。",
-    next: "interestField",
-  },
-  interestField: {
-    message: "ありがとうございます。ここからは興味分析に移ります。IT業界のどの分野に最も興味がありますか？",
-    hint: "Web開発、AI・機械学習、クラウド、セキュリティなど、様々な分野があります。",
-    options: ["Web・アプリ開発", "AI・機械学習", "クラウド・インフラ", "セキュリティ", "データ分析", "その他"],
-    next: "projectType",
-  },
-  projectType: {
-    message: "{previous}の分野ですね。どのようなプロジェクトに携わりたいですか？",
-    hint: "自社サービス開発、受託開発、社内システムなど、働き方によって環境が大きく変わります。",
-    options: ["自社サービス開発", "受託開発・SES", "社内システム開発", "研究開発", "まだ決めていない"],
-    next: "salaryExpectation",
-  },
-  salaryExpectation: {
-    message: "なるほど。それでは待遇面についてお伺いします。初年度の年収について、どのくらいを希望されますか？",
-    hint: "IT業界の新卒平均は300-400万円程度ですが、企業によって大きく異なります。",
-    options: ["300万円以上", "400万円以上", "500万円以上", "特にこだわらない"],
-    next: "workStyle",
-  },
-  workStyle: {
-    message: "承知しました。働き方について、最も重視することは何ですか？",
-    hint: "リモートワーク、フレックス、残業の少なさなど、ワークライフバランスに関わる要素です。",
-    options: [
-      "リモートワーク可能",
-      "フレックスタイム制",
-      "残業が少ない",
-      "オフィス勤務でチーム重視",
-      "特にこだわらない",
-    ],
-    next: "careerGoal",
-  },
-  careerGoal: {
-    message: "最後に、将来のキャリアについてお伺いします。5年後、どのような姿を目指していますか？",
-    hint: "スペシャリスト、マネージャー、起業など、様々なキャリアパスがあります。",
-    options: [
-      "技術のスペシャリスト",
-      "プロジェクトマネージャー",
-      "テックリード・アーキテクト",
-      "起業・フリーランス",
-      "まだ考えていない",
-    ],
-    next: "companySize",
-  },
-  companySize: {
-    message: "素晴らしい目標ですね。最後に、どのような規模の企業で働きたいですか？",
-    hint: "大企業は安定性、ベンチャーは成長性が魅力です。それぞれに良さがあります。",
-    options: ["大手企業（1000名以上）", "中堅企業（100-1000名）", "ベンチャー企業（100名未満）", "特にこだわらない"],
-    next: "complete",
-  },
-}
-
-const analysisPhases = [
-  { id: 1, name: "職種分析", steps: ["jobType", "qualifications", "programmingConfidence", "programmingLanguages"] },
-  { id: 2, name: "興味分析", steps: ["interestField", "projectType"] },
-  { id: 3, name: "待遇分析", steps: ["salaryExpectation", "workStyle"] },
-  { id: 4, name: "将来分析", steps: ["careerGoal", "companySize"] },
-]
 
 export function JobAgentChat() {
-  const [sessionId] = useState(() => {
-    // セッションIDをlocalStorageから取得または新規作成
+  // セッションIDを最初に初期化（他のstateより先に）
+  const [sessionId, setSessionId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('chat_session_id')
-      if (stored) {
-        return stored
+      let storedSessionId = localStorage.getItem('chat_session_id')
+      if (!storedSessionId) {
+        storedSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        localStorage.setItem('chat_session_id', storedSessionId)
       }
+      console.log('[Frontend] Session ID initialized:', storedSessionId)
+      return storedSessionId
     }
-    const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('chat_session_id', newId)
-    }
-    return newId
+    return ''
   })
+  
   const [userId] = useState(1)
   const [industryId] = useState(1)
   const [jobCategoryId] = useState(1)
-  const [useBackend, setUseBackend] = useState(true)
   const [isLoadingFromBackend, setIsLoadingFromBackend] = useState(false)
+  const [isInitializing, setIsInitializing] = useState(true)
 
   const [messages, setMessages] = useState<Message[]>(() => {
-    // localStorageからメッセージ履歴を復元
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('chat_messages')
-      if (stored) {
+    // 初期表示用にLocalStorageからキャッシュを読み込む（バックエンドから取得するまでの一時表示）
+    if (typeof window !== 'undefined' && sessionId) {
+      const cached = localStorage.getItem(`chat_cache_${sessionId}`)
+      if (cached) {
         try {
-          return JSON.parse(stored)
+          console.log('[Frontend] Loading cached messages for session:', sessionId)
+          return JSON.parse(cached)
         } catch (e) {
-          console.error('Failed to parse stored messages:', e)
+          console.error('Failed to parse cached messages:', e)
         }
       }
     }
-    return [
-      {
-        id: "1",
-        role: "agent",
-        content: conversationFlow.jobType.message,
-        options: conversationFlow.jobType.options,
-      },
-    ]
+    return []
   })
   const [inputValue, setInputValue] = useState("")
-  const [currentStep, setCurrentStep] = useState<string>("jobType")
-  const [userData, setUserData] = useState<UserData>({})
-  const [isComplete, setIsComplete] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('chat_is_complete') === 'true'
-    }
-    return false
-  })
-  const [isAnalyzing, setIsAnalyzing] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('chat_is_analyzing') === 'true'
-    }
-    return false
-  })
+  const [isComplete, setIsComplete] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
+  const [userScores, setUserScores] = useState<UserScore[]>([])
+  const [progress, setProgress] = useState({ questions: 0, total: 20, categories: 0, totalCategories: 10 })
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // メッセージが更新されたらキャッシュに保存
+  useEffect(() => {
+    if (typeof window !== 'undefined' && messages.length > 0) {
+      localStorage.setItem(`chat_cache_${sessionId}`, JSON.stringify(messages))
+    }
+  }, [messages, sessionId])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -184,166 +80,201 @@ export function JobAgentChat() {
 
   useEffect(() => {
     scrollToBottom()
-    // メッセージが更新されたらlocalStorageに保存
-    if (typeof window !== 'undefined' && messages.length > 0) {
-      localStorage.setItem('chat_messages', JSON.stringify(messages))
-    }
   }, [messages, isTyping])
 
+  // 初回ロード時にバックエンドからチャット履歴を読み込む
   useEffect(() => {
-    if (useBackend) {
-      loadChatHistory()
+    if (sessionId) {
+      initializeChat()
     }
-  }, [])
+  }, [sessionId])
 
-  const loadChatHistory = async () => {
+  const initializeChat = async () => {
+    if (!sessionId) {
+      console.log('[Frontend] Session ID not ready yet')
+      return
+    }
+    
     try {
+      console.log('[Frontend] Initializing chat with sessionId:', sessionId)
+      
+      // バックエンドからチャット履歴を取得
       const history = await getChatHistory(sessionId)
+      console.log('[Frontend] Chat history loaded:', history.length, 'messages')
+      
       if (history.length > 0) {
+        // 既存の履歴がある場合は復元
         const loadedMessages: Message[] = history.map((msg) => ({
           id: msg.id.toString(),
           role: msg.role === "assistant" ? "agent" : "user",
           content: msg.content,
         }))
         setMessages(loadedMessages)
+        console.log('[Frontend] Messages restored from backend')
+        
+        // バックエンドからスコアと進捗を取得
+        try {
+          const scoresData = await getUserScores(userId, sessionId)
+          console.log('[Frontend] Scores loaded:', scoresData)
+          if (scoresData && scoresData.length > 0) {
+            const scores: UserScore[] = scoresData.map((s: any) => ({
+              category: s.weight_category || s.category,
+              score: s.score || 0,
+              reason: s.reason || ''
+            }))
+            setUserScores(scores)
+            
+            // 進捗状況を計算（スコアの数から）
+            setProgress({
+              questions: history.length,
+              total: 20,
+              categories: scores.length,
+              totalCategories: 10,
+            })
+          }
+        } catch (error) {
+          console.error("Failed to load scores:", error)
+        }
+        
+        // 完了状態をチェック
+        const lastMessage = history[history.length - 1]
+        if (lastMessage.role === "assistant" && lastMessage.content.includes("完了")) {
+          setIsComplete(true)
+        }
+      } else {
+        console.log('[Frontend] No history found, starting new session')
+        // 新規セッション：AIに最初の質問を生成させる
+        setIsTyping(true)
+        const response = await sendChatMessage({
+          user_id: userId,
+          session_id: sessionId,
+          message: "START_SESSION",
+          industry_id: industryId,
+          job_category_id: jobCategoryId,
+        })
+        
+        setMessages([
+          {
+            id: "1",
+            role: "agent",
+            content: response.response,
+          },
+        ])
+        setIsTyping(false)
       }
     } catch (error) {
-      console.error("[v0] Failed to load chat history:", error)
-    }
-  }
-
-  const addAgentMessage = (content: string, hint?: string, options?: string[]) => {
-    setIsTyping(true)
-    setTimeout(() => {
-      const fullContent = hint ? `${content}\n\n💡 ${hint}` : content
-      setMessages((prev) => [
-        ...prev,
+      console.error("Failed to initialize chat:", error)
+      // エラー時はデフォルトメッセージ
+      setMessages([
         {
-          id: Date.now().toString(),
+          id: "1",
           role: "agent",
-          content: fullContent,
-          options,
+          content: "こんにちは！IT業界専門のキャリアエージェントです。あなたに最適な企業を見つけるため、いくつか質問させてください。まず、どのような職種に興味がありますか？",
         },
       ])
-      setIsTyping(false)
-    }, 800)
+    } finally {
+      setIsInitializing(false)
+    }
   }
 
   const handleSend = async (message?: string) => {
     const textToSend = message || inputValue.trim()
-    if (!textToSend) return
+    if (!textToSend || !sessionId) return
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        role: "user",
-        content: textToSend,
-      },
-    ])
+    // ユーザーメッセージを追加
+    const newUserMessage = {
+      id: Date.now().toString(),
+      role: "user" as const,
+      content: textToSend,
+    }
+    
+    setMessages((prev) => [...prev, newUserMessage])
     setInputValue("")
 
-    if (useBackend) {
-      setIsLoadingFromBackend(true)
-      setIsTyping(true)
+    // バックエンドに送信
+    setIsLoadingFromBackend(true)
+    setIsTyping(true)
 
-      try {
-        console.log("[v0] Sending message to backend:", { sessionId, userId, message: textToSend })
+    try {
+      console.log("[Frontend] Sending message to backend:", { sessionId, userId, message: textToSend })
 
-        const response: ChatResponse = await sendChatMessage({
-          user_id: userId,
-          session_id: sessionId,
-          message: textToSend,
-          industry_id: industryId,
-          job_category_id: jobCategoryId,
-        })
+      // 過去のチャット履歴を準備（最新のユーザーメッセージを含む）
+      const chatHistory = [...messages, newUserMessage].map(msg => ({
+        role: msg.role === "agent" ? "assistant" as const : "user" as const,
+        content: msg.content
+      }))
 
-        console.log("[v0] Received response from backend:", response)
+      const response: ChatResponse = await sendChatMessage({
+        user_id: userId,
+        session_id: sessionId,
+        message: textToSend,
+        industry_id: industryId,
+        job_category_id: jobCategoryId,
+        chat_history: chatHistory,
+      })
 
-        setTimeout(() => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              role: "agent",
-              content: response.response,
-            },
-          ])
-          setIsTyping(false)
-          setIsLoadingFromBackend(false)
+      console.log("[Frontend] Received response from backend:", response)
 
-          // 質問終了判定
-          if (response.is_complete) {
-            console.log("[v0] Analysis complete. Starting loading phase...")
-            setTimeout(() => {
-              setIsAnalyzing(true)
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('chat_is_analyzing', 'true')
-              }
-            }, 1000)
-          }
-        }, 500)
-
-        if (response.current_scores && response.current_scores.length > 0) {
-          console.log("[v0] Current scores:", response.current_scores)
-        }
-      } catch (error) {
-        console.error("[v0] Backend error:", error)
-        setIsTyping(false)
-        setIsLoadingFromBackend(false)
-
+      // AIの応答を追加
+      setTimeout(() => {
         setMessages((prev) => [
           ...prev,
           {
             id: Date.now().toString(),
             role: "agent",
-            content: "申し訳ございません。接続エラーが発生しました。もう一度お試しください。",
+            content: response.response,
           },
         ])
-      }
+        setIsTyping(false)
+        setIsLoadingFromBackend(false)
 
-      return
-    }
+        // 進捗状況を更新
+        setProgress({
+          questions: response.answered_questions || 0,
+          total: response.total_questions || 20,
+          categories: response.evaluated_categories || 0,
+          totalCategories: response.total_categories || 10,
+        })
 
-    if (currentStep !== "complete") {
-      setUserData((prev) => ({ ...prev, [currentStep]: textToSend }))
-
-      const currentFlow = conversationFlow[currentStep]
-      const nextStepKey = currentFlow.next
-
-      if (nextStepKey === "complete") {
-        setIsTyping(true)
-        setTimeout(() => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              role: "agent",
-              content: `ありがとうございました！\n\n4段階の分析が完了しました。あなたに適した企業を10社に絞り込んでいます...\n\n📊 職種分析 ✓\n🎯 興味分析 ✓\n💰 待遇分析 ✓\n🚀 将来分析 ✓`,
-            },
-          ])
-          setIsTyping(false)
+        // 質問終了判定
+        if (response.is_complete) {
+          console.log("[Frontend] Analysis complete. Starting loading phase...")
           setTimeout(() => {
-            setIsComplete(true)
-          }, 2000)
-        }, 800)
-      } else {
-        const nextFlow = conversationFlow[nextStepKey]
-        const messageWithContext = nextFlow.message.replace("{previous}", textToSend)
-        addAgentMessage(messageWithContext, nextFlow.hint, nextFlow.options)
-        setCurrentStep(nextStepKey)
+            setIsAnalyzing(true)
+          }, 1000)
+        }
+      }, 500)
+
+      if (response.current_scores && response.current_scores.length > 0) {
+        console.log("[Frontend] Current scores:", response.current_scores)
+        // スコアを保存
+        const scores: UserScore[] = response.current_scores.map((s: any) => ({
+          category: s.weight_category || s.category,
+          score: s.score || 0,
+          reason: s.reason || ''
+        }))
+        setUserScores(scores)
       }
+    } catch (error) {
+      console.error("[Frontend] Backend error:", error)
+      setIsTyping(false)
+      setIsLoadingFromBackend(false)
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "agent",
+          content: "申し訳ございません。接続エラーが発生しました。もう一度お試しください。",
+        },
+      ])
     }
   }
 
   const handleReset = () => {
-    // localStorageをクリア
+    // 古いキャッシュをクリア
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('chat_session_id')
-      localStorage.removeItem('chat_messages')
-      localStorage.removeItem('chat_user_data')
-      localStorage.removeItem('chat_is_complete')
-      localStorage.removeItem('chat_is_analyzing')
+      localStorage.removeItem(`chat_cache_${sessionId}`)
     }
     
     // 新しいセッションID生成
@@ -352,45 +283,13 @@ export function JobAgentChat() {
       localStorage.setItem('chat_session_id', newSessionId)
     }
     
-    setMessages([
-      {
-        id: "1",
-        role: "agent",
-        content: conversationFlow.jobType.message,
-        options: conversationFlow.jobType.options,
-      },
-    ])
-    setCurrentStep("jobType")
-    setUserData({})
-    setIsComplete(false)
-    setIsAnalyzing(false)
-    setInputValue("")
-    
-    // ページをリロード
+    // ページをリロード（バックエンドには古いセッションが残る）
     window.location.reload()
   }
 
   const handleAnalysisComplete = () => {
     setIsAnalyzing(false)
     setIsComplete(true)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('chat_is_analyzing', 'false')
-      localStorage.setItem('chat_is_complete', 'true')
-    }
-  }
-
-  const getCurrentPhase = () => {
-    for (let i = 0; i < analysisPhases.length; i++) {
-      if (analysisPhases[i].steps.includes(currentStep)) {
-        return i + 1
-      }
-    }
-    return 1
-  }
-
-  const isPhaseCompleted = (phaseId: number) => {
-    const currentPhaseId = getCurrentPhase()
-    return phaseId < currentPhaseId
   }
 
   if (isAnalyzing) {
@@ -398,154 +297,107 @@ export function JobAgentChat() {
   }
 
   if (isComplete) {
-    return <CompanyResults userData={userData} onReset={handleReset} />
+    return <CompanyResults userData={{ scores: userScores }} onReset={handleReset} />
   }
 
   return (
-      <div className="flex gap-4 h-[600px]">
-        <Card className="w-64 border-2 p-6 flex flex-col gap-6">
-          <div className="space-y-1">
-            <h3 className="font-bold text-lg text-foreground">分析進捗</h3>
-            <p className="text-xs text-muted-foreground">4段階の分析を実施中</p>
-          </div>
-
-          <div className="flex items-center gap-2 p-2 bg-muted rounded-lg">
-            <input
-                type="checkbox"
-                id="backend-toggle"
-                checked={useBackend}
-                onChange={(e) => setUseBackend(e.target.checked)}
-                className="w-4 h-4"
-            />
-            <label htmlFor="backend-toggle" className="text-xs text-muted-foreground cursor-pointer">
-              バックエンド連携
-            </label>
-          </div>
-
-          <div className="flex flex-col gap-4 flex-1">
-            {analysisPhases.map((phase, index) => (
-                <div key={phase.id} className="flex flex-col gap-2">
-                  <div className="flex items-center gap-3">
-                    {isPhaseCompleted(phase.id) ? (
-                        <CheckCircle2 className="w-6 h-6 text-primary flex-shrink-0" />
-                    ) : getCurrentPhase() === phase.id ? (
-                        <Circle className="w-6 h-6 text-primary fill-primary flex-shrink-0" />
-                    ) : (
-                        <Circle className="w-6 h-6 text-muted-foreground flex-shrink-0" />
-                    )}
-                    <div className="flex flex-col">
-                  <span
-                      className={`text-sm font-semibold ${
-                          getCurrentPhase() === phase.id
-                              ? "text-primary"
-                              : isPhaseCompleted(phase.id)
-                                  ? "text-foreground"
-                                  : "text-muted-foreground"
-                      }`}
-                  >
-                    {phase.name}
-                  </span>
-                      <span className="text-xs text-muted-foreground">
-                    {isPhaseCompleted(phase.id) ? "完了" : getCurrentPhase() === phase.id ? "進行中" : "待機中"}
-                  </span>
+      <div className="flex justify-center items-center h-screen bg-background p-4">
+        <Card className="flex flex-col w-full max-w-4xl h-[90vh] border-2">
+          <div className="border-b bg-muted/50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Avatar className="w-10 h-10 bg-primary">
+                  <AvatarFallback>
+                    <Bot className="w-5 h-5 text-primary-foreground" />
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <h2 className="font-bold text-foreground">IT業界キャリアエージェント</h2>
+                  <p className="text-xs text-muted-foreground">
+                    AI駆動で最適な企業を選定
+                  </p>
+                </div>
+              </div>
+              
+              {/* 進捗状況表示 */}
+              {progress.categories > 0 && (
+                <div className="flex flex-col items-end gap-1.5 min-w-[200px]">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-primary">
+                      診断進行度
+                    </div>
+                    <div className="text-lg font-bold text-primary">
+                      {Math.round((progress.categories / progress.totalCategories) * 100)}%
                     </div>
                   </div>
-                  {index < analysisPhases.length - 1 && (
-                      <div
-                          className={`w-0.5 h-8 ml-3 ${isPhaseCompleted(phase.id + 1) ? "bg-primary" : "bg-muted-foreground/30"}`}
-                      />
-                  )}
+                  <div className="text-xs text-muted-foreground text-right">
+                    {progress.categories}/{progress.totalCategories} カテゴリ評価済み
+                  </div>
+                  <Progress 
+                    value={(progress.categories / progress.totalCategories) * 100} 
+                    className="w-full h-2.5"
+                  />
                 </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="flex flex-col flex-1 border-2">
-          <div className="border-b bg-muted/50 p-4">
-            <div className="flex items-center gap-3">
-              <Avatar className="w-10 h-10 bg-primary">
-                <AvatarFallback>
-                  <Bot className="w-5 h-5 text-primary-foreground" />
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <h2 className="font-bold text-foreground">IT業界キャリアエージェント</h2>
-                <p className="text-xs text-muted-foreground">
-                  4万社から最適な企業を選定 {useBackend && "(バックエンド連携中)"}
-                </p>
-              </div>
+              )}
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {messages.map((message) => (
-                <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
-                  <Avatar className={`w-10 h-10 ${message.role === "agent" ? "bg-primary" : "bg-accent"}`}>
-                    <AvatarFallback>
-                      {message.role === "agent" ? (
-                          <Bot className="w-5 h-5 text-primary-foreground" />
-                      ) : (
-                          <User className="w-5 h-5 text-accent-foreground" />
-                      )}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div
-                      className={`flex flex-col gap-2 max-w-[80%] ${message.role === "user" ? "items-end" : "items-start"}`}
-                  >
-                    <div
-                        className={`rounded-2xl px-4 py-3 ${
-                            message.role === "agent" ? "bg-muted text-foreground" : "bg-primary text-primary-foreground"
-                        }`}
-                    >
-                      <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
-                    </div>
-                    {message.options && (
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {message.options.map((option, index) => (
-                              <Button
-                                  key={index}
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleSend(option)}
-                                  className="text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
-                              >
-                                {option}
-                              </Button>
-                          ))}
+            {isInitializing ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center space-y-2">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                  <p className="text-sm text-muted-foreground">チャットを準備中...</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {messages.map((message) => (
+                    <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                      <Avatar className={`w-10 h-10 ${message.role === "agent" ? "bg-primary" : "bg-accent"} flex-shrink-0`}>
+                        <AvatarFallback>
+                          {message.role === "agent" ? (
+                              <Bot className="w-5 h-5 text-primary-foreground" />
+                          ) : (
+                              <User className="w-5 h-5 text-accent-foreground" />
+                          )}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div
+                          className={`flex flex-col gap-2 max-w-[75%] ${message.role === "user" ? "items-end" : "items-start"}`}
+                      >
+                        <div
+                            className={`rounded-2xl px-4 py-3 ${
+                                message.role === "agent" ? "bg-muted text-foreground" : "bg-primary text-primary-foreground"
+                            }`}
+                        >
+                          <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
                         </div>
-                    )}
-                  </div>
-                </div>
-            ))}
-            {isTyping && (
-                <div className="flex gap-3">
-                  <Avatar className="w-10 h-10 bg-primary">
-                    <AvatarFallback>
-                      <Bot className="w-5 h-5 text-primary-foreground" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="bg-muted rounded-2xl px-4 py-3">
-                    <div className="flex gap-1">
-                  <span
-                      className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                      style={{ animationDelay: "0ms" }}
-                  />
-                      <span
-                          className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                          style={{ animationDelay: "150ms" }}
-                      />
-                      <span
-                          className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                          style={{ animationDelay: "300ms" }}
-                      />
+                      </div>
                     </div>
-                  </div>
-                </div>
+                ))}
+                {isTyping && (
+                    <div className="flex gap-3">
+                      <Avatar className="w-10 h-10 bg-primary flex-shrink-0">
+                        <AvatarFallback>
+                          <Bot className="w-5 h-5 text-primary-foreground" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="bg-muted rounded-2xl px-4 py-3">
+                        <div className="flex gap-1">
+                          <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                          <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                          <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce"></div>
+                        </div>
+                      </div>
+                    </div>
+                )}
+                <div ref={messagesEndRef} />
+              </>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
-          <div className="border-t bg-muted/30 p-4">
+          <div className="border-t p-4">
             <form
                 onSubmit={(e) => {
                   e.preventDefault()
@@ -557,10 +409,10 @@ export function JobAgentChat() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   placeholder="メッセージを入力..."
-                  className="flex-1 bg-background"
-                  disabled={isTyping || isLoadingFromBackend}
+                  className="flex-1"
+                  disabled={isLoadingFromBackend || isInitializing}
               />
-              <Button type="submit" size="icon" disabled={!inputValue.trim() || isTyping || isLoadingFromBackend}>
+              <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing}>
                 <Send className="w-4 h-4" />
               </Button>
             </form>

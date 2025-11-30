@@ -13,11 +13,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the server application
-ENV CGO_ENABLED=0
-ENV GOOS=linux
-ENV GOARCH=amd64
-RUN go build -ldflags="-s -w" -o /app/bin/server ./cmd/server
+# Build the server application for the host architecture
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/bin/server ./cmd/server
 
 # Runtime stage
 FROM golang:1.25-alpine
@@ -27,9 +24,12 @@ WORKDIR /app
 # Install runtime dependencies
 RUN apk --no-cache add ca-certificates git build-base tzdata
 
-# Copy binary and source (for migrations)
-COPY --from=builder /app/bin/server /app/server
+# Copy source (for migrations) and binary
 COPY --from=builder /app /app
+COPY --from=builder /app/bin/server /app/server
+
+# Make binary executable
+RUN chmod +x /app/server
 
 # Expose port
 EXPOSE 80

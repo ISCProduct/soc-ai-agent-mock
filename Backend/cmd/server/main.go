@@ -78,7 +78,7 @@ func main() {
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo)
+	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, userRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 
 	// コントローラー層の初期化
