@@ -16,6 +16,7 @@ type ChatService struct {
 	chatMessageRepo         *repositories.ChatMessageRepository
 	userWeightScoreRepo     *repositories.UserWeightScoreRepository
 	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository
+	userRepo                *repositories.UserRepository
 }
 
 func NewChatService(
@@ -24,6 +25,7 @@ func NewChatService(
 	chatMessageRepo *repositories.ChatMessageRepository,
 	userWeightScoreRepo *repositories.UserWeightScoreRepository,
 	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository,
+	userRepo *repositories.UserRepository,
 ) *ChatService {
 	return &ChatService{
 		aiClient:                aiClient,
@@ -31,6 +33,7 @@ func NewChatService(
 		chatMessageRepo:         chatMessageRepo,
 		userWeightScoreRepo:     userWeightScoreRepo,
 		aiGeneratedQuestionRepo: aiGeneratedQuestionRepo,
+		userRepo:                userRepo,
 	}
 }
 
@@ -45,16 +48,23 @@ type ChatRequest struct {
 
 // ChatResponse チャットレスポンス
 type ChatResponse struct {
-	Response          string                   `json:"response"`
-	QuestionWeightID  uint                     `json:"question_weight_id,omitempty"`
-	CurrentScores     []models.UserWeightScore `json:"current_scores,omitempty"`
-	IsComplete        bool                     `json:"is_complete"`
-	TotalQuestions    int                      `json:"total_questions"`
-	AnsweredQuestions int                      `json:"answered_questions"`
+	Response            string                   `json:"response"`
+	QuestionWeightID    uint                     `json:"question_weight_id,omitempty"`
+	CurrentScores       []models.UserWeightScore `json:"current_scores,omitempty"`
+	IsComplete          bool                     `json:"is_complete"`
+	TotalQuestions      int                      `json:"total_questions"`
+	AnsweredQuestions   int                      `json:"answered_questions"`
+	EvaluatedCategories int                      `json:"evaluated_categories"`
+	TotalCategories     int                      `json:"total_categories"`
 }
 
 // ProcessChat チャット処理のメインロジック
 func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	// セッション開始の特殊処理
+	if req.Message == "START_SESSION" {
+		return s.handleSessionStart(ctx, req)
+	}
+
 	// 1. ユーザーのメッセージを保存
 	userMsg := &models.ChatMessage{
 		SessionID: req.SessionID,
@@ -66,8 +76,8 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to save user message: %w", err)
 	}
 
-	// 2. 会話履歴を取得（最新5件）
-	history, err := s.chatMessageRepo.FindRecentBySessionID(req.SessionID, 5)
+	// 2. 会話履歴を取得（全履歴を取得して重複チェックに使用）
+	history, err := s.chatMessageRepo.FindRecentBySessionID(req.SessionID, 100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chat history: %w", err)
 	}
@@ -78,22 +88,33 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		fmt.Printf("Warning: failed to update weights: %v\n", err)
 	}
 
-	// 4. 既に聞いた質問のIDと質問文を取得
+	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
+	askedTexts := make(map[string]bool)
+
+	// 4-1. AI生成質問テーブルから取得
 	askedQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	if err != nil {
 		fmt.Printf("Warning: failed to get asked questions: %v\n", err)
 		askedQuestions = []models.AIGeneratedQuestion{}
 	}
-
-	askedIDs := []uint{}
-	askedTexts := make(map[string]bool)
 	for _, q := range askedQuestions {
-		if q.TemplateID > 0 {
-			askedIDs = append(askedIDs, q.TemplateID)
-		}
-		// 質問文も記録（AIが生成した質問との重複防止）
 		askedTexts[q.QuestionText] = true
 	}
+
+	// 4-2. チャット履歴からもアシスタントの質問を収集
+	for _, msg := range history {
+		if msg.Role == "assistant" {
+			// 質問文を正規化して記録
+			questionText := strings.TrimSpace(msg.Content)
+			// 💡マークなどのヒント部分を除去
+			if idx := strings.Index(questionText, "\n\n💡"); idx > 0 {
+				questionText = questionText[:idx]
+			}
+			askedTexts[questionText] = true
+		}
+	}
+
+	fmt.Printf("Total asked questions for duplicate check: %d\n", len(askedTexts))
 
 	// 5. 現在のスコアを分析して、次に評価すべきカテゴリを決定
 	scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
@@ -103,8 +124,12 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	// スコア分布を分析
 	scoreMap := make(map[string]int)
+	evaluatedCategories := make(map[string]bool)
 	for _, score := range scores {
 		scoreMap[score.WeightCategory] = score.Score
+		if score.Score != 0 {
+			evaluatedCategories[score.WeightCategory] = true
+		}
 	}
 
 	// 全カテゴリ
@@ -114,73 +139,57 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		"ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
 	}
 
-	// 未評価または評価が浅いカテゴリを優先
+	// 未評価カテゴリを優先的に選択
 	var targetCategory string
-	minScore := 1000
+	unevaluatedCategories := []string{}
+	weaklyEvaluatedCategories := []string{}
+
 	for _, cat := range allCategories {
 		score, exists := scoreMap[cat]
-		if !exists {
-			targetCategory = cat
-			break
-		}
-		// 評価が浅いカテゴリを見つける
-		if score < minScore && score > -5 && score < 5 {
-			minScore = score
-			targetCategory = cat
+		if !exists || score == 0 {
+			unevaluatedCategories = append(unevaluatedCategories, cat)
+		} else if score > -3 && score < 3 {
+			// スコアが-3〜3の範囲は評価が曖昧
+			weaklyEvaluatedCategories = append(weaklyEvaluatedCategories, cat)
 		}
 	}
 
-	// まだ評価が不十分なカテゴリがあれば、そのカテゴリの質問を優先
-	var nextQuestion *models.QuestionWeight
-	var err2 error
-	if targetCategory != "" {
-		// 特定カテゴリの質問を取得（既出を除外）
-		nextQuestion, err2 = s.questionWeightRepo.GetRandomQuestionByCategory(targetCategory, askedIDs)
-		if err2 != nil {
-			fmt.Printf("No question found for category %s, falling back to general selection\n", targetCategory)
+	if len(unevaluatedCategories) > 0 {
+		targetCategory = unevaluatedCategories[0]
+		fmt.Printf("Targeting unevaluated category: %s\n", targetCategory)
+	} else if len(weaklyEvaluatedCategories) > 0 {
+		targetCategory = weaklyEvaluatedCategories[0]
+		fmt.Printf("Targeting weakly evaluated category: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
+	} else {
+		// 全カテゴリ評価済みなら、最もスコアが極端なものを深掘り
+		maxAbsScore := 0
+		for cat, score := range scoreMap {
+			absScore := score
+			if absScore < 0 {
+				absScore = -absScore
+			}
+			if absScore > maxAbsScore {
+				maxAbsScore = absScore
+				targetCategory = cat
+			}
 		}
+		fmt.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
 	}
 
-	// カテゴリ指定で見つからなければ、通常の選択
-	if nextQuestion == nil {
-		nextQuestion, err2 = s.questionWeightRepo.GetRandomQuestionExcluding(req.IndustryID, req.JobCategoryID, askedIDs)
-	}
-
+	// 常にAIで戦略的に質問を生成
 	var questionWeightID uint
 	var aiResponse string
 
-	if err2 != nil || nextQuestion == nil {
-		// データベースに質問がない場合、AIに戦略的に生成させる
-		fmt.Printf("No question found in DB, generating strategic question with AI\n")
-		aiResponse, _, err = s.generateStrategicQuestion(ctx, history, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate question: %w", err)
-		}
-	} else {
-		// 同じ質問文が既に出ていないか最終確認
-		if askedTexts[nextQuestion.Question] {
-			fmt.Printf("Question already asked (text match), generating new question\n")
-			aiResponse, _, err = s.generateStrategicQuestion(ctx, history, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate question: %w", err)
-			}
-		} else {
-			aiResponse = nextQuestion.Question
-			questionWeightID = nextQuestion.ID
+	// 質問生成には最新10件の履歴のみ使用（文脈を保ちつつ、プロンプトを短く）
+	recentHistory := history
+	if len(history) > 10 {
+		recentHistory = history[len(history)-10:]
+	}
 
-			// AI生成質問テーブルに記録
-			aiGenQuestion := &models.AIGeneratedQuestion{
-				UserID:       req.UserID,
-				SessionID:    req.SessionID,
-				TemplateID:   nextQuestion.ID,
-				QuestionText: nextQuestion.Question,
-				Weight:       nextQuestion.WeightValue,
-				IsAnswered:   false,
-			}
-			if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {
-				fmt.Printf("Warning: failed to save AI generated question: %v\n", err)
-			}
-		}
+	fmt.Printf("Generating strategic question with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
+	aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate question: %w", err)
 	}
 
 	// 5. AIの応答を保存
@@ -207,46 +216,83 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		fmt.Printf("Warning: failed to count answered questions: %v\n", err)
 	}
 
-	totalQuestions := 15 // 各カテゴリから最低1問ずつ + 深掘り質問
+	// evaluatedCategoriesは既に上で定義済み（124行目）なので再利用
+
+	totalQuestions := 20 // 最低20問で診断完了
 	answeredCount := len(answeredQuestions)
-	isComplete := answeredCount >= totalQuestions
+	allCategoriesEvaluated := len(evaluatedCategories) >= 10
+
+	// 全カテゴリが評価され、かつ十分な質問数に達した場合のみ完了
+	isComplete := answeredCount >= totalQuestions && allCategoriesEvaluated
+
+	fmt.Printf("Diagnosis progress: %d/%d questions, %d/10 categories evaluated, complete: %v\n",
+		answeredCount, totalQuestions, len(evaluatedCategories), isComplete)
+
+	// 診断完了時のメッセージを追加
+	if isComplete {
+		completionMessage := "\n\n✅ 診断が完了しました！あなたの適性を分析し、最適な企業をマッチングします。"
+		aiResponse = aiResponse + completionMessage
+	}
 
 	return &ChatResponse{
-		Response:          aiResponse,
-		QuestionWeightID:  questionWeightID,
-		CurrentScores:     finalScores,
-		IsComplete:        isComplete,
-		TotalQuestions:    totalQuestions,
-		AnsweredQuestions: answeredCount,
+		Response:            aiResponse,
+		QuestionWeightID:    questionWeightID,
+		CurrentScores:       finalScores,
+		IsComplete:          isComplete,
+		TotalQuestions:      totalQuestions,
+		AnsweredQuestions:   answeredCount,
+		EvaluatedCategories: len(evaluatedCategories),
+		TotalCategories:     10,
 	}, nil
 }
 
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新
 func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string) error {
-	// 「わからない」などの回答パターンを検出
+	// 回答の妥当性を事前チェック
+	messageTrimmed := strings.TrimSpace(message)
+
+	// 1. 空または極端に短い回答（5文字未満は無視）
+	if len([]rune(messageTrimmed)) < 5 {
+		fmt.Printf("Answer too short (%d chars), skipping analysis\n", len([]rune(messageTrimmed)))
+		return nil
+	}
+
+	// 2. 「わからない」などの回答パターンを検出（より厳格に）
 	lowConfidencePatterns := []string{
 		"わからない", "分からない", "わかりません", "分かりません",
-		"よくわからない", "よく分からない", "不明", "知らない",
-		"特にない", "ない", "思いつかない", "特に無い", "ありません",
+		"よくわからない", "よく分からない", "不明", "知らない", "しらない",
+		"特にない", "思いつかない", "特に無い", "ありません", "特になし", "なし",
+		"無い", "ない", "いいえ", "とくにない", "とくになし",
 	}
 
 	isLowConfidence := false
-	messageLower := strings.ToLower(message)
-	for _, pattern := range lowConfidencePatterns {
-		if strings.Contains(messageLower, pattern) {
-			isLowConfidence = true
-			break
+	messageNormalized := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(messageTrimmed), " ", ""), "　", "")
+
+	// 短い回答で否定的な内容の場合
+	if len([]rune(messageTrimmed)) < 15 {
+		for _, pattern := range lowConfidencePatterns {
+			if strings.Contains(messageNormalized, pattern) {
+				isLowConfidence = true
+				fmt.Printf("Low confidence answer detected: '%s' contains '%s'\n", messageTrimmed, pattern)
+				break
+			}
 		}
 	}
 
 	// わからない回答の場合は、スキップ
 	if isLowConfidence {
-		fmt.Printf("Low confidence answer detected, skipping analysis\n")
+		fmt.Printf("Skipping analysis for low confidence answer\n")
 		return nil
 	}
 
-	// 会話履歴を取得して文脈を理解
-	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 10)
+	// 3. 10文字以上の回答のみAI分析を実行
+	if len([]rune(messageTrimmed)) < 10 {
+		fmt.Printf("Answer too short for meaningful analysis (%d chars): %s\n", len([]rune(messageTrimmed)), messageTrimmed)
+		return nil
+	}
+
+	// 会話履歴を取得して文脈を理解（最新5件のみ）
+	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
 	if err != nil {
 		fmt.Printf("Warning: failed to get history for analysis: %v\n", err)
 		history = []models.ChatMessage{}
@@ -261,161 +307,47 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		}
 	}
 
-	// より詳細な分析プロンプト
-	prompt := fmt.Sprintf(`あなたは就職活動の適性診断と企業マッチングの専門家です。以下の会話履歴とユーザーの最新回答を総合的に分析し、
-**企業選定に直結する**詳細なスコアリングを行ってください。
+	// 簡潔な分析プロンプト
+	prompt := fmt.Sprintf(`あなたは就職活動の適性診断専門家です。以下の回答を分析し、スコアリングしてください。
 
-## 会話履歴
+## 会話
 %s
 
-## 最新の回答
+## 最新回答
 %s
 
-## 評価カテゴリと企業選定への影響
+## 評価カテゴリ（-10〜+10で評価）
 
-### 1. 技術志向 (-10〜+10)
-**評価基準:**
-- プログラミングや技術への興味・経験
-- 技術的な課題への取り組み方
-- 新しい技術への学習意欲
-- 技術的な深掘りや探求心
+## 評価カテゴリ（-10〜+10で評価）
 
-**企業選定への影響:**
-- +7以上: 技術主導企業、R&D部門、スタートアップ
-- +3〜+6: バランス型企業、開発部門
-- -3〜+2: ビジネス寄り企業、サポート部門
-- -3以下: 非技術職、営業・企画
+1. 技術志向: プログラミング・技術への興味
+2. コミュニケーション能力: 対話力・説明力
+3. リーダーシップ: 主導性・意思決定力
+4. チームワーク: 協働・協調性
+5. 問題解決力: 論理思考・分析力
+6. 創造性・発想力: 独創性・革新性
+7. 計画性・実行力: 目標設定・タスク管理
+8. 学習意欲・成長志向: 継続学習・成長意識
+9. ストレス耐性・粘り強さ: 困難対処・プレッシャー対応
+10. ビジネス思考・目標志向: ビジネス価値理解・成果志向
 
-### 2. コミュニケーション能力 (-10〜+10)
-**評価基準:**
-- 説明の分かりやすさ・論理性
-- 他者との対話・協調姿勢
-- 自分の考えを伝える能力
-- 傾聴力や相手を理解する姿勢
+## 重要
+- 判断材料がない場合は0点
+- 必ずJSON形式で返す
+- 短く簡潔な理由を記載
 
-**企業選定への影響:**
-- +7以上: コンサル、営業、PM職
-- +3〜+6: チーム開発重視企業
-- -3〜+2: 個人開発メイン企業
-- -3以下: 研究職、単独作業
-
-### 3. リーダーシップ (-10〜+10)
-**評価基準:**
-- チームを率いた経験
-- 主体的な意思決定
-- 目標設定や計画立案能力
-- メンバーをサポート・動機づける力
-
-**企業選定への影響:**
-- +7以上: マネジメント志向、リーダー候補
-- +3〜+6: チームリード志向
-- -3〜+2: メンバー志向
-- -3以下: サポート役、スペシャリスト
-
-### 4. チームワーク (-10〜+10)
-**評価基準:**
-- 協力して作業する姿勢
-- 役割分担への理解
-- メンバーとの協調性
-- チームの目標達成への貢献
-
-**企業選定への影響:**
-- +7以上: 大規模チーム企業、協調重視文化
-- +3〜+6: 中規模チーム企業
-- -3〜+2: 少数精鋭企業
-- -3以下: 個人裁量大企業、フリーランス向き
-
-### 5. 問題解決力 (-10〜+10)
-**評価基準:**
-- 論理的思考力
-- 課題の分析・構造化能力
-- 複雑な問題への取り組み方
-- 解決策の創出と実行力
-
-**企業選定への影響:**
-- +7以上: コンサル、戦略系、難易度高プロジェクト
-- +3〜+6: 開発・エンジニアリング
-- -3〜+2: 運用・保守
-- -3以下: 定型業務中心
-
-### 6. 創造性・発想力 (-10〜+10)
-**評価基準:**
-- 独創的なアイデアの提案
-- 既存の枠にとらわれない思考
-- 新しいアプローチへの挑戦
-- デザイン思考やイノベーション志向
-
-**企業選定への影響:**
-- +7以上: スタートアップ、新規事業、R&D
-- +3〜+6: 自社サービス開発
-- -3〜+2: 受託開発
-- -3以下: 既存システム保守
-
-### 7. 計画性・実行力 (-10〜+10)
-**評価基準:**
-- 目標設定と計画立案
-- タスク管理能力
-- スケジュール遵守
-- 着実な実行と完遂力
-
-**企業選定への影響:**
-- +7以上: プロジェクト型企業、SIer
-- +3〜+6: 開発プロジェクト
-- -3〜+2: アジャイル・柔軟な環境
-- -3以下: 探索的・研究開発
-
-### 8. 学習意欲・成長志向 (-10〜+10)
-**評価基準:**
-- 継続的な学習姿勢
-- フィードバックの受容
-- 失敗からの学び
-- キャリア成長への意識
-
-**企業選定への影響:**
-- +7以上: 急成長企業、スタートアップ、教育重視企業
-- +3〜+6: 成長機会ある企業
-- -3〜+2: 安定企業
-- -3以下: ルーチン業務中心
-
-### 9. ストレス耐性・粘り強さ (-10〜+10)
-**評価基準:**
-- 困難な状況での対処
-- プレッシャー下でのパフォーマンス
-- あきらめずに取り組む姿勢
-- 柔軟な対応力
-
-**企業選定への影響:**
-- +7以上: 高負荷環境、ベンチャー、成果主義
-- +3〜+6: 通常の開発環境
-- -3〜+2: ワークライフバランス重視
-- -3以下: 低ストレス環境、安定志向
-
-### 10. ビジネス思考・目標志向 (-10〜+10)
-**評価基準:**
-- ビジネス価値への理解
-- 成果・目標への意識
-- 戦略的思考
-- 顧客志向
-
-**企業選定への影響:**
-- +7以上: 事業会社、プロダクト企業、コンサル
-- +3〜+6: 自社サービス開発
-- -3〜+2: 受託開発
-- -3以下: 技術特化、研究開発
-
-## 重要な注意事項
-1. **企業選定に役立つ評価**: 各スコアが具体的な企業タイプ・職種に結びつくように評価
-2. **根拠の明確化**: スコアの理由を具体的に記述
-3. **総合的判断**: 単一の回答だけでなく、会話全体から判断
-4. **判断材料がない場合は0**: 無理に推測せず、情報不足なら0点
-
-## 出力形式
-JSON形式で、各カテゴリのスコアと**企業選定に関連する理由**を返してください。
-
+## 出力形式（この形式を厳守）
 {
-  "技術志向": {"score": 8, "reason": "独学でプログラミングを学び、新技術への探求心が強い → 技術主導企業向き"},
-  "コミュニケーション能力": {"score": 6, "reason": "論理的な説明ができ、チームでの対話を重視 → チーム開発企業向き"},
-  "リーダーシップ": {"score": 0, "reason": "リーダー経験に関する情報なし"}
+  "技術志向": {"score": 0, "reason": "理由"},
+  "コミュニケーション能力": {"score": 0, "reason": "理由"},
+  "リーダーシップ": {"score": 0, "reason": "理由"},
+  "チームワーク": {"score": 0, "reason": "理由"},
+  "問題解決力": {"score": 0, "reason": "理由"},
+  "創造性・発想力": {"score": 0, "reason": "理由"},
+  "計画性・実行力": {"score": 0, "reason": "理由"},
+  "学習意欲・成長志向": {"score": 0, "reason": "理由"},
+  "ストレス耐性・粘り強さ": {"score": 0, "reason": "理由"},
+  "ビジネス思考・目標志向": {"score": 0, "reason": "理由"}
 }`, conversationContext, message)
 
 	response, err := s.aiClient.Responses(ctx, prompt)
@@ -434,12 +366,14 @@ JSON形式で、各カテゴリのスコアと**企業選定に関連する理�
 	jsonStart := strings.Index(response, "{")
 	jsonEnd := strings.LastIndex(response, "}")
 	if jsonStart == -1 || jsonEnd == -1 {
-		return fmt.Errorf("invalid JSON response from AI")
+		fmt.Printf("Warning: No JSON found in AI response, skipping score update\n")
+		return nil // JSONが見つからない場合はスキップ（エラーにしない）
 	}
 	jsonStr := response[jsonStart : jsonEnd+1]
 
 	if err := json.Unmarshal([]byte(jsonStr), &scores); err != nil {
-		return fmt.Errorf("failed to parse AI response: %w", err)
+		fmt.Printf("Warning: failed to parse AI response JSON: %v\nResponse: %s\n", err, jsonStr)
+		return nil // 解析失敗してもスキップ（エラーにしない）
 	}
 
 	// スコアを更新（スコアが0でないもののみ）
@@ -464,10 +398,17 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		historyText += fmt.Sprintf("%s: %s\n", msg.Role, msg.Content)
 	}
 
-	// 既に聞いた質問のリスト
-	askedQuestionsText := "\n## 既に聞いた質問（これらと重複しないこと）\n"
-	for text := range askedTexts {
-		askedQuestionsText += fmt.Sprintf("- %s\n", text)
+	// 既に聞いた質問のリスト（重複防止を徹底）
+	askedQuestionsText := "\n## 【重要】既に聞いた質問（絶対に重複させないこと）\n"
+	if len(askedTexts) == 0 {
+		askedQuestionsText += "（まだ質問していません）\n"
+	} else {
+		questionCount := 0
+		for text := range askedTexts {
+			questionCount++
+			askedQuestionsText += fmt.Sprintf("%d. %s\n", questionCount, text)
+		}
+		askedQuestionsText += fmt.Sprintf("\n**上記%d個の質問と類似・重複する質問は絶対に生成しないでください**\n", questionCount)
 	}
 
 	// スコア状況の分析
@@ -596,13 +537,28 @@ D) 経験者に教えてもらいながら学ぶ」
 - ビジネスへの貢献
 - 保守性や拡張性」
 
-## 注意事項
-- 質問のみを返す（説明や前置きは不要）
-- 1つの質問で複数の観点を評価できるように工夫
-- 答えやすく、かつ企業選定に役立つ情報が得られる内容
-- 業界ID: %d, 職種ID: %d を考慮
+## 【重要】質問生成の制約
+1. **重複厳禁**: 既出質問と同じ内容や類似する質問は絶対に生成しないこと
+2. **簡潔明瞭**: 質問は1つのみ、説明や前置きは不要
+3. **回答可能性**: 学生が具体的に答えられる質問
+4. **目的の明確化**: 何を評価したいかを明確に
+5. **文脈の活用**: これまでの会話の流れを自然に継続
+6. **進捗表示禁止**: 質問に進捗状況（例: 📊 進捗: X/10カテゴリ評価済み）を含めないこと
 
-**質問のみ**を返してください。`,
+## 質問の例（良い例）
+
+**技術志向を評価する場合:**
+「プログラミングを学ぶとき、あなたはどのようなアプローチを取ることが多いですか？具体的な経験があれば教えてください。」
+
+**チームワークを評価する場合:**
+「これまでのプロジェクトや活動で、チームメンバーと協力して成果を出した経験について教えてください。あなたはどのような役割を果たしましたか？」
+
+**問題解決力を評価する場合:**
+「困難な課題に直面したとき、あなたはどのように解決策を見つけますか？最近の具体例があれば教えてください。」
+
+**業界ID: %d, 職種ID: %d を考慮して質問を生成してください。**
+
+質問のみを返してください。説明や補足は一切不要です。`,
 		historyText,
 		scoreAnalysis,
 		askedQuestionsText,
@@ -621,18 +577,74 @@ D) 経験者に教えてもらいながら学ぶ」
 	questionText = strings.TrimSpace(questionText)
 	questionText = strings.Trim(questionText, `"「」`)
 
-	// 重複チェック（念のため）
-	if askedTexts[questionText] {
-		// 非常に稀だが、AIが同じ質問を生成した場合は少し変更を加える
-		fmt.Printf("Warning: AI generated duplicate question, modifying\n")
-		questionText = questionText + "（あなたの経験から具体的に教えてください）"
+	// 重複チェック（完全一致および類似度チェック）を最大3回まで試行
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		isDuplicate := false
+		duplicateReason := ""
+
+		// 完全一致チェック
+		if askedTexts[questionText] {
+			isDuplicate = true
+			duplicateReason = fmt.Sprintf("完全一致: %s", questionText)
+		} else {
+			// 類似度チェック
+			for askedQ := range askedTexts {
+				similarity := calculateSimilarity(questionText, askedQ)
+				if similarity > 0.6 { // 閾値を0.6に下げて、より厳格に
+					isDuplicate = true
+					duplicateReason = fmt.Sprintf("類似度%.2f: %s", similarity, askedQ)
+					break
+				}
+			}
+		}
+
+		if !isDuplicate {
+			break // 重複なし、使用可能
+		}
+
+		fmt.Printf("Retry %d: Duplicate detected (%s)\n", attempt+1, duplicateReason)
+
+		// 再生成プロンプト
+		retryPrompt := fmt.Sprintf(`以下の質問は既に聞いているか類似しています：
+"%s"
+
+既に聞いた全ての質問：
+%s
+
+これらと完全に異なる新しい質問を生成してください。
+対象カテゴリ: %s
+**質問のみ**を返してください。説明は不要です。`,
+			questionText,
+			func() string {
+				var list string
+				count := 0
+				for q := range askedTexts {
+					count++
+					list += fmt.Sprintf("%d. %s\n", count, q)
+				}
+				return list
+			}(),
+			targetCategory)
+
+		questionText, err = s.aiClient.Responses(ctx, retryPrompt)
+		if err != nil {
+			return "", 0, err
+		}
+		questionText = strings.TrimSpace(questionText)
+		questionText = strings.Trim(questionText, `"「」`)
+
+		// 最後の試行で重複してもそのまま使用（無限ループ防止）
+		if attempt == maxRetries-1 {
+			fmt.Printf("Max retries reached, using question anyway: %s\n", questionText)
+		}
 	}
 
 	// AI生成質問をデータベースに保存
 	aiGenQuestion := &models.AIGeneratedQuestion{
 		UserID:       userID,
 		SessionID:    sessionID,
-		TemplateID:   0, // AI生成の場合は0
+		TemplateID:   nil, // AI生成の場合はNULL
 		QuestionText: questionText,
 		Weight:       7, // 戦略的質問は重み高め
 		IsAnswered:   false,
@@ -645,6 +657,135 @@ D) 経験者に教えてもらいながら学ぶ」
 
 	return questionText, aiGenQuestion.ID, nil
 }
+
+// calculateSimilarity 2つの文字列の類似度を計算（簡易版）
+func calculateSimilarity(s1, s2 string) float64 {
+	// 正規化
+	s1 = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(s1, " ", ""), "　", ""))
+	s2 = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(s2, " ", ""), "　", ""))
+
+	// 完全一致
+	if s1 == s2 {
+		return 1.0
+	}
+
+	// 一方が他方を含む場合
+	if strings.Contains(s1, s2) || strings.Contains(s2, s1) {
+		return 0.9
+	}
+
+	// 共通の単語数をカウント
+	words1 := extractKeywords(s1)
+	words2 := extractKeywords(s2)
+
+	if len(words1) == 0 || len(words2) == 0 {
+		return 0.0
+	}
+
+	commonCount := 0
+	for w1 := range words1 {
+		if words2[w1] {
+			commonCount++
+		}
+	}
+
+	// Jaccard係数
+	totalWords := len(words1) + len(words2) - commonCount
+	if totalWords == 0 {
+		return 0.0
+	}
+
+	return float64(commonCount) / float64(totalWords)
+}
+
+// extractKeywords 文字列から重要なキーワードを抽出
+func extractKeywords(s string) map[string]bool {
+	// ストップワードを除外
+	stopWords := map[string]bool{
+		"あなた": true, "ます": true, "です": true, "ですか": true, "ください": true,
+		"について": true, "として": true, "という": true, "どのよう": true,
+		"何": true, "どう": true, "いつ": true, "どこ": true, "誰": true,
+		"か": true, "の": true, "に": true, "を": true, "は": true, "が": true,
+		"で": true, "と": true, "や": true, "から": true, "まで": true,
+	}
+
+	keywords := make(map[string]bool)
+
+	// 3文字以上の単語を抽出（簡易版）
+	runes := []rune(s)
+	for i := 0; i < len(runes)-2; i++ {
+		word := string(runes[i : i+3])
+		if !stopWords[word] {
+			keywords[word] = true
+		}
+
+		// 4文字以上も試す
+		if i < len(runes)-3 {
+			word4 := string(runes[i : i+4])
+			if !stopWords[word4] {
+				keywords[word4] = true
+			}
+		}
+	}
+
+	return keywords
+}
+
+// handleSessionStart セッション開始時の初回質問を生成
+func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	fmt.Printf("Starting new session: %s\n", req.SessionID)
+
+	// ユーザー情報を取得
+	user, err := s.userRepo.GetUserByID(req.UserID)
+	userName := "あなた"
+	if err == nil && user != nil && user.Name != "" {
+		userName = user.Name
+	}
+
+	// 初回メッセージを生成
+	initialPrompt := fmt.Sprintf(`あなたは「ソフィア」という名前のIT業界専門キャリアエージェントです。
+これから就職活動中の学生と会話を始めます。
+
+## ユーザー情報
+- ユーザー名: %s
+
+## 最初のメッセージの方針
+- 簡潔に自己紹介する（「初めまして、ソフィアです」程度）
+- IT業界のどの分野に興味があるか聞く
+- シンプルで答えやすい質問にする
+
+**挨拶と質問を簡潔に生成してください。**`, userName)
+
+	response, err := s.aiClient.Responses(ctx, initialPrompt)
+	if err != nil {
+		// AIエラー時のフォールバック
+		response = fmt.Sprintf("初めまして、ソフィアです。IT業界のどの分野に興味がありますか？", userName)
+	}
+
+	response = strings.TrimSpace(response)
+	response = strings.Trim(response, `"「」`)
+
+	// 初回メッセージを保存
+	assistantMsg := &models.ChatMessage{
+		SessionID: req.SessionID,
+		UserID:    req.UserID,
+		Role:      "assistant",
+		Content:   response,
+	}
+	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+		return nil, fmt.Errorf("failed to save initial message: %w", err)
+	}
+
+	return &ChatResponse{
+		Response:            response,
+		IsComplete:          false,
+		TotalQuestions:      20,
+		AnsweredQuestions:   0,
+		EvaluatedCategories: 0,
+		TotalCategories:     10,
+	}, nil
+}
+
 func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, industryID, jobCategoryID uint) (string, uint, error) {
 	// 会話履歴を構築
 	historyText := ""
@@ -813,7 +954,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	aiGenQuestion := &models.AIGeneratedQuestion{
 		UserID:       userID,
 		SessionID:    sessionID,
-		TemplateID:   0, // AI生成の場合は0
+		TemplateID:   nil, // AI生成の場合はNULL
 		QuestionText: questionText,
 		Weight:       5, // デフォルト重み
 		IsAnswered:   false,
@@ -839,4 +980,9 @@ func (s *ChatService) GetUserScores(userID uint, sessionID string) ([]models.Use
 // GetTopRecommendations トップNの適性カテゴリを取得
 func (s *ChatService) GetTopRecommendations(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error) {
 	return s.userWeightScoreRepo.FindTopCategories(userID, sessionID, limit)
+}
+
+// GetUserChatSessions ユーザーのチャットセッション一覧を取得
+func (s *ChatService) GetUserChatSessions(userID uint) ([]models.ChatSession, error) {
+	return s.chatMessageRepo.GetUserSessions(userID)
 }

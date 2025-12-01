@@ -6,6 +6,7 @@ import {
   Drawer,
   List,
   ListItem,
+  ListItemButton,
   ListItemIcon,
   ListItemText,
   Typography,
@@ -24,8 +25,10 @@ import {
   Speed,
   EmojiEvents,
   Logout,
+  History,
 } from '@mui/icons-material'
 import { User } from '@/lib/auth'
+import { useRouter } from 'next/navigation'
 
 const DRAWER_WIDTH = 280
 
@@ -44,11 +47,15 @@ interface AnalysisSidebarProps {
 
 export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
   const [messageCount, setMessageCount] = useState(0)
+  const [questionCount, setQuestionCount] = useState(0)
+  const [totalQuestions, setTotalQuestions] = useState(15)
+  const router = useRouter()
   
-  // チャットの進行状況をリスンして進捗を更新
   useEffect(() => {
     const handleChatProgress = (event: CustomEvent) => {
       setMessageCount(event.detail.messageCount || 0)
+      setQuestionCount(event.detail.questionCount || 0)
+      setTotalQuestions(event.detail.totalQuestions || 15)
     }
     
     window.addEventListener('chatProgress', handleChatProgress as EventListener)
@@ -57,23 +64,22 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
     }
   }, [])
 
-  // メッセージ数に応じて進捗を計算
+  // 質問数に応じて進捗を計算（AIが動的に質問を生成）
   const calculateProgress = () => {
-    // 職種分析: メッセージ1-5 (0% → 100%)
-    // 興味分析: メッセージ6-10 (0% → 100%)
-    // 適性分析: メッセージ11-15 (0% → 100%)
-    // 将来分析: メッセージ16-20 (0% → 100%)
+    const progress = totalQuestions > 0 ? Math.min(100, Math.floor((questionCount / totalQuestions) * 100)) : 0
     
-    const jobProgress = Math.min(100, Math.floor((messageCount / 5) * 100))
-    const interestProgress = messageCount > 5 ? Math.min(100, Math.floor(((messageCount - 5) / 5) * 100)) : 0
-    const aptitudeProgress = messageCount > 10 ? Math.min(100, Math.floor(((messageCount - 10) / 5) * 100)) : 0
-    const futureProgress = messageCount > 15 ? Math.min(100, Math.floor(((messageCount - 15) / 5) * 100)) : 0
+    // 各段階の進捗を均等に配分
+    const stage1Progress = Math.min(100, Math.floor((progress / 25) * 100)) // 0-25%
+    const stage2Progress = progress > 25 ? Math.min(100, Math.floor(((progress - 25) / 25) * 100)) : 0 // 25-50%
+    const stage3Progress = progress > 50 ? Math.min(100, Math.floor(((progress - 50) / 25) * 100)) : 0 // 50-75%
+    const stage4Progress = progress > 75 ? Math.min(100, Math.floor(((progress - 75) / 25) * 100)) : 0 // 75-100%
     
     return {
-      job: jobProgress,
-      interest: interestProgress,
-      aptitude: aptitudeProgress,
-      future: futureProgress,
+      overall: progress,
+      job: stage1Progress,
+      interest: stage2Progress,
+      aptitude: stage3Progress,
+      future: stage4Progress,
     }
   }
 
@@ -158,10 +164,10 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
         <Divider sx={{ mb: 2 }} />
 
         <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
-          分析進捗
+          AI分析進捗
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          4段階の分析を実施中
+          質問: {questionCount}/{totalQuestions} 完了 ({progress.overall}%)
         </Typography>
 
         <List sx={{ p: 0 }}>
@@ -219,7 +225,7 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
             IT業界キャリアエージェント
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            4万社から最適な企業を選定 (バックエンド連携中)
+            AIが質問を動的に生成し、あなたの適性を分析
           </Typography>
           <Chip
             label="AI分析中"
@@ -228,6 +234,28 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
             sx={{ fontSize: '0.75rem' }}
           />
         </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        <ListItem disablePadding>
+          <ListItemButton
+            onClick={() => router.push('/profile')}
+            sx={{
+              borderRadius: 1,
+            }}
+          >
+            <ListItemIcon sx={{ minWidth: 36 }}>
+              <History color="primary" />
+            </ListItemIcon>
+            <ListItemText
+              primary="チャット履歴"
+              primaryTypographyProps={{
+                fontSize: '0.875rem',
+                fontWeight: 500,
+              }}
+            />
+          </ListItemButton>
+        </ListItem>
       </Box>
     </Drawer>
   )

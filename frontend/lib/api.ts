@@ -4,6 +4,10 @@ export interface ChatRequest {
     message: string
     industry_id: number
     job_category_id: number
+    chat_history?: Array<{
+        role: "user" | "assistant"
+        content: string
+    }>
 }
 
 export interface ChatResponse {
@@ -12,6 +16,8 @@ export interface ChatResponse {
     is_complete: boolean
     total_questions: number
     answered_questions: number
+    evaluated_categories?: number
+    total_categories?: number
     current_scores?: Array<{
         id: number
         user_id: number
@@ -99,4 +105,14 @@ export async function sendMessage(message: string): Promise<{ message: string }>
     } catch (error) {
         throw error
     }
+}
+
+export async function getCompanyDetail(companyId: number) {
+    const response = await fetch(`/api/companies/${companyId}`)
+    
+    if (!response.ok) {
+        throw new Error(`Company API error: ${response.statusText}`)
+    }
+    
+    return response.json()
 }
