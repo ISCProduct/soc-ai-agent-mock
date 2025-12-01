@@ -32,11 +32,12 @@ export default function ProfilePage() {
 
   const fetchSessions = async (userId: number) => {
     try {
-      const response = await fetch(`http://localhost:80/api/chat/sessions?user_id=${userId}`)
+      const response = await fetch(`http://localhost:8080/api/chat/sessions?user_id=${userId}`)
       if (!response.ok) {
         throw new Error('Failed to fetch sessions')
       }
       const data = await response.json()
+      console.log('[Profile] Fetched sessions:', data)
       setSessions(data || [])
     } catch (error) {
       console.error('Error fetching sessions:', error)

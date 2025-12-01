@@ -1,0 +1,23 @@
+# 依存関係
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js
+.next
+out
+dist
+
+# 環境変数ファイル
+.env*.local
+
+# テスト
+coverage
+.nyc_output
+
+# その他
+.DS_Store
+*.pem
+.idea
+.vscode

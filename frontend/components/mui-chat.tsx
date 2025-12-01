@@ -69,12 +69,14 @@ export function MuiChat() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [allPhasesCompleted, setAllPhasesCompleted] = useState(false)
   const [sessionId, setSessionId] = useState('')
   const [userId, setUserId] = useState<number>(0)
   const [questionCount, setQuestionCount] = useState(0)
   const [totalQuestions, setTotalQuestions] = useState(15)
   const [mounted, setMounted] = useState(false)
   const [showCompletionModal, setShowCompletionModal] = useState(false)
+  const [showEndChatModal, setShowEndChatModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -94,12 +96,25 @@ export function MuiChat() {
       const currentUserId = user ? user.user_id : 1
       setUserId(currentUserId)
       
-      // セッションIDの生成または復元（sessionStorageのみ使用）
-      let storedSessionId = sessionStorage.getItem('chatSessionId')
+      // セッションIDの取得優先順位:
+      // 1. localStorageから（履歴ページから選択した場合）
+      // 2. sessionStorageから（ページリロード時の復元）
+      // 3. 新規生成
+      let storedSessionId = localStorage.getItem('currentSessionId')
+      if (storedSessionId) {
+        console.log('[MUI Chat] Loading session from localStorage:', storedSessionId)
+        // localStorageから読み込んだ後は削除
+        localStorage.removeItem('currentSessionId')
+      } else {
+        storedSessionId = sessionStorage.getItem('chatSessionId')
+      }
+      
       if (!storedSessionId) {
         storedSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
-        sessionStorage.setItem('chatSessionId', storedSessionId)
+        console.log('[MUI Chat] Created new session:', storedSessionId)
       }
+      
+      sessionStorage.setItem('chatSessionId', storedSessionId)
       setSessionId(storedSessionId)
       
       // バックエンドからチャット履歴を取得
@@ -126,20 +141,16 @@ export function MuiChat() {
             setAnalysisComplete(true)
           }
         } else {
-          // 履歴がない場合: バックエンドでセッションを開始
-          console.log('[MUI Chat] No history found, starting new session')
-          const initialResponse = await sendChatMessage({
-            user_id: currentUserId,
-            session_id: storedSessionId,
-            message: 'START_SESSION',
-            industry_id: 1,
-            job_category_id: 1,
-          })
+          // 履歴がない場合: AIのあいさつメッセージを表示（バックエンドには送信しない）
+          console.log('[MUI Chat] No history found, displaying initial greeting')
+          
+          // AIのあいさつメッセージ（フロントエンドのみで表示）
+          const greetingMessage = 'こんにちは！IT業界への就職をサポートする適性診断AIです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は**AIが動的に生成**するため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者'
           
           const initialMessage: Message = {
             id: '0',
             role: 'assistant',
-            content: initialResponse.response,
+            content: greetingMessage,
             timestamp: new Date(),
           }
           setMessages([initialMessage])
@@ -201,28 +212,37 @@ export function MuiChat() {
         setQuestionCount(newCount)
         setTotalQuestions(response.total_questions ?? 15)
         
-        // 進捗状況を親コンポーネントに通知
-        window.dispatchEvent(new CustomEvent('chatProgress', { 
-          detail: { 
-            messageCount: newMessages.length,
-            questionCount: newCount,
-            totalQuestions: response.total_questions ?? 15,
-          } 
-        }))
+        // 進捗状況を親コンポーネントに通知（非同期で実行）
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('chatProgress', { 
+            detail: { 
+              messageCount: newMessages.length,
+              questionCount: newCount,
+              totalQuestions: response.total_questions ?? 15,
+            } 
+          }))
+        }, 0)
         
         // **重要: バックエンドのis_completeのみを信頼**
         // バックエンドがtrueを返した時は分析完了状態にする
         console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
         if (response.is_complete === true) {
           console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
+          
+          // 全フェーズ完了かどうかをチェック
+          const allCompleted = response.all_phases?.every((phase: any) => phase.is_completed) ?? false
+          console.log('[MUI Chat] All phases completed:', allCompleted)
+          
           setTimeout(() => {
             setAnalysisComplete(true)
+            setAllPhasesCompleted(allCompleted)
             setShowCompletionModal(true)
           }, 1000)
         } else {
           console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
           // 明示的にfalseを設定
           setAnalysisComplete(false)
+          setAllPhasesCompleted(false)
         }
         
         return newMessages
@@ -264,9 +284,37 @@ export function MuiChat() {
     setMessages([initialMessage])
     localStorage.setItem('chatMessages', JSON.stringify([initialMessage]))
     
-    window.dispatchEvent(new CustomEvent('chatProgress', { 
-      detail: { messageCount: 1, questionCount: 0, totalQuestions: 15 } 
-    }))
+    // 進捗状況を親コンポーネントに通知（非同期で実行）
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('chatProgress', { 
+        detail: { messageCount: 1, questionCount: 0, totalQuestions: 15 } 
+      }))
+    }, 0)
+  }
+
+  const handleEndChat = () => {
+    setShowEndChatModal(true)
+  }
+
+  const handleConfirmEndChat = () => {
+    // セッションとキャッシュを完全にクリア
+    sessionStorage.removeItem('chatSessionId')
+    sessionStorage.removeItem('chatMessages')
+    localStorage.removeItem('chatMessages')
+    
+    // チャット履歴のキャッシュも削除
+    const currentSessionId = sessionStorage.getItem('chatSessionId')
+    if (currentSessionId) {
+      localStorage.removeItem(`chat_cache_${currentSessionId}`)
+    }
+    localStorage.removeItem('chat_session_id')
+    
+    // ページをリロードして新しいセッションを開始
+    window.location.reload()
+  }
+
+  const handleCancelEndChat = () => {
+    setShowEndChatModal(false)
   }
 
   const handleViewResults = () => {
@@ -275,7 +323,21 @@ export function MuiChat() {
   }
 
   const handleContinueChat = () => {
+    console.log('[MUI Chat] Continuing chat after completion')
+    console.log('[MUI Chat] Before reset - analysisComplete:', analysisComplete)
     setShowCompletionModal(false)
+    setAnalysisComplete(false)
+    console.log('[MUI Chat] After reset - modal closed, analysisComplete set to false')
+    // 入力フィールドを有効化するためにフォーカス
+    setTimeout(() => {
+      const inputElement = document.querySelector('input[type="text"]') as HTMLInputElement
+      if (inputElement) {
+        console.log('[MUI Chat] Input field found, focusing')
+        inputElement.focus()
+      } else {
+        console.log('[MUI Chat] Input field not found')
+      }
+    }, 100)
   }
 
   const jobOptions = [
@@ -294,7 +356,7 @@ export function MuiChat() {
       {/* 分析完了モーダル */}
       <Dialog
         open={showCompletionModal}
-        onClose={handleContinueChat}
+        onClose={allPhasesCompleted ? undefined : handleContinueChat}
         maxWidth="sm"
         fullWidth
         PaperProps={{
@@ -311,21 +373,25 @@ export function MuiChat() {
         </DialogTitle>
         <DialogContent sx={{ pt: 2, pb: 2 }}>
           <Typography variant="body1" sx={{ textAlign: 'center', mb: 2 }}>
-            あなたの適性を分析し、最適な企業をマッチングしました。
+            {allPhasesCompleted 
+              ? 'すべての分析が完了しました！あなたに最適な企業をマッチングしました。'
+              : 'あなたの適性を分析し、最適な企業をマッチングしました。'}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
             結果ページで詳細な企業情報を確認できます。
           </Typography>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'center', gap: 2, pb: 2 }}>
-          <Button
-            onClick={handleContinueChat}
-            variant="outlined"
-            size="large"
-            sx={{ minWidth: 140 }}
-          >
-            チャットを続ける
-          </Button>
+          {!allPhasesCompleted && (
+            <Button
+              onClick={handleContinueChat}
+              variant="outlined"
+              size="large"
+              sx={{ minWidth: 140 }}
+            >
+              チャットを続ける
+            </Button>
+          )}
           <Button
             onClick={handleViewResults}
             variant="contained"
@@ -333,6 +399,53 @@ export function MuiChat() {
             sx={{ minWidth: 140 }}
           >
             結果を見る
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* チャット終了確認モーダル */}
+      <Dialog
+        open={showEndChatModal}
+        onClose={handleCancelEndChat}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            p: 2,
+          }
+        }}
+      >
+        <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
+          <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'warning.main' }}>
+            ⚠️ チャットを終了しますか？
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2, pb: 2 }}>
+          <Typography variant="body1" sx={{ textAlign: 'center', mb: 2 }}>
+            チャットを終了すると、現在の会話履歴が削除されます。
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+            新しいセッションで最初からやり直すことになりますが、よろしいですか？
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', gap: 2, pb: 2 }}>
+          <Button
+            onClick={handleCancelEndChat}
+            variant="outlined"
+            size="large"
+            sx={{ minWidth: 140 }}
+          >
+            キャンセル
+          </Button>
+          <Button
+            onClick={handleConfirmEndChat}
+            variant="contained"
+            color="error"
+            size="large"
+            sx={{ minWidth: 140 }}
+          >
+            終了する
           </Button>
         </DialogActions>
       </Dialog>
@@ -350,15 +463,28 @@ export function MuiChat() {
           p: 2,
           borderBottom: '1px solid #e0e0e0',
           backgroundColor: '#fff',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
         }}
       >
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          IT業界キャリアエージェント
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          AI適性診断 - {questionCount}/{totalQuestions} 問完了 
-          {questionCount > 0 && ` (${Math.round((questionCount / totalQuestions) * 100)}%)`}
-        </Typography>
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+            IT業界キャリアエージェント
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            AI適性診断 - {questionCount}/{totalQuestions} 問完了 
+            {questionCount > 0 && ` (${Math.round((questionCount / totalQuestions) * 100)}%)`}
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={handleEndChat}
+          sx={{ minWidth: '120px' }}
+        >
+          チャットを終了
+        </Button>
       </Box>
 
       <Box
@@ -504,6 +630,7 @@ export function MuiChat() {
       >
         {analysisComplete ? (
           <Box sx={{ textAlign: 'center' }}>
+            {console.log('[MUI Chat] Rendering completion button (analysisComplete=true)')}
             <Button
               variant="contained"
               size="large"
@@ -523,6 +650,7 @@ export function MuiChat() {
           </Box>
         ) : (
           <Box sx={{ display: 'flex', gap: 1 }}>
+            {console.log('[MUI Chat] Rendering input field (analysisComplete=false)')}
             <TextField
               fullWidth
               placeholder="メッセージを入力..."

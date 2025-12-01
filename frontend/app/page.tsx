@@ -1,37 +1,35 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Box } from '@mui/material'
 import { AnalysisSidebar } from '@/components/analysis-sidebar'
 import { MuiChat } from '@/components/mui-chat'
-import { LoginPage } from '@/components/login-page'
-import { authService, User, AuthResponse } from '@/lib/auth'
+import { authService, User } from '@/lib/auth'
 
 export default function Home() {
+  const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
+    if (!storedUser) {
+      router.replace('/login')
+      return
+    }
     setUser(storedUser)
     setLoading(false)
-  }, [])
-
-  const handleAuthSuccess = (authResponse: AuthResponse) => {
-    setUser({ ...authResponse, user_id: Number(authResponse.user_id) })
-  }
+  }, [router])
 
   const handleLogout = () => {
     authService.logout()
     setUser(null)
+    router.push('/login')
   }
 
-  if (loading) {
+  if (loading || !user) {
     return null
-  }
-
-  if (!user) {
-    return <LoginPage onAuthSuccess={handleAuthSuccess} />
   }
 
   return (

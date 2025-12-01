@@ -123,7 +123,15 @@ export const authService = {
   },
 
   logout() {
+    // ユーザー情報とトークンを削除
     localStorage.removeItem('user')
     localStorage.removeItem('token')
+    
+    // チャットキャッシュを削除
+    const sessionId = localStorage.getItem('chat_session_id')
+    if (sessionId) {
+      localStorage.removeItem(`chat_cache_${sessionId}`)
+    }
+    localStorage.removeItem('chat_session_id')
   },
 }

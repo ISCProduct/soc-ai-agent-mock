@@ -87,12 +87,6 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
 
   const analysisSteps: AnalysisStep[] = [
     {
-      id: 'backend',
-      label: 'バックエンド連携',
-      icon: <Speed />,
-      completed: true,
-    },
-    {
       id: 'job',
       label: progress.job === 100 ? '職種分析完了' : '職種分析進行中',
       icon: <Work />,

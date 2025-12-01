@@ -1,3 +1,5 @@
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'
+
 export interface ChatRequest {
     user_id: number
     session_id: string
@@ -40,7 +42,7 @@ export interface ChatHistory {
 }
 
 export async function sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
-    const response = await fetch('/api/chat', {
+    const response = await fetch(`${BACKEND_URL}/api/chat`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -49,14 +51,16 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
     })
 
     if (!response.ok) {
-        throw new Error(`Chat API error: ${response.statusText}`)
+        const errorText = await response.text().catch(() => response.statusText)
+        console.error('[API] Chat error:', response.status, errorText)
+        throw new Error(`Chat API error: ${errorText || response.statusText}`)
     }
 
     return response.json()
 }
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
-    const response = await fetch(`/api/chat/history?session_id=${sessionId}`)
+    const response = await fetch(`${BACKEND_URL}/api/chat/history?session_id=${sessionId}`)
 
     if (!response.ok) {
         throw new Error(`History API error: ${response.statusText}`)
@@ -66,7 +70,7 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
 }
 
 export async function getUserScores(userId: number, sessionId: string) {
-    const response = await fetch(`/api/chat/scores?user_id=${userId}&session_id=${sessionId}`)
+    const response = await fetch(`${BACKEND_URL}/api/chat/scores?user_id=${userId}&session_id=${sessionId}`)
 
     if (!response.ok) {
         throw new Error(`Scores API error: ${response.statusText}`)
@@ -77,7 +81,7 @@ export async function getUserScores(userId: number, sessionId: string) {
 
 export async function getRecommendations(userId: number, sessionId: string, limit = 5) {
     const response = await fetch(
-        `/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
+        `${BACKEND_URL}/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
     )
 
     if (!response.ok) {
@@ -108,7 +112,7 @@ export async function sendMessage(message: string): Promise<{ message: string }>
 }
 
 export async function getCompanyDetail(companyId: number) {
-    const response = await fetch(`/api/companies/${companyId}`)
+    const response = await fetch(`${BACKEND_URL}/api/companies/${companyId}`)
     
     if (!response.ok) {
         throw new Error(`Company API error: ${response.statusText}`)

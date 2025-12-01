@@ -48,7 +48,7 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ctxReq, cancel := context.WithTimeout(ctx, 30*time.Second)
 
 		resp, err := cli.c.CreateChatCompletion(ctxReq, openai.ChatCompletionRequest{
 			Model: model,
@@ -70,6 +70,7 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 		}
 
 		lastErr = err
+		println("OpenAI API error (attempt", attempt, "):", err.Error())
 		time.Sleep(time.Duration(attempt) * time.Second)
 	}
 

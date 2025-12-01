@@ -47,15 +47,20 @@ services:
   frontend: # サービス名を追加
     build:
       context: ./frontend # ./frontend をルートとして使用（従来の構造を維持）
-      dockerfile: ${DOCKERFILE:-Dockerfile} # Dockerfile名もデフォルト設定を使用
+      dockerfile: Dockerfile
     container_name: soc-ai-agent-frontend
     restart: 'always'
-    # volumes:
-    #   - ./frontend:/app  # 本番ビルド時は不要（開発時のみ）
+    volumes:
+      # ホットリロード用にソースコードをマウント（本番ではコメントアウト）
+      - ./frontend:/app
+      - /app/node_modules  # node_modulesは除外
+      - /app/.next  # .nextディレクトリも除外（コンテナ内で生成）
     ports:
       - "3000:3000"
-    env_file:
-      - ${ENV_FILE:-./Backend/.env}
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
+      - BACKEND_URL=${BACKEND_URL:-http://app:8080}
     depends_on:
       app:
         condition: service_started
