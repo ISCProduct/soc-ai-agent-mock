@@ -34,6 +34,11 @@ func SeedData(db *gorm.DB) error {
 		return err
 	}
 
+	// 分析フェーズデータ
+	if err := seedAnalysisPhases(db); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -478,4 +483,49 @@ func seedDetailedQuestions(db *gorm.DB) error {
 	}
 
 	return db.Create(&questions).Error
+}
+
+func seedAnalysisPhases(db *gorm.DB) error {
+	var count int64
+	db.Model(&AnalysisPhase{}).Count(&count)
+	if count > 0 {
+		return nil
+	}
+
+	phases := []AnalysisPhase{
+		{
+			PhaseName:    "job_analysis",
+			DisplayName:  "職種分析",
+			PhaseOrder:   1,
+			Description:  "ユーザーが興味を持つIT職種や分野を特定し、基本的な方向性を確認します。",
+			MinQuestions: 2,
+			MaxQuestions: 4,
+		},
+		{
+			PhaseName:    "interest_analysis",
+			DisplayName:  "興味分析",
+			PhaseOrder:   2,
+			Description:  "技術的な興味や学習スタイル、好きな作業内容などを深掘りします。",
+			MinQuestions: 3,
+			MaxQuestions: 5,
+		},
+		{
+			PhaseName:    "aptitude_analysis",
+			DisplayName:  "適性分析",
+			PhaseOrder:   3,
+			Description:  "コミュニケーション能力、チームワーク、問題解決力などの適性を評価します。",
+			MinQuestions: 3,
+			MaxQuestions: 5,
+		},
+		{
+			PhaseName:    "future_analysis",
+			DisplayName:  "将来分析",
+			PhaseOrder:   4,
+			Description:  "キャリアビジョンや将来の目標、働き方の希望などを確認します。",
+			MinQuestions: 2,
+			MaxQuestions: 4,
+		},
+	}
+
+	return db.Create(&phases).Error
 }

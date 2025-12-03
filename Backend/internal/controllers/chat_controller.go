@@ -36,6 +36,8 @@ func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := c.chatService.ProcessChat(r.Context(), req)
 	if err != nil {
+		// エラーログを詳細に出力
+		println("Error in ProcessChat:", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

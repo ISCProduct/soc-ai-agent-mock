@@ -64,7 +64,7 @@ export function JobAgentChat() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
   const [userScores, setUserScores] = useState<UserScore[]>([])
-  const [progress, setProgress] = useState({ questions: 0, total: 20, categories: 0, totalCategories: 10 })
+  const [progress, setProgress] = useState({ questions: 0, total: 15, categories: 0, totalCategories: 10 })
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // メッセージが更新されたらキャッシュに保存
@@ -127,7 +127,7 @@ export function JobAgentChat() {
             // 進捗状況を計算（スコアの数から）
             setProgress({
               questions: history.length,
-              total: 20,
+              total: 15,
               categories: scores.length,
               totalCategories: 10,
             })
@@ -136,9 +136,9 @@ export function JobAgentChat() {
           console.error("Failed to load scores:", error)
         }
         
-        // 完了状態をチェック
+        // 完了状態をチェック（診断完了の特別なメッセージのみ）
         const lastMessage = history[history.length - 1]
-        if (lastMessage.role === "assistant" && lastMessage.content.includes("完了")) {
+        if (lastMessage.role === "assistant" && lastMessage.content.includes("✅ 診断が完了しました")) {
           setIsComplete(true)
         }
       } else {
@@ -287,6 +287,17 @@ export function JobAgentChat() {
     window.location.reload()
   }
 
+  const handleEndChat = () => {
+    // セッションとキャッシュを完全にクリア
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`chat_cache_${sessionId}`)
+      localStorage.removeItem('chat_session_id')
+    }
+    
+    // ページをリロードして新しいセッションを開始
+    window.location.reload()
+  }
+
   const handleAnalysisComplete = () => {
     setIsAnalyzing(false)
     setIsComplete(true)
@@ -319,26 +330,38 @@ export function JobAgentChat() {
                 </div>
               </div>
               
-              {/* 進捗状況表示 */}
-              {progress.categories > 0 && (
-                <div className="flex flex-col items-end gap-1.5 min-w-[200px]">
-                  <div className="flex items-center gap-2">
-                    <div className="text-sm font-semibold text-primary">
-                      診断進行度
+              <div className="flex items-center gap-3">
+                {/* 進捗状況表示 */}
+                {progress.categories > 0 && (
+                  <div className="flex flex-col items-end gap-1.5 min-w-[200px]">
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-semibold text-primary">
+                        診断進行度
+                      </div>
+                      <div className="text-lg font-bold text-primary">
+                        {Math.round((progress.categories / progress.totalCategories) * 100)}%
+                      </div>
                     </div>
-                    <div className="text-lg font-bold text-primary">
-                      {Math.round((progress.categories / progress.totalCategories) * 100)}%
+                    <div className="text-xs text-muted-foreground text-right">
+                      {progress.categories}/{progress.totalCategories} カテゴリ評価済み
                     </div>
+                    <Progress 
+                      value={(progress.categories / progress.totalCategories) * 100} 
+                      className="w-full h-2.5"
+                    />
                   </div>
-                  <div className="text-xs text-muted-foreground text-right">
-                    {progress.categories}/{progress.totalCategories} カテゴリ評価済み
-                  </div>
-                  <Progress 
-                    value={(progress.categories / progress.totalCategories) * 100} 
-                    className="w-full h-2.5"
-                  />
-                </div>
-              )}
+                )}
+                
+                {/* チャットを終了ボタン */}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleEndChat}
+                  className="text-sm"
+                >
+                  チャットを終了
+                </Button>
+              </div>
             </div>
           </div>
 

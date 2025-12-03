@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://app:80'
+const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 

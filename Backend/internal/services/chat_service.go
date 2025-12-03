@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type ChatService struct {
@@ -17,6 +18,8 @@ type ChatService struct {
 	userWeightScoreRepo     *repositories.UserWeightScoreRepository
 	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository
 	userRepo                *repositories.UserRepository
+	phaseRepo               *repositories.AnalysisPhaseRepository
+	progressRepo            *repositories.UserAnalysisProgressRepository
 }
 
 func NewChatService(
@@ -26,6 +29,8 @@ func NewChatService(
 	userWeightScoreRepo *repositories.UserWeightScoreRepository,
 	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository,
 	userRepo *repositories.UserRepository,
+	phaseRepo *repositories.AnalysisPhaseRepository,
+	progressRepo *repositories.UserAnalysisProgressRepository,
 ) *ChatService {
 	return &ChatService{
 		aiClient:                aiClient,
@@ -34,6 +39,8 @@ func NewChatService(
 		userWeightScoreRepo:     userWeightScoreRepo,
 		aiGeneratedQuestionRepo: aiGeneratedQuestionRepo,
 		userRepo:                userRepo,
+		phaseRepo:               phaseRepo,
+		progressRepo:            progressRepo,
 	}
 }
 
@@ -51,11 +58,26 @@ type ChatResponse struct {
 	Response            string                   `json:"response"`
 	QuestionWeightID    uint                     `json:"question_weight_id,omitempty"`
 	CurrentScores       []models.UserWeightScore `json:"current_scores,omitempty"`
+	CurrentPhase        *PhaseProgress           `json:"current_phase,omitempty"`
+	AllPhases           []PhaseProgress          `json:"all_phases,omitempty"`
 	IsComplete          bool                     `json:"is_complete"`
 	TotalQuestions      int                      `json:"total_questions"`
 	AnsweredQuestions   int                      `json:"answered_questions"`
 	EvaluatedCategories int                      `json:"evaluated_categories"`
 	TotalCategories     int                      `json:"total_categories"`
+}
+
+// PhaseProgress フェーズ進捗情報
+type PhaseProgress struct {
+	PhaseID         uint    `json:"phase_id"`
+	PhaseName       string  `json:"phase_name"`
+	DisplayName     string  `json:"display_name"`
+	QuestionsAsked  int     `json:"questions_asked"`
+	ValidAnswers    int     `json:"valid_answers"`
+	CompletionScore float64 `json:"completion_score"`
+	IsCompleted     bool    `json:"is_completed"`
+	MinQuestions    int     `json:"min_questions"`
+	MaxQuestions    int     `json:"max_questions"`
 }
 
 // ProcessChat チャット処理のメインロジック
@@ -80,6 +102,50 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	history, err := s.chatMessageRepo.FindRecentBySessionID(req.SessionID, 100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chat history: %w", err)
+	}
+
+	// 2.5. 回答の妥当性チェック
+	handled, response, err := s.checkAnswerValidity(ctx, history, req.Message, req.UserID, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2.6. 現在のフェーズを取得または開始
+	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
+	if err != nil {
+		// 全フェーズ完了の場合は特別な応答を返す
+		if err.Error() == "all phases completed" {
+			allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+			return &ChatResponse{
+				Response:            "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。",
+				IsComplete:          true,
+				TotalQuestions:      15,
+				AnsweredQuestions:   15,
+				EvaluatedCategories: 10,
+				TotalCategories:     10,
+				AllPhases:           allPhases,
+				CurrentPhase:        currentPhaseInfo,
+			}, nil
+		}
+		return nil, fmt.Errorf("failed to get current phase: %w", err)
+	}
+
+	// 2.7. フェーズ進捗を更新
+	if err := s.updatePhaseProgress(currentPhase, !handled); err != nil {
+		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
+	}
+
+	if handled {
+		// 無効な回答として処理済み -> レスポンスを返して終了
+		allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+		return &ChatResponse{
+			Response:          response,
+			IsComplete:        false,
+			TotalQuestions:    15,
+			AnsweredQuestions: len(history) / 2,
+			AllPhases:         allPhases,
+			CurrentPhase:      currentPhaseInfo,
+		}, nil
 	}
 
 	// 3. ユーザーの回答から重み係数を判定・更新
@@ -187,12 +253,37 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	fmt.Printf("Generating strategic question with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
-	aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID)
+	aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID, currentPhase)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate question: %w", err)
 	}
 
-	// 5. AIの応答を保存
+	// 5. 質問数をカウントして終了判定
+	answeredQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
+	if err != nil {
+		fmt.Printf("Warning: failed to count answered questions: %v\n", err)
+	}
+
+	// evaluatedCategoriesは既に上で定義済み（124行目）なので再利用
+
+	totalQuestions := 15 // 最低15問で診断完了（全10カテゴリ評価が条件）
+	answeredCount := len(answeredQuestions)
+	allCategoriesEvaluated := len(evaluatedCategories) >= 10
+
+	// 全カテゴリが評価され、かつ十分な質問数に達した場合のみ完了
+	// または、20問に達した場合は強制完了
+	isComplete := (answeredCount >= totalQuestions && allCategoriesEvaluated) || answeredCount >= 20
+
+	fmt.Printf("Diagnosis progress: %d/%d questions, %d/10 categories evaluated, complete: %v\n",
+		answeredCount, totalQuestions, len(evaluatedCategories), isComplete)
+
+	// 診断完了時のメッセージを追加（保存前に）
+	if isComplete {
+		completionMessage := "\n\n✅ 診断が完了しました！あなたの適性を分析し、最適な企業をマッチングします。"
+		aiResponse = aiResponse + completionMessage
+	}
+
+	// 6. AIの応答を保存
 	assistantMsg := &models.ChatMessage{
 		SessionID:        req.SessionID,
 		UserID:           req.UserID,
@@ -204,42 +295,23 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to save assistant message: %w", err)
 	}
 
-	// 6. 現在のスコアを取得
+	// 7. 現在のスコアを取得
 	finalScores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scores: %w", err)
 	}
 
-	// 7. 質問数をカウントして終了判定
-	answeredQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	if err != nil {
-		fmt.Printf("Warning: failed to count answered questions: %v\n", err)
-	}
-
-	// evaluatedCategoriesは既に上で定義済み（124行目）なので再利用
-
-	totalQuestions := 20 // 最低20問で診断完了
-	answeredCount := len(answeredQuestions)
-	allCategoriesEvaluated := len(evaluatedCategories) >= 10
-
-	// 全カテゴリが評価され、かつ十分な質問数に達した場合のみ完了
-	isComplete := answeredCount >= totalQuestions && allCategoriesEvaluated
-
-	fmt.Printf("Diagnosis progress: %d/%d questions, %d/10 categories evaluated, complete: %v\n",
-		answeredCount, totalQuestions, len(evaluatedCategories), isComplete)
-
-	// 診断完了時のメッセージを追加
-	if isComplete {
-		completionMessage := "\n\n✅ 診断が完了しました！あなたの適性を分析し、最適な企業をマッチングします。"
-		aiResponse = aiResponse + completionMessage
-	}
+	// フェーズ情報を構築
+	allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 
 	return &ChatResponse{
 		Response:            aiResponse,
 		QuestionWeightID:    questionWeightID,
 		CurrentScores:       finalScores,
+		CurrentPhase:        currentPhaseInfo,
+		AllPhases:           allPhases,
 		IsComplete:          isComplete,
-		TotalQuestions:      totalQuestions,
+		TotalQuestions:      15,
 		AnsweredQuestions:   answeredCount,
 		EvaluatedCategories: len(evaluatedCategories),
 		TotalCategories:     10,
@@ -391,7 +463,7 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 }
 
 // generateStrategicQuestion AIが戦略的に次の質問を生成
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint) (string, uint, error) {
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, currentPhase *models.UserAnalysisProgress) (string, uint, error) {
 	// 会話履歴を構築
 	historyText := ""
 	for _, msg := range history {
@@ -471,9 +543,22 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		"ビジネス思考・目標志向": "ビジネス価値理解、成果志向 → 事業会社か受託開発か",
 	}
 
+	// フェーズ情報を追加
+	phaseContext := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		phaseContext = fmt.Sprintf(`
+## 現在の分析フェーズ: %s
+%s
+このフェーズでは%dつ〜%dつの質問を行います。現在%d個目の質問です。
+フェーズの目的に沿った質問を生成してください。
+`, currentPhase.Phase.DisplayName, currentPhase.Phase.Description,
+			currentPhase.Phase.MinQuestions, currentPhase.Phase.MaxQuestions,
+			currentPhase.QuestionsAsked+1)
+	}
+
 	prompt := fmt.Sprintf(`あなたは就職活動の適性診断と企業マッチングの専門家です。
 これまでの会話と評価状況を分析し、**企業選定に直結する戦略的な質問**を1つ生成してください。
-
+%s
 ## これまでの会話
 %s
 
@@ -559,6 +644,7 @@ D) 経験者に教えてもらいながら学ぶ」
 **業界ID: %d, 職種ID: %d を考慮して質問を生成してください。**
 
 質問のみを返してください。説明や補足は一切不要です。`,
+		phaseContext,
 		historyText,
 		scoreAnalysis,
 		askedQuestionsText,
@@ -779,7 +865,7 @@ func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (
 	return &ChatResponse{
 		Response:            response,
 		IsComplete:          false,
-		TotalQuestions:      20,
+		TotalQuestions:      15,
 		AnsweredQuestions:   0,
 		EvaluatedCategories: 0,
 		TotalCategories:     10,
@@ -985,4 +1071,290 @@ func (s *ChatService) GetTopRecommendations(userID uint, sessionID string, limit
 // GetUserChatSessions ユーザーのチャットセッション一覧を取得
 func (s *ChatService) GetUserChatSessions(userID uint) ([]models.ChatSession, error) {
 	return s.chatMessageRepo.GetUserSessions(userID)
+}
+
+// checkAnswerValidity: 直近の assistant メッセージが質問かを判定し、ユーザー入力がその質問に対する有効な回答かを判定する。
+// 無効な場合はアシスタントの「この質問には回答できません」メッセージを保存して true を返す。
+// 戻り値: handled(bool) - true の場合は処理を終了してよい、response(string) - 保存したアシスタント応答（ある場合）、error
+func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.ChatMessage, userMessage string, userID uint, sessionID string) (bool, string, error) {
+	// 直近の assistant メッセージを探す
+	var lastAssistant *models.ChatMessage
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			lastAssistant = &history[i]
+			break
+		}
+	}
+
+	// 直近が質問でないなら検証不要
+	if lastAssistant == nil || !isQuestion(lastAssistant.Content) {
+		return false, "", nil
+	}
+
+	// ユーザー回答が質問に対する答えかどうか判定
+	isValid, err := s.validateAnswerRelevance(ctx, lastAssistant.Content, userMessage)
+	if err != nil {
+		// AI判定エラー時は基本的な検証のみ
+		fmt.Printf("Warning: AI validation failed: %v, using basic validation\n", err)
+		isValid = isLikelyAnswer(userMessage, lastAssistant.Content)
+	}
+
+	if isValid {
+		// 有効な回答と判断 -> 既存の処理に進める
+		return false, "", nil
+	}
+
+	// 無効な回答と判断 -> 「この質問には回答できません」メッセージを保存して返す
+	assistantText := "この質問には回答できません。質問に沿った回答をお願いします。"
+	assistantMsg := &models.ChatMessage{
+		SessionID: sessionID,
+		UserID:    userID,
+		Role:      "assistant",
+		Content:   assistantText,
+	}
+	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+		return true, "", fmt.Errorf("failed to save assistant message for invalid answer: %w", err)
+	}
+	return true, assistantText, nil
+}
+
+// isQuestion: アシスタントのメッセージが「質問」であるか粗く判定する
+func isQuestion(text string) bool {
+	txt := strings.TrimSpace(text)
+	if txt == "" {
+		return false
+	}
+	// 疑問符があれば質問とみなす
+	if strings.ContainsAny(txt, "？?") {
+		return true
+	}
+	// 日本語の疑問語が含まれるか確認
+	questionWords := []string{"どのよう", "どの", "どう", "なぜ", "なに", "何", "いつ", "どれ", "どこ", "どなた", "どんな", "〜ますか", "ますか", "でしょうか"}
+	for _, w := range questionWords {
+		if strings.Contains(txt, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAnswerRelevance: AIを使って回答が質問に沿っているかを判定
+func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, answer string) (bool, error) {
+	prompt := fmt.Sprintf(`あなたは回答の妥当性を判定する専門家です。
+以下の質問に対する回答が適切かどうかを判定してください。
+
+## 質問
+%s
+
+## ユーザーの回答
+%s
+
+## 判定基準
+1. 回答が質問の内容に直接関連しているか
+2. 質問が求めている情報を提供しているか
+3. 単なる挨拶や無関係な内容でないか
+4. 「わからない」のみの回答でないか（説明があれば可）
+
+## 有効な回答の例
+- 質問の内容に沿った具体的な説明や経験
+- 質問に対する明確な立場や意見の表明
+- 質問の選択肢に対する回答
+- 「わからない」でも理由や背景の説明がある場合
+
+## 無効な回答の例
+- 挨拶のみ（「こんにちは」「よろしく」など）
+- 全く関係ない話題
+- 「わからない」「特にない」のみの短い回答
+- 質問内容を無視した回答
+
+## 出力形式
+有効な場合: "VALID"
+無効な場合: "INVALID"
+
+判定結果のみを1単語で返してください。`, question, answer)
+
+	response, err := s.aiClient.Responses(ctx, prompt)
+	if err != nil {
+		return false, err
+	}
+
+	response = strings.TrimSpace(strings.ToUpper(response))
+	return strings.Contains(response, "VALID"), nil
+}
+
+// isLikelyAnswer: ユーザーの入力が質問に対する「回答らしい」かを判定する簡易ロジック（フォールバック用）
+func isLikelyAnswer(answer, question string) bool {
+	a := strings.TrimSpace(answer)
+	if len([]rune(a)) < 5 {
+		// 短すぎる応答は無効とする
+		return false
+	}
+
+	// 挨拶・感謝などの雑談パターンは無効
+	if containsGreeting(a) {
+		return false
+	}
+
+	// 明らかな無回答パターンをチェック
+	noAnswerPatterns := []string{
+		"わからない", "分からない", "わかりません", "分かりません",
+		"知らない", "知りません", "思いつかない", "思いつきません",
+		"特にない", "特になし", "ありません", "ないです",
+	}
+	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
+	for _, pattern := range noAnswerPatterns {
+		if answerLower == pattern || answerLower == pattern+"。" {
+			// 「わからない」だけの回答は無効
+			return false
+		}
+	}
+
+	// 質問文に選択肢や具体例が含まれている場合、回答側に数字や選択肢文字があれば回答とみなす
+	if strings.Contains(question, "A)") || strings.Contains(question, "A：") || strings.Contains(question, "A、") {
+		if strings.ContainsAny(a, "ABCDabcd1-5①②③④") {
+			return true
+		}
+	}
+
+	// 10文字以上の回答で、無回答パターンに完全一致しない場合は有効とみなす
+	if len([]rune(a)) >= 10 {
+		return true
+	}
+
+	// 質問文から抽出したキーワードと回答に共通語があるかを確認する（簡易）
+	qk := extractKeywords(question)
+	ak := extractKeywords(a)
+	common := 0
+	for w := range qk {
+		if ak[w] {
+			common++
+		}
+	}
+	// 共通キーワードが1つ以上あれば回答とみなす
+	if common > 0 {
+		return true
+	}
+
+	// デフォルトは有効（寛容に判断）
+	return true
+}
+
+// containsGreeting: 簡易的な雑談フラグ（挨拶・感謝・了承など）
+func containsGreeting(s string) bool {
+	l := strings.ToLower(s)
+	greetings := []string{
+		"こんにちは", "こんばんは", "おはよう", "ありがとう", "ありがとうございます",
+		"了解", "わかった", "わかりました", "よろしく", "ありがとうござい",
+		"はい", "いいえ", "ok", "オッケー",
+	}
+	for _, g := range greetings {
+		if strings.Contains(l, g) {
+			return true
+		}
+	}
+	return false
+}
+
+// getCurrentOrNextPhase 現在のフェーズを取得または次のフェーズを開始
+func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, sessionID string) (*models.UserAnalysisProgress, error) {
+	// 現在進行中のフェーズを取得
+	currentProgress, err := s.progressRepo.GetCurrentPhase(userID, sessionID)
+	if err == nil {
+		return currentProgress, nil
+	}
+
+	// 進行中のフェーズがない場合、次のフェーズを開始
+	allPhases, err := s.phaseRepo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// 既に完了したフェーズを確認
+	completedProgresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	completedMap := make(map[uint]bool)
+	for _, p := range completedProgresses {
+		if p.IsCompleted {
+			completedMap[p.PhaseID] = true
+		}
+	}
+
+	// 次の未完了フェーズを見つける
+	for _, phase := range allPhases {
+		if !completedMap[phase.ID] {
+			// 新しいフェーズを開始
+			return s.progressRepo.FindOrCreate(userID, sessionID, phase.ID)
+		}
+	}
+
+	// 全フェーズ完了
+	return nil, fmt.Errorf("all phases completed")
+}
+
+// updatePhaseProgress フェーズの進捗を更新
+func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress, isValidAnswer bool) error {
+	progress.QuestionsAsked++
+	if isValidAnswer {
+		progress.ValidAnswers++
+	} else {
+		progress.InvalidAnswers++
+	}
+
+	// 完了スコアを計算（有効回答率 × 100）
+	if progress.QuestionsAsked > 0 {
+		progress.CompletionScore = (float64(progress.ValidAnswers) / float64(progress.QuestionsAsked)) * 100
+	}
+
+	// フェーズ完了条件をチェック
+	// 最小質問数に達し、かつ完了スコアが70%以上、または最大質問数に達した場合
+	if (progress.QuestionsAsked >= progress.Phase.MinQuestions && progress.CompletionScore >= 70) ||
+		progress.QuestionsAsked >= progress.Phase.MaxQuestions {
+		progress.IsCompleted = true
+		now := new(time.Time)
+		*now = time.Now()
+		progress.CompletedAt = now
+	}
+
+	return s.progressRepo.Update(progress)
+}
+
+// buildPhaseProgressResponse フェーズ進捗レスポンスを構築
+func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) ([]PhaseProgress, *PhaseProgress, error) {
+	progresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	allPhases, err := s.phaseRepo.FindAll()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	progressMap := make(map[uint]*models.UserAnalysisProgress)
+	for i := range progresses {
+		progressMap[progresses[i].PhaseID] = &progresses[i]
+	}
+
+	var result []PhaseProgress
+	var current *PhaseProgress
+
+	for _, phase := range allPhases {
+		pp := PhaseProgress{
+			PhaseID:      phase.ID,
+			PhaseName:    phase.PhaseName,
+			DisplayName:  phase.DisplayName,
+			MinQuestions: phase.MinQuestions,
+			MaxQuestions: phase.MaxQuestions,
+		}
+
+		if progress, exists := progressMap[phase.ID]; exists {
+			pp.QuestionsAsked = progress.QuestionsAsked
+			pp.ValidAnswers = progress.ValidAnswers
+			pp.CompletionScore = progress.CompletionScore
+			pp.IsCompleted = progress.IsCompleted
+
+			if !progress.IsCompleted && current == nil {
+				current = &pp
+			}
+		}
+
+		result = append(result, pp)
+	}
+
+	return result, current, nil
 }
