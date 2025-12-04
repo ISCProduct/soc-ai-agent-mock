@@ -229,6 +229,28 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
           />
         </Box>
 
+
+        <Divider sx={{ my: 2 }} />
+        <ListItem disablePadding>
+          <ListItemButton
+              onClick={() => router.push('/Correlation-diagram')}
+              sx={{
+                borderRadius: 1,
+              }}
+          >
+            <ListItemIcon sx={{ minWidth: 36 }}>
+              <History color="primary" />
+            </ListItemIcon>
+            <ListItemText
+                primary="企業相関図"
+                primaryTypographyProps={{
+                  fontSize: '0.875rem',
+                  fontWeight: 500,
+                }}
+            />
+          </ListItemButton>
+        </ListItem>
+
         <Divider sx={{ my: 2 }} />
 
         <ListItem disablePadding>
