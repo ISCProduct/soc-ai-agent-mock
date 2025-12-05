@@ -304,11 +304,11 @@ export function JobAgentChat() {
   }
 
   if (isAnalyzing) {
-    return <AnalysisLoading onComplete={handleAnalysisComplete} />
+    return <AnalysisLoading onCompleteAction={handleAnalysisComplete} />
   }
 
   if (isComplete) {
-    return <CompanyResults userData={{ scores: userScores }} onReset={handleReset} />
+    return <CompanyResults userData={{ scores: userScores }} onResetAction={handleReset} />
   }
 
   return (

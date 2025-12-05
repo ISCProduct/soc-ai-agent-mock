@@ -114,7 +114,7 @@ export function JobMatchingWizard() {
 
   if (isComplete) {
     // @ts-ignore
-    return < CompanyResults answers={answers} onReset={handleReset} />
+    return < CompanyResults answers={answers} onResetAction={handleReset} />
   }
 
   return (

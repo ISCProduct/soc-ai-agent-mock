@@ -13,9 +13,6 @@ import {
   Stack,
   CircularProgress,
   Button,
-  Card,
-  CardContent,
-  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -77,6 +74,7 @@ export function MuiChat() {
   const [mounted, setMounted] = useState(false)
   const [showCompletionModal, setShowCompletionModal] = useState(false)
   const [showEndChatModal, setShowEndChatModal] = useState(false)
+  const [showTerminationModal, setShowTerminationModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -134,18 +132,32 @@ export function MuiChat() {
           setMessages(restoredMessages)
           setQuestionCount(history.filter(msg => msg.role === 'user').length)
           
-          // スコアを取得して分析完了状態を判定
-          const scores = await getUserScores(currentUserId, storedSessionId)
-          console.log('[MUI Chat] Scores loaded:', scores?.length)
-          if (scores && scores.length > 0) {
+          // 最後のメッセージが完了メッセージかチェック
+          const lastMessage = history[history.length - 1]
+          const isCompletionMessage = lastMessage?.content?.includes('分析が完了しました') || 
+                                     lastMessage?.content?.includes('全てのフェーズが完了') ||
+                                     lastMessage?.content?.includes('最適な企業をマッチング')
+          
+          if (isCompletionMessage) {
+            console.log('[MUI Chat] Session already completed, showing completion state')
             setAnalysisComplete(true)
+            setAllPhasesCompleted(true)
+          } else {
+            // スコアを取得して分析完了状態を判定
+            const scores = await getUserScores(currentUserId, storedSessionId)
+            console.log('[MUI Chat] Scores loaded:', scores?.length)
+            if (scores && scores.length >= 10) {
+              // 全カテゴリ評価済みなら完了とみなす
+              setAnalysisComplete(true)
+              setAllPhasesCompleted(true)
+            }
           }
         } else {
           // 履歴がない場合: AIのあいさつメッセージを表示（バックエンドには送信しない）
           console.log('[MUI Chat] No history found, displaying initial greeting')
           
           // AIのあいさつメッセージ（フロントエンドのみで表示）
-          const greetingMessage = 'こんにちは！IT業界への就職をサポートする適性診断AIです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は**AIが動的に生成**するため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者'
+          const greetingMessage = 'こんにちは！IT業界専門のキャリアエージェントです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は動的に生成されるため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者'
           
           const initialMessage: Message = {
             id: '0',
@@ -161,7 +173,7 @@ export function MuiChat() {
         const initialMessage: Message = {
           id: '0',
           role: 'assistant',
-          content: 'こんにちは！IT業界への就職をサポートする適性診断AIです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は**AIが動的に生成**するため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者',
+          content: 'こんにちは！IT業界専門のキャリアエージェントです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は動的に生成されるため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者',
           timestamp: new Date(),
         }
         setMessages([initialMessage])
@@ -173,6 +185,12 @@ export function MuiChat() {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading || !sessionId || !userId) return
+    
+    // 分析完了後はメッセージ送信を無効化
+    if (analysisComplete) {
+      console.log('[MUI Chat] Analysis already complete, ignoring message')
+      return
+    }
 
     const userMessage: Message = {
       id: String(Date.now()),
@@ -204,59 +222,102 @@ export function MuiChat() {
         timestamp: new Date(),
       }
       
+      // バリデーションエラーかどうかをチェック
+      const isValidationError = response.response?.includes('書かれた内容にはお答えできません') || 
+                                response.response?.includes('質問に回答してください') ||
+                                response.response?.includes('質問と関係のない内容が3回続いた')
+      
+      // セッション終了チェック
+      const isTerminated = response.is_terminated === true || 
+                          response.response?.includes('チャットを終了させていただきます')
+      
       setMessages((prev) => {
         const newMessages = [...prev, assistantMessage]
         
-        // 質問カウントの更新
-        const newCount = response.answered_questions ?? questionCount + 1
-        setQuestionCount(newCount)
-        setTotalQuestions(response.total_questions ?? 15)
+        // セッション終了の場合 - 専用モーダルを表示
+        if (isTerminated) {
+          console.log('[MUI Chat] Session terminated due to invalid answers')
+          setAnalysisComplete(true)
+          setShowTerminationModal(true)  // 終了専用モーダル
+          return newMessages
+        }
         
-        // 進捗状況を親コンポーネントに通知（非同期で実行）
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('chatProgress', { 
-            detail: { 
-              messageCount: newMessages.length,
-              questionCount: newCount,
-              totalQuestions: response.total_questions ?? 15,
-            } 
-          }))
-        }, 0)
-        
-        // **重要: バックエンドのis_completeのみを信頼**
-        // バックエンドがtrueを返した時は分析完了状態にする
-        console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
-        if (response.is_complete === true) {
-          console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
+        // バリデーションエラーの場合は質問カウントを進めない
+        if (!isValidationError) {
+          // 質問カウントの更新
+          const newCount = response.answered_questions ?? questionCount + 1
+          setQuestionCount(newCount)
+          setTotalQuestions(response.total_questions ?? 15)
           
-          // 全フェーズ完了かどうかをチェック
-          const allCompleted = response.all_phases?.every((phase: any) => phase.is_completed) ?? false
-          console.log('[MUI Chat] All phases completed:', allCompleted)
-          
+          // 進捗状況を親コンポーネントに通知（非同期で実行）
           setTimeout(() => {
-            setAnalysisComplete(true)
-            setAllPhasesCompleted(allCompleted)
-            setShowCompletionModal(true)
-          }, 1000)
+            window.dispatchEvent(new CustomEvent('chatProgress', { 
+              detail: { 
+                messageCount: newMessages.length,
+                questionCount: newCount,
+                totalQuestions: response.total_questions ?? 15,
+              } 
+            }))
+          }, 0)
+          
+          // **重要: バックエンドのis_completeのみを信頼**
+          // バックエンドがtrueを返した時は分析完了状態にする
+          console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
+          if (response.is_complete === true) {
+            console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
+            
+            // 全フェーズ完了かどうかをチェック
+            const allCompleted = response.all_phases?.every((phase: any) => phase.is_completed) ?? false
+            console.log('[MUI Chat] All phases completed:', allCompleted)
+            
+            setTimeout(() => {
+              setAnalysisComplete(true)
+              setAllPhasesCompleted(allCompleted)
+              setShowCompletionModal(true)
+            }, 1000)
+          } else {
+            console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
+            // 明示的にfalseを設定
+            setAnalysisComplete(false)
+            setAllPhasesCompleted(false)
+          }
         } else {
-          console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
-          // 明示的にfalseを設定
-          setAnalysisComplete(false)
-          setAllPhasesCompleted(false)
+          // バリデーションエラーの場合は現在の状態を維持
+          console.log('[MUI Chat] Validation error detected, not updating question count')
         }
         
         return newMessages
       })
     } catch (error) {
       console.error('[MUI Chat] Backend error:', error)
-      const errorMessage: Message = {
-        id: String(Date.now() + 1),
-        role: 'assistant',
-        content:
-          'バックエンドとの接続に失敗しました。後ほど再試行してください。\n\nエラー: ' + (error as Error).message,
-        timestamp: new Date(),
+      
+      // "all phases completed"エラーの場合は分析完了として扱う
+      const errorMessage = (error as Error).message
+      if (errorMessage.includes('all phases completed')) {
+        console.log('[MUI Chat] All phases completed - showing completion modal')
+        setAnalysisComplete(true)
+        setAllPhasesCompleted(true)
+        setShowCompletionModal(true)
+        
+        // 完了メッセージを表示
+        const completionMessage: Message = {
+          id: String(Date.now() + 1),
+          role: 'assistant',
+          content: '分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。',
+          timestamp: new Date(),
+        }
+        setMessages((prev) => [...prev, completionMessage])
+      } else {
+        // その他のエラー
+        const errorMsg: Message = {
+          id: String(Date.now() + 1),
+          role: 'assistant',
+          content:
+            'バックエンドとの接続に失敗しました。後ほど再試行してください。\n\nエラー: ' + errorMessage,
+          timestamp: new Date(),
+        }
+        setMessages((prev) => [...prev, errorMsg])
       }
-      setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
     }
@@ -450,6 +511,56 @@ export function MuiChat() {
         </DialogActions>
       </Dialog>
 
+      {/* 強制終了モーダル（3回の無効回答） */}
+      <Dialog
+        open={showTerminationModal}
+        onClose={() => {}} // 閉じられないようにする
+        disableEscapeKeyDown // Escキーでも閉じられない
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            p: 2,
+          }
+        }}
+      >
+        <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
+          <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'error.main' }}>
+            ⚠️ チャットを終了します
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2, pb: 2 }}>
+          <Typography variant="body1" sx={{ textAlign: 'center', mb: 2, color: 'error.main', fontWeight: 'bold' }}>
+            質問と関係のない内容が3回続いたため、チャットを終了しました。
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 1 }}>
+            新しいセッションで最初からやり直してください。
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+            現在の回答内容は保存されていません。
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button
+            onClick={() => {
+              // 新しいセッションを開始（ページリロード）
+              sessionStorage.removeItem('chatSessionId')
+              localStorage.removeItem('currentSessionId')
+              window.location.reload()
+            }}
+            variant="contained"
+            color="error"
+            size="large"
+            sx={{ minWidth: 180 }}
+            autoFocus={false}
+            tabIndex={-1}
+          >
+            新しいセッションを開始
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Box
         sx={{
           height: '100vh',
@@ -509,7 +620,16 @@ export function MuiChat() {
           </Box>
         )}
 
-        {messages.map((message) => (
+        {messages.map((message) => {
+          const isValidationError = message.role === 'assistant' && 
+            (message.content.includes('書かれた内容にはお答えできません') || 
+             message.content.includes('質問に回答してください') ||
+             message.content.includes('質問と関係のない内容が3回続いた'))
+          
+          const isTerminationMessage = message.role === 'assistant' && 
+            message.content.includes('チャットを終了させていただきます')
+          
+          return (
           <Box
             key={message.id}
             sx={{
@@ -522,7 +642,7 @@ export function MuiChat() {
             {message.role === 'assistant' && (
               <Avatar
                 sx={{
-                  bgcolor: '#1976d2',
+                  bgcolor: isTerminationMessage ? '#d32f2f' : (isValidationError ? '#f57c00' : '#1976d2'),
                   width: 36,
                   height: 36,
                   mr: 2,
@@ -537,8 +657,15 @@ export function MuiChat() {
                 p: 2,
                 maxWidth: '70%',
                 backgroundColor:
-                  message.role === 'user' ? '#1976d2' : '#f5f5f5',
+                  message.role === 'user' 
+                    ? '#1976d2' 
+                    : isTerminationMessage
+                      ? '#ffebee'
+                      : isValidationError 
+                        ? '#fff3e0' 
+                        : '#f5f5f5',
                 color: message.role === 'user' ? '#fff' : '#000',
+                border: isTerminationMessage ? '2px solid #d32f2f' : (isValidationError ? '2px solid #f57c00' : 'none'),
               }}
             >
               <Typography variant="body1">{message.content}</Typography>
@@ -556,7 +683,8 @@ export function MuiChat() {
               </Avatar>
             )}
           </Box>
-        ))}
+          )
+        })}
 
         {/* ローディングインジケーター */}
         {isLoading && (
@@ -630,11 +758,13 @@ export function MuiChat() {
       >
         {analysisComplete ? (
           <Box sx={{ textAlign: 'center' }}>
-            {console.log('[MUI Chat] Rendering completion button (analysisComplete=true)')}
             <Button
               variant="contained"
               size="large"
-              onClick={() => setShowCompletionModal(true)}
+              onClick={() => {
+                console.log('[MUI Chat] Rendering completion button (analysisComplete=true)')
+                setShowCompletionModal(true)
+              }}
               sx={{
                 py: 2,
                 px: 4,
@@ -650,12 +780,14 @@ export function MuiChat() {
           </Box>
         ) : (
           <Box sx={{ display: 'flex', gap: 1 }}>
-            {console.log('[MUI Chat] Rendering input field (analysisComplete=false)')}
             <TextField
               fullWidth
               placeholder="メッセージを入力..."
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                console.log('[MUI Chat] Rendering input field (analysisComplete=false)')
+                setInput(e.target.value)
+              }}
               onKeyPress={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()

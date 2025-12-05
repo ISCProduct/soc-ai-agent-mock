@@ -17,5 +17,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&UserWeightScore{},
 		&AnalysisPhase{},
 		&UserAnalysisProgress{},
+		&SessionValidation{},
 	)
 }

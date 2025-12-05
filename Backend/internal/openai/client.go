@@ -79,3 +79,56 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 	}
 	return "", lastErr
 }
+
+// ResponsesWithTemperature は system と user プロンプトを分けて、温度パラメータ付きでリクエストします
+func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, userPrompt string, temperature float32, modelOverride ...string) (string, error) {
+	if cli == nil || cli.c == nil {
+		return "", errors.New("openai client is nil")
+	}
+
+	model := cli.DefaultModel
+	if len(modelOverride) > 0 && modelOverride[0] != "" {
+		model = modelOverride[0]
+	}
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		ctxReq, cancel := context.WithTimeout(ctx, 30*time.Second)
+
+		resp, err := cli.c.CreateChatCompletion(ctxReq, openai.ChatCompletionRequest{
+			Model: model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: systemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: userPrompt,
+				},
+			},
+			Temperature:         temperature,
+			MaxCompletionTokens: 100, // バリデーションは短い応答で十分
+		})
+		cancel()
+
+		if err == nil {
+			if len(resp.Choices) > 0 {
+				return resp.Choices[0].Message.Content, nil
+			}
+			return "", nil
+		}
+
+		lastErr = err
+		println("OpenAI API error (attempt", attempt, "):", err.Error())
+		time.Sleep(time.Duration(attempt) * time.Second)
+	}
+
+	if lastErr == nil {
+		lastErr = errors.New("no response from model")
+	}
+	return "", lastErr
+}

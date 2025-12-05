@@ -27,11 +27,11 @@ type CompanyData = {
 
 type Props = {
   open: boolean
-  onClose: () => void
+  onCloseAction: () => void
   data: CompanyData
 }
 
-export default function CompanyDetailModal({ open, onClose, data }: Props) {
+export default function CompanyDetailModal({ open, onCloseAction, data }: Props) {
   const [tab, setTab] = useState(0)
 
   const handleTabChange = (_: any, newValue: number) => {
@@ -39,11 +39,11 @@ export default function CompanyDetailModal({ open, onClose, data }: Props) {
   }
 
   return (
-      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <Dialog open={open} onClose={onCloseAction} maxWidth="md" fullWidth>
         {/* Header */}
         <Box display="flex" justifyContent="space-between" alignItems="center" px={2} py={1}>
           <DialogTitle sx={{ m: 0, p: 0 }}>{data.name}</DialogTitle>
-          <IconButton onClick={onClose}>
+          <IconButton onClick={onCloseAction}>
             <X size={22} />
           </IconButton>
         </Box>
@@ -99,7 +99,7 @@ export default function CompanyDetailModal({ open, onClose, data }: Props) {
 
           {/* Actions */}
           <Box mt={3} textAlign="right">
-            <Button variant="contained" color="primary" onClick={onClose}>
+            <Button variant="contained" color="primary" onClick={onCloseAction}>
               閉じる
             </Button>
           </Box>

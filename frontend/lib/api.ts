@@ -12,14 +12,30 @@ export interface ChatRequest {
     }>
 }
 
+export interface PhaseProgress {
+    phase_id: number
+    phase_name: string
+    display_name: string
+    questions_asked: number
+    valid_answers: number
+    completion_score: number
+    is_completed: boolean
+    min_questions: number
+    max_questions: number
+}
+
 export interface ChatResponse {
     response: string
     question_weight_id?: number
     is_complete: boolean
+    is_terminated?: boolean
+    invalid_answer_count?: number
     total_questions: number
     answered_questions: number
     evaluated_categories?: number
     total_categories?: number
+    current_phase?: PhaseProgress
+    all_phases?: PhaseProgress[]
     current_scores?: Array<{
         id: number
         user_id: number

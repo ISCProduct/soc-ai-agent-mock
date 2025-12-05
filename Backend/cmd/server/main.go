@@ -76,11 +76,12 @@ func main() {
 	aiGeneratedQuestionRepo := repositories.NewAIGeneratedQuestionRepository(db)
 	phaseRepo := repositories.NewAnalysisPhaseRepository(db)
 	progressRepo := repositories.NewUserAnalysisProgressRepository(db)
+	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, userRepo, phaseRepo, progressRepo)
+	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 
 	// コントローラー層の初期化

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { CheckCircle2, Loader2, ArrowRight } from "lucide-react"
 
 type AnalysisLoadingProps = {
-  onComplete: () => void
+  onCompleteAction: () => void
 }
 
 const analysisSteps = [
@@ -17,7 +17,7 @@ const analysisSteps = [
   { id: 5, name: "最適企業の選定", duration: 1000 },
 ]
 
-export function AnalysisLoading({ onComplete }: AnalysisLoadingProps) {
+export function AnalysisLoading({ onCompleteAction }: AnalysisLoadingProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [completedSteps, setCompletedSteps] = useState<number[]>([])
   const [isFullyComplete, setIsFullyComplete] = useState(false)
@@ -132,7 +132,7 @@ export function AnalysisLoading({ onComplete }: AnalysisLoadingProps) {
               </div>
               <Button 
                 size="lg" 
-                onClick={onComplete}
+                onClick={onCompleteAction}
                 className="w-full"
               >
                 結果を見る

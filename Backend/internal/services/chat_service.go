@@ -20,6 +20,7 @@ type ChatService struct {
 	userRepo                *repositories.UserRepository
 	phaseRepo               *repositories.AnalysisPhaseRepository
 	progressRepo            *repositories.UserAnalysisProgressRepository
+	sessionValidationRepo   *repositories.SessionValidationRepository
 }
 
 func NewChatService(
@@ -31,6 +32,7 @@ func NewChatService(
 	userRepo *repositories.UserRepository,
 	phaseRepo *repositories.AnalysisPhaseRepository,
 	progressRepo *repositories.UserAnalysisProgressRepository,
+	sessionValidationRepo *repositories.SessionValidationRepository,
 ) *ChatService {
 	return &ChatService{
 		aiClient:                aiClient,
@@ -41,6 +43,7 @@ func NewChatService(
 		userRepo:                userRepo,
 		phaseRepo:               phaseRepo,
 		progressRepo:            progressRepo,
+		sessionValidationRepo:   sessionValidationRepo,
 	}
 }
 
@@ -61,6 +64,8 @@ type ChatResponse struct {
 	CurrentPhase        *PhaseProgress           `json:"current_phase,omitempty"`
 	AllPhases           []PhaseProgress          `json:"all_phases,omitempty"`
 	IsComplete          bool                     `json:"is_complete"`
+	IsTerminated        bool                     `json:"is_terminated,omitempty"`
+	InvalidAnswerCount  int                      `json:"invalid_answer_count,omitempty"`
 	TotalQuestions      int                      `json:"total_questions"`
 	AnsweredQuestions   int                      `json:"answered_questions"`
 	EvaluatedCategories int                      `json:"evaluated_categories"`
@@ -87,6 +92,29 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return s.handleSessionStart(ctx, req)
 	}
 
+	// セッション終了チェック
+	isTerminated, err := s.sessionValidationRepo.IsTerminated(req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check session status: %w", err)
+	}
+	if isTerminated {
+		terminationMsg := "このセッションは終了しています。不適切な回答が3回続いたため、チャットを終了しました。新しいセッションを開始してください。"
+		assistantMsg := &models.ChatMessage{
+			SessionID: req.SessionID,
+			UserID:    req.UserID,
+			Role:      "assistant",
+			Content:   terminationMsg,
+		}
+		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+			fmt.Printf("Warning: failed to save termination message: %v\n", err)
+		}
+		return &ChatResponse{
+			Response:     terminationMsg,
+			IsComplete:   true,
+			IsTerminated: true,
+		}, nil
+	}
+
 	// 1. ユーザーのメッセージを保存
 	userMsg := &models.ChatMessage{
 		SessionID: req.SessionID,
@@ -110,14 +138,59 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, err
 	}
 
+	// 無効な回答の場合は、ここで処理を終了
+	if handled {
+		validation, err := s.sessionValidationRepo.GetOrCreate(req.SessionID)
+		if err != nil {
+			fmt.Printf("Warning: failed to get validation: %v\n", err)
+		}
+
+		allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+
+		chatResponse := &ChatResponse{
+			Response:          response,
+			IsComplete:        false,
+			TotalQuestions:    15,
+			AnsweredQuestions: len(history) / 2,
+			AllPhases:         allPhases,
+			CurrentPhase:      currentPhaseInfo,
+		}
+
+		if validation != nil {
+			chatResponse.InvalidAnswerCount = validation.InvalidAnswerCount
+			chatResponse.IsTerminated = validation.IsTerminated
+
+			// 3回目の無効回答の場合は完了フラグを立てる
+			if validation.IsTerminated {
+				chatResponse.IsComplete = true
+			}
+		}
+
+		return chatResponse, nil
+	}
+
+	// 有効な回答の場合のみ、以降の処理を実行
 	// 2.6. 現在のフェーズを取得または開始
 	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
 	if err != nil {
 		// 全フェーズ完了の場合は特別な応答を返す
 		if err.Error() == "all phases completed" {
+			completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
+
+			// 完了メッセージを保存
+			assistantMsg := &models.ChatMessage{
+				SessionID: req.SessionID,
+				UserID:    req.UserID,
+				Role:      "assistant",
+				Content:   completionMsg,
+			}
+			if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+				fmt.Printf("Warning: failed to save completion message: %v\n", err)
+			}
+
 			allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 			return &ChatResponse{
-				Response:            "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。",
+				Response:            completionMsg,
 				IsComplete:          true,
 				TotalQuestions:      15,
 				AnsweredQuestions:   15,
@@ -130,22 +203,9 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
 
-	// 2.7. フェーズ進捗を更新
-	if err := s.updatePhaseProgress(currentPhase, !handled); err != nil {
+	// 2.7. フェーズ進捗を更新（有効な回答のみ）
+	if err := s.updatePhaseProgress(currentPhase, true); err != nil {
 		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
-	}
-
-	if handled {
-		// 無効な回答として処理済み -> レスポンスを返して終了
-		allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-		return &ChatResponse{
-			Response:          response,
-			IsComplete:        false,
-			TotalQuestions:    15,
-			AnsweredQuestions: len(history) / 2,
-			AllPhases:         allPhases,
-			CurrentPhase:      currentPhaseInfo,
-		}, nil
 	}
 
 	// 3. ユーザーの回答から重み係数を判定・更新
@@ -258,28 +318,32 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to generate question: %w", err)
 	}
 
-	// 5. 質問数をカウントして終了判定
-	answeredQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
+	// 5. フェーズベースの完了判定
+	// 全フェーズが完了しているかチェック
+	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
-		fmt.Printf("Warning: failed to count answered questions: %v\n", err)
+		fmt.Printf("Warning: failed to get phases: %v\n", err)
+	}
+	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
+	completedPhaseCount := 0
+	for _, p := range completedProgresses {
+		if p.IsCompleted {
+			completedPhaseCount++
+		}
 	}
 
-	// evaluatedCategoriesは既に上で定義済み（124行目）なので再利用
+	isComplete := completedPhaseCount >= len(allPhases)
 
-	totalQuestions := 15 // 最低15問で診断完了（全10カテゴリ評価が条件）
+	// 質問数と評価カテゴリ数を計算（進捗表示用）
+	answeredQuestions, _ := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	answeredCount := len(answeredQuestions)
-	allCategoriesEvaluated := len(evaluatedCategories) >= 10
 
-	// 全カテゴリが評価され、かつ十分な質問数に達した場合のみ完了
-	// または、20問に達した場合は強制完了
-	isComplete := (answeredCount >= totalQuestions && allCategoriesEvaluated) || answeredCount >= 20
-
-	fmt.Printf("Diagnosis progress: %d/%d questions, %d/10 categories evaluated, complete: %v\n",
-		answeredCount, totalQuestions, len(evaluatedCategories), isComplete)
+	fmt.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
+		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
 
 	// 診断完了時のメッセージを追加（保存前に）
 	if isComplete {
-		completionMessage := "\n\n✅ 診断が完了しました！あなたの適性を分析し、最適な企業をマッチングします。"
+		completionMessage := "\n\n✅ 全てのフェーズが完了しました！あなたの適性を分析し、最適な企業をマッチングします。"
 		aiResponse = aiResponse + completionMessage
 	}
 
@@ -302,16 +366,16 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// フェーズ情報を構築
-	allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+	allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 
 	return &ChatResponse{
 		Response:            aiResponse,
 		QuestionWeightID:    questionWeightID,
 		CurrentScores:       finalScores,
 		CurrentPhase:        currentPhaseInfo,
-		AllPhases:           allPhases,
+		AllPhases:           allPhasesInfo,
 		IsComplete:          isComplete,
-		TotalQuestions:      15,
+		TotalQuestions:      len(allPhases) * 3, // 各フェーズ平均3問と想定
 		AnsweredQuestions:   answeredCount,
 		EvaluatedCategories: len(evaluatedCategories),
 		TotalCategories:     10,
@@ -1074,7 +1138,8 @@ func (s *ChatService) GetUserChatSessions(userID uint) ([]models.ChatSession, er
 }
 
 // checkAnswerValidity: 直近の assistant メッセージが質問かを判定し、ユーザー入力がその質問に対する有効な回答かを判定する。
-// 無効な場合はアシスタントの「この質問には回答できません」メッセージを保存して true を返す。
+// 無効な場合はアシスタントの「書かれた内容にはお答えできません」メッセージを保存して true を返す。
+// 3回連続で無効な場合はセッションを強制終了する。
 // 戻り値: handled(bool) - true の場合は処理を終了してよい、response(string) - 保存したアシスタント応答（ある場合）、error
 func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.ChatMessage, userMessage string, userID uint, sessionID string) (bool, string, error) {
 	// 直近の assistant メッセージを探す
@@ -1086,26 +1151,60 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		}
 	}
 
-	// 直近が質問でないなら検証不要
-	if lastAssistant == nil || !isQuestion(lastAssistant.Content) {
-		return false, "", nil
+	// アシスタントメッセージがない場合、またはそれが質問でない場合
+	// → これは初回や説明メッセージの直後なので、職種に関する回答を期待する
+	var questionText string
+	if lastAssistant == nil {
+		// 履歴がない場合は、初回の職種選択を期待
+		questionText = "どのようなIT職種に興味がありますか？"
+	} else if !isQuestion(lastAssistant.Content) {
+		// 質問ではない場合（説明文など）も、職種に関する回答を期待
+		questionText = "IT業界のどのような職種に興味がありますか？"
+	} else {
+		// 通常の質問の場合
+		questionText = lastAssistant.Content
 	}
 
 	// ユーザー回答が質問に対する答えかどうか判定
-	isValid, err := s.validateAnswerRelevance(ctx, lastAssistant.Content, userMessage)
+	isValid, err := s.validateAnswerRelevance(ctx, questionText, userMessage)
 	if err != nil {
 		// AI判定エラー時は基本的な検証のみ
-		fmt.Printf("Warning: AI validation failed: %v, using basic validation\n", err)
-		isValid = isLikelyAnswer(userMessage, lastAssistant.Content)
+		fmt.Printf("[Validation] AI validation failed: %v, using basic validation\n", err)
+		isValid = isLikelyAnswer(userMessage, questionText)
+		fmt.Printf("[Validation] Basic validation result: %v for message: %s\n", isValid, userMessage)
+	} else {
+		fmt.Printf("[Validation] AI validation result: %v for message: %s\n", isValid, userMessage)
 	}
 
 	if isValid {
-		// 有効な回答と判断 -> 既存の処理に進める
+		// 有効な回答と判断 -> カウントをリセットして既存の処理に進める
+		fmt.Printf("[Validation] Valid answer detected, resetting invalid count for session: %s\n", sessionID)
+		if err := s.sessionValidationRepo.ResetInvalidCount(sessionID); err != nil {
+			fmt.Printf("Warning: failed to reset invalid count: %v\n", err)
+		}
 		return false, "", nil
 	}
 
-	// 無効な回答と判断 -> 「この質問には回答できません」メッセージを保存して返す
-	assistantText := "この質問には回答できません。質問に沿った回答をお願いします。"
+	// 無効な回答と判断 -> カウントをインクリメント
+	fmt.Printf("[Validation] Invalid answer detected for message: %s\n", userMessage)
+	validation, err := s.sessionValidationRepo.IncrementInvalidCount(sessionID)
+	if err != nil {
+		return true, "", fmt.Errorf("failed to increment invalid count: %w", err)
+	}
+	fmt.Printf("[Validation] Invalid count incremented to: %d/3\n", validation.InvalidAnswerCount)
+
+	var assistantText string
+	if validation.InvalidAnswerCount >= 3 {
+		// 3回目の無効回答 -> セッションを強制終了
+		if err := s.sessionValidationRepo.TerminateSession(sessionID); err != nil {
+			fmt.Printf("Warning: failed to terminate session: %v\n", err)
+		}
+		assistantText = "申し訳ございませんが、質問と関係のない内容が3回続いたため、チャットを終了させていただきます。新しいセッションで最初からやり直してください。"
+	} else {
+		// 1-2回目の無効回答 -> 警告メッセージ
+		assistantText = fmt.Sprintf("書かれた内容にはお答えできません。質問に回答してください。（%d/3回目の警告）", validation.InvalidAnswerCount)
+	}
+
 	assistantMsg := &models.ChatMessage{
 		SessionID: sessionID,
 		UserID:    userID,
@@ -1139,9 +1238,22 @@ func isQuestion(text string) bool {
 }
 
 // validateAnswerRelevance: AIを使って回答が質問に沿っているかを判定
+// moderateでスタブ化（実運用ではモデレーションAPIを呼ぶ）
+// temperature=0で厳格に判定し、JSONのみを返す
 func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, answer string) (bool, error) {
-	prompt := fmt.Sprintf(`あなたは回答の妥当性を判定する専門家です。
-以下の質問に対する回答が適切かどうかを判定してください。
+	systemPrompt := `あなたは回答の妥当性を判定する厳格な審査AIです。
+
+## 重要な制約
+- 必ずJSON形式のみで応答してください
+- 他の説明文やコメントは一切含めないでください
+- 無関係な発言は絶対に禁止です
+
+## 出力形式（厳守）
+{"valid": true} または {"valid": false}
+
+この形式以外の応答は絶対に行わないでください。`
+
+	userPrompt := fmt.Sprintf(`以下の質問に対するユーザーの回答が適切かどうかを判定してください。
 
 ## 質問
 %s
@@ -1149,49 +1261,60 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 ## ユーザーの回答
 %s
 
-## 判定基準
-1. 回答が質問の内容に直接関連しているか
-2. 質問が求めている情報を提供しているか
-3. 単なる挨拶や無関係な内容でないか
-4. 「わからない」のみの回答でないか（説明があれば可）
+## 判定基準（厳格）
+1. IT業界・職種に関する具体的な内容であること
+2. 質問の内容に直接関連していること
+3. 挨拶のみ（「こんにちは」「よろしく」など）は無効
+4. 無関係な話題（天気、日常会話など）は無効
+5. 「わからない」「特にない」のみは無効
+6. 最低5文字以上の意味のある回答であること
 
-## 有効な回答の例
-- 質問の内容に沿った具体的な説明や経験
-- 質問に対する明確な立場や意見の表明
-- 質問の選択肢に対する回答
-- 「わからない」でも理由や背景の説明がある場合
+## 判定
+上記基準に基づき、JSON形式で回答の妥当性を判定してください。
+{"valid": true} または {"valid": false}`, question, answer)
 
-## 無効な回答の例
-- 挨拶のみ（「こんにちは」「よろしく」など）
-- 全く関係ない話題
-- 「わからない」「特にない」のみの短い回答
-- 質問内容を無視した回答
-
-## 出力形式
-有効な場合: "VALID"
-無効な場合: "INVALID"
-
-判定結果のみを1単語で返してください。`, question, answer)
-
-	response, err := s.aiClient.Responses(ctx, prompt)
+	// temperature=0で安定した判定を行う
+	response, err := s.aiClient.ResponsesWithTemperature(ctx, systemPrompt, userPrompt, 0.0)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("AI validation error: %w", err)
 	}
 
-	response = strings.TrimSpace(strings.ToUpper(response))
-	return strings.Contains(response, "VALID"), nil
+	// コードフェンスを除去してJSON抽出
+	response = strings.TrimSpace(response)
+	response = strings.TrimPrefix(response, "```json")
+	response = strings.TrimPrefix(response, "```")
+	response = strings.TrimSuffix(response, "```")
+	response = strings.TrimSpace(response)
+
+	// JSON構造体で検証
+	type ValidationResult struct {
+		Valid bool `json:"valid"`
+	}
+
+	var result ValidationResult
+	if err := json.Unmarshal([]byte(response), &result); err != nil {
+		// JSONパースに失敗した場合は無効とみなす
+		fmt.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
+		return false, nil
+	}
+
+	return result.Valid, nil
 }
 
 // isLikelyAnswer: ユーザーの入力が質問に対する「回答らしい」かを判定する簡易ロジック（フォールバック用）
+// AI判定が失敗した場合の厳格なフォールバック
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
+
+	// 5文字未満は無効（厳格化）
 	if len([]rune(a)) < 5 {
-		// 短すぎる応答は無効とする
+		fmt.Printf("[Validation] Fallback: Too short (< 5 chars): %s\n", a)
 		return false
 	}
 
 	// 挨拶・感謝などの雑談パターンは無効
 	if containsGreeting(a) {
+		fmt.Printf("[Validation] Fallback: Contains greeting: %s\n", a)
 		return false
 	}
 
@@ -1204,20 +1327,39 @@ func isLikelyAnswer(answer, question string) bool {
 	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
 	for _, pattern := range noAnswerPatterns {
 		if answerLower == pattern || answerLower == pattern+"。" {
-			// 「わからない」だけの回答は無効
+			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
 			return false
+		}
+	}
+
+	// IT職種関連のキーワードを含むかチェック
+	itKeywords := []string{
+		"エンジニア", "プログラマ", "開発", "インフラ", "セキュリティ",
+		"データ", "サイエンティスト", "アプリ", "Web", "モバイル",
+		"フロントエンド", "バックエンド", "フルスタック", "DevOps",
+		"クラウド", "ネットワーク", "システム", "プロジェクト",
+		"技術", "スキル", "経験", "プログラミング", "コード",
+	}
+
+	hasITKeyword := false
+	for _, keyword := range itKeywords {
+		if strings.Contains(a, keyword) {
+			hasITKeyword = true
+			break
 		}
 	}
 
 	// 質問文に選択肢や具体例が含まれている場合、回答側に数字や選択肢文字があれば回答とみなす
 	if strings.Contains(question, "A)") || strings.Contains(question, "A：") || strings.Contains(question, "A、") {
 		if strings.ContainsAny(a, "ABCDabcd1-5①②③④") {
+			fmt.Printf("[Validation] Fallback: Contains choice character: %s\n", a)
 			return true
 		}
 	}
 
-	// 10文字以上の回答で、無回答パターンに完全一致しない場合は有効とみなす
-	if len([]rune(a)) >= 10 {
+	// IT関連キーワードを含み、かつ10文字以上なら有効
+	if hasITKeyword && len([]rune(a)) >= 10 {
+		fmt.Printf("[Validation] Fallback: Has IT keyword and >= 10 chars: %s\n", a)
 		return true
 	}
 
@@ -1230,13 +1372,16 @@ func isLikelyAnswer(answer, question string) bool {
 			common++
 		}
 	}
-	// 共通キーワードが1つ以上あれば回答とみなす
-	if common > 0 {
+
+	// 共通キーワードが2つ以上あれば回答とみなす（厳格化）
+	if common >= 2 {
+		fmt.Printf("[Validation] Fallback: Common keywords >= 2: %s\n", a)
 		return true
 	}
 
-	// デフォルトは有効（寛容に判断）
-	return true
+	// デフォルトは無効（厳格に判断）
+	fmt.Printf("[Validation] Fallback: Default INVALID for: %s\n", a)
+	return false
 }
 
 // containsGreeting: 簡易的な雑談フラグ（挨拶・感謝・了承など）
