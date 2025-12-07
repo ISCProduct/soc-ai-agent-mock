@@ -54,3 +54,14 @@ func (r *UserWeightScoreRepository) FindTopCategories(userID uint, sessionID str
 		Find(&scores).Error
 	return scores, err
 }
+
+// FindByUserSessionAndCategory ユーザー、セッション、カテゴリで検索
+func (r *UserWeightScoreRepository) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error) {
+	var score models.UserWeightScore
+	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?", userID, sessionID, category).
+		First(&score).Error
+	if err != nil {
+		return nil, err
+	}
+	return &score, nil
+}

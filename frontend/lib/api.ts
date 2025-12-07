@@ -12,14 +12,30 @@ export interface ChatRequest {
     }>
 }
 
+export interface PhaseProgress {
+    phase_id: number
+    phase_name: string
+    display_name: string
+    questions_asked: number
+    valid_answers: number
+    completion_score: number
+    is_completed: boolean
+    min_questions: number
+    max_questions: number
+}
+
 export interface ChatResponse {
     response: string
     question_weight_id?: number
     is_complete: boolean
+    is_terminated?: boolean
+    invalid_answer_count?: number
     total_questions: number
     answered_questions: number
     evaluated_categories?: number
     total_categories?: number
+    current_phase?: PhaseProgress
+    all_phases?: PhaseProgress[]
     current_scores?: Array<{
         id: number
         user_id: number
@@ -42,31 +58,42 @@ export interface ChatHistory {
 }
 
 export async function sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
-    const response = await fetch(`${BACKEND_URL}/api/chat`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify(request),
-    })
+    try {
+        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(request),
+        })
 
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText)
-        console.error('[API] Chat error:', response.status, errorText)
-        throw new Error(`Chat API error: ${errorText || response.statusText}`)
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => response.statusText)
+            console.error('[API] Chat error:', response.status, errorText)
+            throw new Error(`Chat API error: ${errorText || response.statusText}`)
+        }
+
+        return response.json()
+    } catch (error) {
+        console.error('[API] Failed to send chat message:', error)
+        throw error
     }
-
-    return response.json()
 }
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
-    const response = await fetch(`${BACKEND_URL}/api/chat/history?session_id=${sessionId}`)
+    try {
+        const response = await fetch(`${BACKEND_URL}/api/chat/history?session_id=${sessionId}`)
 
-    if (!response.ok) {
-        throw new Error(`History API error: ${response.statusText}`)
+        if (!response.ok) {
+            console.warn(`History API error: ${response.statusText}`)
+            return []
+        }
+
+        return response.json()
+    } catch (error) {
+        console.warn('Failed to fetch chat history:', error)
+        return []
     }
-
-    return response.json()
 }
 
 export async function getUserScores(userId: number, sessionId: string) {

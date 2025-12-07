@@ -440,7 +440,7 @@ const getBaseCompanyData = (): Company[] => {
   ]
 }
 
-export function CompanyResults({ userData, onReset }: { userData: UserData; onReset: () => void }) {
+export function CompanyResults({ userData, onResetAction }: { userData: UserData; onResetAction: () => void }) {
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
@@ -693,7 +693,7 @@ export function CompanyResults({ userData, onReset }: { userData: UserData; onRe
 
 
       <div className="text-center">
-        <Button variant="outline" onClick={onReset} size="lg">
+        <Button variant="outline" onClick={onResetAction} size="lg">
           <RotateCcw className="w-4 h-4 mr-2" />
           最初からやり直す
         </Button>

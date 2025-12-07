@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge"
 import { 
   ArrowLeft, Building2, MapPin, Users, Calendar, Globe, 
   TrendingUp, Award, Code, Briefcase, Heart, ExternalLink,
-  DollarSign, Star, Clock, Target
+  DollarSign, Star, Clock, Target, GitBranch, Network
 } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import CompanyDiagram from "@/components/company-diagram"
 
 type Company = {
   id: number
@@ -36,11 +38,25 @@ type Company = {
   }
 }
 
+// 企業名からIDにマッピング（暫定的に企業ID 1-3 を使用）
+function getMockCompanyId(companyName: string): number {
+  // 実際の企業データから取得する場合はAPIを使用
+  // ここでは既存の3社のいずれかを返す
+  const nameMap: Record<string, number> = {
+    '株式会社テクノシステム': 1,
+    '日本ソフトウェア株式会社': 2,
+    '株式会社クラウドワークス': 3,
+  };
+  
+  return nameMap[companyName] || 1; // デフォルトは企業ID 1
+}
+
 export default function CompanyDetailPage() {
   const params = useParams()
   const router = useRouter()
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('capital')
 
   useEffect(() => {
     const fetchCompanyDetail = async () => {
@@ -295,6 +311,70 @@ export default function CompanyDetailPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* 企業関連図 */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Network className="w-5 h-5" />
+              企業関連図
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsTrigger value="capital" className="flex items-center gap-2">
+                  <GitBranch className="w-4 h-4" />
+                  資本関連図
+                </TabsTrigger>
+                <TabsTrigger value="business" className="flex items-center gap-2">
+                  <Network className="w-4 h-4" />
+                  ビジネス関連図
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="capital" className="mt-4">
+                <div className="mb-3 text-sm text-muted-foreground space-y-1">
+                  <p>• 黄色でハイライトされた企業が現在表示中の企業です</p>
+                  <p>• 実線：子会社（出資比率50%以上）、破線：関連会社（出資比率50%未満）</p>
+                  <div className="flex gap-4 mt-2">
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#4169E1' }}></span>
+                      プライム
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#32CD32' }}></span>
+                      スタンダード
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#FF6347' }}></span>
+                      グロース
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#9E9E9E' }}></span>
+                      非上場
+                    </span>
+                  </div>
+                </div>
+                <CompanyDiagram 
+                  companyId={getMockCompanyId(company.name)} 
+                  diagramType="capital" 
+                />
+              </TabsContent>
+              
+              <TabsContent value="business" className="mt-4">
+                <div className="mb-3 text-sm text-muted-foreground space-y-1">
+                  <p>• 黄色でハイライトされた企業が現在表示中の企業です</p>
+                  <p>• 青い矢印：ビジネス取引関係、灰色の点線：資本関係（親会社）</p>
+                </div>
+                <CompanyDiagram 
+                  companyId={getMockCompanyId(company.name)} 
+                  diagramType="business" 
+                />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
 
         {/* アクションボタン */}
         <div className="mt-8 flex gap-4 justify-center">

@@ -18,6 +18,7 @@ import {
 } from '@mui/material'
 import {
   CheckCircle,
+  BorderAll,
   RadioButtonUnchecked,
   Work,
   Psychology,
@@ -239,7 +240,7 @@ export function AnalysisSidebar({ user, onLogout }: AnalysisSidebarProps) {
               }}
           >
             <ListItemIcon sx={{ minWidth: 36 }}>
-              <History color="primary" />
+              <BorderAll color="primary"/>
             </ListItemIcon>
             <ListItemText
                 primary="企業相関図"
