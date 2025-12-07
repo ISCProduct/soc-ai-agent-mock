@@ -16,12 +16,12 @@ export function TabsList({ children, className = "" }: { children: React.ReactNo
   return <div className={`flex gap-2 ${className}`}>{children}</div>
 }
 
-export function TabsTrigger({ value, children }: { value: string; children: React.ReactNode }) {
+export function TabsTrigger({ value, children, className = "" }: { value: string; children: React.ReactNode; className?: string }) {
   return (
     <button
       type="button"
       onClick={() => (document.dispatchEvent(new CustomEvent("tabs-trigger", { detail: { value } }))) }
-      className="px-3 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/70"
+      className={`px-3 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/70 ${className}`}
     >
       {children}
     </button>

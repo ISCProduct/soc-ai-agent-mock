@@ -130,7 +130,25 @@ export function MuiChat() {
             timestamp: new Date(msg.created_at),
           }))
           setMessages(restoredMessages)
-          setQuestionCount(history.filter(msg => msg.role === 'user').length)
+          const userQuestionCount = history.filter(msg => msg.role === 'user').length
+          setQuestionCount(userQuestionCount)
+          
+          // sessionStorageから総質問数を復元（なければデフォルト15）
+          const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
+          const restoredTotalQuestions = savedTotalQuestions ? parseInt(savedTotalQuestions) : 15
+          setTotalQuestions(restoredTotalQuestions)
+          
+          // 進捗状況を通知（履歴復元時）
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('chatProgress', { 
+              detail: { 
+                messageCount: restoredMessages.length,
+                questionCount: userQuestionCount,
+                totalQuestions: restoredTotalQuestions,
+              } 
+            }))
+            console.log('[MUI Chat] Progress restored:', userQuestionCount, '/', restoredTotalQuestions)
+          }, 100)
           
           // 最後のメッセージが完了メッセージかチェック
           const lastMessage = history[history.length - 1]
@@ -247,7 +265,11 @@ export function MuiChat() {
           // 質問カウントの更新
           const newCount = response.answered_questions ?? questionCount + 1
           setQuestionCount(newCount)
-          setTotalQuestions(response.total_questions ?? 15)
+          const newTotalQuestions = response.total_questions ?? 15
+          setTotalQuestions(newTotalQuestions)
+          
+          // totalQuestionsをsessionStorageに保存
+          sessionStorage.setItem('totalQuestions', String(newTotalQuestions))
           
           // 進捗状況を親コンポーネントに通知（非同期で実行）
           setTimeout(() => {
@@ -255,7 +277,7 @@ export function MuiChat() {
               detail: { 
                 messageCount: newMessages.length,
                 questionCount: newCount,
-                totalQuestions: response.total_questions ?? 15,
+                totalQuestions: newTotalQuestions,
               } 
             }))
           }, 0)
@@ -263,8 +285,13 @@ export function MuiChat() {
           // **重要: バックエンドのis_completeのみを信頼**
           // バックエンドがtrueを返した時は分析完了状態にする
           console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
-          if (response.is_complete === true) {
-            console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
+          console.log('[MUI Chat] evaluated_categories:', response.evaluated_categories, 'total:', response.total_categories)
+          
+          // 分析の信頼性をチェック（全カテゴリ評価済み かつ 15問以上回答）
+          const hasReliableData = (response.evaluated_categories >= 10) && (newCount >= 15)
+          
+          if (response.is_complete === true && hasReliableData) {
+            console.log('[MUI Chat] AI分析完了（信頼性あり） - モーダルを表示します')
             
             // 全フェーズ完了かどうかをチェック
             const allCompleted = response.all_phases?.every((phase: any) => phase.is_completed) ?? false
@@ -275,6 +302,11 @@ export function MuiChat() {
               setAllPhasesCompleted(allCompleted)
               setShowCompletionModal(true)
             }, 1000)
+          } else if (response.is_complete === true && !hasReliableData) {
+            // データが不十分な場合は、完了モーダルを表示せずに継続
+            console.log('[MUI Chat] 分析完了したがデータ不十分 - チャット継続')
+            setAnalysisComplete(false)
+            setAllPhasesCompleted(false)
           } else {
             console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
             // 明示的にfalseを設定
@@ -282,8 +314,11 @@ export function MuiChat() {
             setAllPhasesCompleted(false)
           }
         } else {
-          // バリデーションエラーの場合は現在の状態を維持
+          // バリデーションエラーの場合は質問カウントを進めないが、完了状態はリセット
           console.log('[MUI Chat] Validation error detected, not updating question count')
+          // バリデーションエラー後も質問を継続できるように、完了状態を解除
+          setAnalysisComplete(false)
+          setAllPhasesCompleted(false)
         }
         
         return newMessages

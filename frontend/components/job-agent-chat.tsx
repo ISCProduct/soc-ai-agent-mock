@@ -136,9 +136,11 @@ export function JobAgentChat() {
           console.error("Failed to load scores:", error)
         }
         
-        // 完了状態をチェック（診断完了の特別なメッセージのみ）
+        // 完了状態をチェック（診断完了の特別なメッセージを確認）
         const lastMessage = history[history.length - 1]
-        if (lastMessage.role === "assistant" && lastMessage.content.includes("✅ 診断が完了しました")) {
+        if (lastMessage.role === "assistant" && 
+            (lastMessage.content.includes("分析が完了しました") || 
+             lastMessage.content.includes("診断が完了しました"))) {
           setIsComplete(true)
         }
       } else {

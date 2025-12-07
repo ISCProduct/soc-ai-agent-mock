@@ -16,6 +16,9 @@ COPY . .
 # Build the server application to /bin directory
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/server ./cmd/server
 
+# Build the large data seed command
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/seed-large ./cmd/seed-large
+
 # Runtime stage
 FROM golang:1.25-alpine
 
@@ -29,9 +32,10 @@ COPY --from=builder /app /app
 
 # Copy binary from builder to /bin (won't be overwritten by volume mount)
 COPY --from=builder /bin/server /bin/server
+COPY --from=builder /bin/seed-large /bin/seed-large
 
 # Make binary executable
-RUN chmod +x /bin/server
+RUN chmod +x /bin/server /bin/seed-large
 
 # Expose port
 EXPOSE 8080

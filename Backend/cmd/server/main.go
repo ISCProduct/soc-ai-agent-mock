@@ -77,22 +77,27 @@ func main() {
 	phaseRepo := repositories.NewAnalysisPhaseRepository(db)
 	progressRepo := repositories.NewUserAnalysisProgressRepository(db)
 	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
+	companyRepo := repositories.NewCompanyRepository(db)
+	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
+	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo)
 
 	// コントローラー層の初期化
 	authController := controllers.NewAuthController(authService)
 	oauthController := controllers.NewOAuthController(oauthService)
-	chatController := controllers.NewChatController(chatService)
+	chatController := controllers.NewChatController(chatService, matchingService)
 	questionController := controllers.NewQuestionController(questionService)
+	relationController := &controllers.CompanyRelationController{DB: db}
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
+	routes.SetupCompanyRoutes(relationController)
 
 	// ヘルスチェックエンドポイント
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
