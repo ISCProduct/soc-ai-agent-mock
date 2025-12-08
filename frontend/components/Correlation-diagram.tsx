@@ -29,17 +29,17 @@ type DiagramType = 'capital' | 'business';
 
 const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
     const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-    
+
     // ラベルの位置を計算（中点）
     const labelX = (sourceX + targetX) / 2;
     const labelY = (sourceY + targetY) / 2;
-    
+
     // エッジの角度を計算
     const angle = Math.atan2(targetY - sourceY, targetX - sourceX) * (180 / Math.PI);
-    
+
     // テキストが逆さまにならないように調整（-90度〜90度の範囲に収める）
     const adjustedAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
-    
+
     return (
         <>
             <path
@@ -161,7 +161,7 @@ export default function CorrelationDiagram() {
             const nodes: Node[] = [];
             const ids = Array.from(companyIds);
             const cols = Math.ceil(Math.sqrt(ids.length));
-            
+
             ids.forEach((id, idx) => {
                 const row = Math.floor(idx / cols);
                 const col = idx % cols;
@@ -174,9 +174,9 @@ export default function CorrelationDiagram() {
                     data: {
                         label: (
                             <Box sx={{ textAlign: 'center', p: 1, minWidth: '140px' }}>
-                                <Typography 
-                                    variant="body2" 
-                                    sx={{ 
+                                <Typography
+                                    variant="body2"
+                                    sx={{
                                         fontSize: '13px',
                                         fontWeight: 500,
                                         lineHeight: 1.3,
@@ -184,7 +184,7 @@ export default function CorrelationDiagram() {
                                         wordBreak: 'break-word',
                                     }}
                                 >
-                                    {getCompanyName(id).length > 20 
+                                    {getCompanyName(id).length > 20
                                         ? getCompanyName(id).substring(0, 20) + '...'
                                         : getCompanyName(id)
                                     }
@@ -218,7 +218,7 @@ export default function CorrelationDiagram() {
         }
 
         const relatedIds = new Set([focusCompanyId]);
-        
+
         relations.forEach(rel => {
             if (type === 'capital' && rel.relation_type.startsWith('capital')) {
                 if (rel.parent_id === focusCompanyId || rel.child_id === focusCompanyId) {
@@ -250,9 +250,9 @@ export default function CorrelationDiagram() {
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1.5, minWidth: '140px' }}>
-                            <Typography 
-                                variant="body2" 
-                                sx={{ 
+                            <Typography
+                                variant="body2"
+                                sx={{
                                     fontWeight: isFocusCompany ? 700 : 500,
                                     fontSize: isFocusCompany ? '14px' : '13px',
                                     mb: 0.5,
@@ -433,13 +433,13 @@ export default function CorrelationDiagram() {
                         attributionPosition="bottom-right"
                     >
                         <Background color="#aaa" gap={16} />
-                        <Controls 
+                        <Controls
                             showZoom={true}
                             showFitView={true}
                             showInteractive={true}
                             position="top-right"
                         />
-                        <MiniMap 
+                        <MiniMap
                             nodeColor={(node) => {
                                 const border = node.style?.border as string;
                                 if (border?.includes('#FFA726')) return '#FFA726';

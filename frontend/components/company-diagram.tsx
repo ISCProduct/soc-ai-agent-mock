@@ -29,7 +29,7 @@ type DiagramType = 'capital' | 'business';
 
 const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
     const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-    
+
     return (
         <>
             <path
@@ -96,7 +96,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
     const createCapitalNodes = useCallback((focusCompanyId: number): Node[] => {
         const relatedIds = new Set([focusCompanyId]);
-        
+
         // 資本関係のあるIDを収集
         relations.forEach(rel => {
             if (rel.relation_type.startsWith('capital')) {
@@ -121,9 +121,9 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
             if (processedIds.has(compId)) return xOffset;
             processedIds.add(compId);
 
-            const children = relations.filter(rel => 
-                rel.relation_type.startsWith('capital') && 
-                rel.parent_id === compId && 
+            const children = relations.filter(rel =>
+                rel.relation_type.startsWith('capital') &&
+                rel.parent_id === compId &&
                 relatedIds.has(rel.child_id!)
             );
 
@@ -152,8 +152,8 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
-                            <Typography 
-                                variant="body2" 
+                            <Typography
+                                variant="body2"
                                 sx={{ fontWeight: isFocusCompany ? 'bold' : 'normal', mb: 0.5 }}
                             >
                                 {getCompanyName(compId)}
@@ -186,9 +186,9 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
         // トップレベルの親会社を見つける
         const parentCompanies = Array.from(relatedIds).filter(id => {
-            return !relations.some(rel => 
-                rel.relation_type.startsWith('capital') && 
-                rel.child_id === id && 
+            return !relations.some(rel =>
+                rel.relation_type.startsWith('capital') &&
+                rel.child_id === id &&
                 relatedIds.has(rel.parent_id!)
             );
         });
@@ -204,7 +204,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
     const createCapitalEdges = useCallback((focusCompanyId: number): Edge[] => {
         const relatedIds = new Set([focusCompanyId]);
-        
+
         relations.forEach(rel => {
             if (rel.relation_type.startsWith('capital')) {
                 if (rel.parent_id === focusCompanyId || rel.child_id === focusCompanyId) {
@@ -221,7 +221,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         });
 
         return relations
-            .filter(rel => 
+            .filter(rel =>
                 rel.relation_type.startsWith('capital') &&
                 rel.parent_id && rel.child_id &&
                 relatedIds.has(rel.parent_id) && relatedIds.has(rel.child_id)
@@ -247,7 +247,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
     const createBusinessNodes = useCallback((focusCompanyId: number): Node[] => {
         const relatedIds = new Set([focusCompanyId]);
-        
+
         relations.forEach(rel => {
             if (rel.relation_type === 'business') {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
@@ -280,8 +280,8 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
-                            <Typography 
-                                variant="body2" 
+                            <Typography
+                                variant="body2"
                                 sx={{ fontWeight: isFocusCompany ? 'bold' : 'normal', mb: 0.5 }}
                             >
                                 {getCompanyName(compId)}
@@ -314,7 +314,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     const createBusinessEdges = useCallback((focusCompanyId: number): Edge[] => {
         const edges: Edge[] = [];
         const relatedIds = new Set([focusCompanyId]);
-        
+
         relations.forEach(rel => {
             if (rel.relation_type === 'business') {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
