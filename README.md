@@ -159,10 +159,5 @@ docker build -t soc-frontend:local frontend
 - OpenAI キーがない: `OPENAI_API_KEY` を設定しないとバックエンドは初期化時にエラーを返します（`Backend/internal/openai` に依存）。
 - フロントのビルド失敗: Node のバージョンを確認（推奨は安定した LTS または Next.js の要件に合わせる）。
 
-**次のステップ（提案）**
-
-- GitHub Actions による CI (Lint + Unit + Playwright E2E) の追加。
-- `Makefile` や `justfile` を追加して開発コマンドを統一。
-- バックエンドのユニットテスト追加（`internal/` のサービス層のテストなど）。
 
 ---
