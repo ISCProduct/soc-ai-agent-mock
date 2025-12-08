@@ -166,5 +166,3 @@ docker build -t soc-frontend:local frontend
 - バックエンドのユニットテスト追加（`internal/` のサービス層のテストなど）。
 
 ---
-
-もし README に他に載せたい情報（API エンドポイント仕様、DB スキーマ、CI サンプル等）があれば教えてください。追加で GitHub Actions CI のサンプルや `docker-compose` の簡易構成も作成します。
