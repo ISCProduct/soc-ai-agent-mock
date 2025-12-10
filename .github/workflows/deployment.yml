@@ -1,60 +1,83 @@
-name: Deploy to Amazon ECS
+name: Deploy Frontend & Backend to ECS
 
 on:
   push:
-    branches: [ "main" ]
-
-env:
-  AWS_REGION: ap-northeast-1
-  ECR_REPOSITORY: soc-app
-  ECS_SERVICE: soc-app-task-service
-  ECS_CLUSTER: soc-app-cluster
-  ECS_TASK_DEFINITION_TEMPLATE: .aws/task-definition-template.json
-  ECS_TASK_DEFINITION: .aws/task-definition.json
-  CONTAINER_NAME: soc-app
-
-permissions:
-  contents: read
+    branches:
+      - main
 
 jobs:
   deploy:
-    name: Deploy
     runs-on: ubuntu-latest
-    environment: production
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      # ECR
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+      ECR_REPOSITORY_FRONTEND: ${{ secrets.ECR_REPOSITORY_FRONTEND }}
+      ECR_REPOSITORY_BACKEND: ${{ secrets.ECR_REPOSITORY_BACKEND }}
+      IMAGE_TAG: ${{ github.sha }}
+
+      # ECS
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+      ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY }}
 
     steps:
-      - name: Checkout source code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      # ===== 1) フロントエンドのイメージをビルド & Push =====
+      - name: Build frontend image
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG frontend
 
-      - name: Replace image in task definition template
+      - name: Push frontend image
         run: |
-          sed "s|REPLACE_IMAGE|${{ steps.build-image.outputs.image }}|g" $ECS_TASK_DEFINITION_TEMPLATE > $ECS_TASK_DEFINITION
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
 
+      # ===== 2) バックエンドのイメージをビルド & Push =====
+      - name: Build backend image
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG backend
+
+      - name: Push backend image
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
+
+      # ===== 3) タスク定義にフロント用イメージを適用 =====
+      - name: Render task definition (frontend)
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .aws/task-definition-template.json
+          container-name: soc-frontend
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
+
+      # ===== 4) その結果にバックエンド用イメージも適用 =====
+      - name: Render task definition (backend)
+        id: render-backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          container-name: soc-backend
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ env.IMAGE_TAG }}
+
+      # ===== 5) 最終的なタスク定義でサービスを更新 =====
       - name: Deploy to Amazon ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          task-definition: ${{ steps.render-backend.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
