@@ -38,31 +38,33 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       # =========================
-      # 1) フロントエンド ビルド
+      # Buildx のセットアップ
+      # =========================
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # =========================
+      # フロントエンドのビルドとプッシュ
       # =========================
       - name: Build frontend image
         working-directory: ./frontend
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
-
-      - name: Push frontend image
-        run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
+          docker buildx build --platform linux/amd64 \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
+            --push .
 
       # =========================
-      # 2) バックエンド ビルド
+      # バックエンドのビルドとプッシュ
       # =========================
       - name: Build backend image
-        working-directory: ./Backend     # 修正ポイント（大文字対応）
+        working-directory: ./Backend
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
-
-      - name: Push backend image
-        run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
+          docker buildx build --platform linux/amd64 \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
+            --push .
 
       # =========================
-      # 3) タスク定義の更新（フロント）
+      # タスク定義の更新（フロント）
       # =========================
       - name: Render task definition (frontend)
         id: render-frontend
@@ -73,7 +75,7 @@ jobs:
           image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
 
       # =========================
-      # 4) タスク定義の更新（バックエンド）
+      # タスク定義の更新（バックエンド）
       # =========================
       - name: Render task definition (backend)
         id: render-backend
@@ -84,7 +86,7 @@ jobs:
           image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ env.IMAGE_TAG }}
 
       # =========================
-      # 5) ECS にデプロイ
+      # ECS デプロイ
       # =========================
       - name: Deploy to Amazon ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
