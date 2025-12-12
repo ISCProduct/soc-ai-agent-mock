@@ -26,10 +26,62 @@ func NewMatchingService(
 	}
 }
 
-// CalculateMatching ユーザーと企業のマッチングを計算（高速化のため無効化）
+// CalculateMatching ユーザーと企業のマッチングを計算
 func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, sessionID string) error {
-	// 事前計算済みデータを使用するため、実際の計算はスキップ
-	fmt.Printf("[CalculateMatching] Skipped (using pre-calculated data) for user %d, session %s\n", userID, sessionID)
+	fmt.Printf("[CalculateMatching] Starting matching calculation for user %d, session %s\n", userID, sessionID)
+
+	// 1. ユーザーのスコアを取得
+	userScores, err := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get user scores: %w", err)
+	}
+
+	if len(userScores) == 0 {
+		fmt.Printf("[CalculateMatching] No user scores found for user %d, session %s\n", userID, sessionID)
+		return nil
+	}
+
+	// スコアをマップに変換
+	scoreMap := make(map[string]float64)
+	for _, score := range userScores {
+		scoreMap[score.WeightCategory] = float64(score.Score)
+	}
+
+	fmt.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
+
+	// 2. 全企業のプロファイルを取得
+	companies, err := s.companyRepo.FindAllActive()
+	if err != nil {
+		return fmt.Errorf("failed to get companies: %w", err)
+	}
+
+	fmt.Printf("[CalculateMatching] Found %d active companies\n", len(companies))
+
+	// 3. 各企業とのマッチングを計算
+	matchCount := 0
+	for _, company := range companies {
+		// 企業のweightプロファイルを取得
+		profile, err := s.companyRepo.GetWeightProfile(company.ID, nil)
+		if err != nil {
+			fmt.Printf("[CalculateMatching] Warning: No profile for company %d: %v\n", company.ID, err)
+			continue
+		}
+
+		// マッチングスコアを計算
+		match := s.calculateMatchScore(scoreMap, profile)
+		match.UserID = userID
+		match.SessionID = sessionID
+		match.CompanyID = company.ID
+
+		// マッチング結果を保存
+		if err := s.matchRepo.CreateOrUpdate(match); err != nil {
+			fmt.Printf("[CalculateMatching] Warning: Failed to save match for company %d: %v\n", company.ID, err)
+			continue
+		}
+		matchCount++
+	}
+
+	fmt.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
 }
 

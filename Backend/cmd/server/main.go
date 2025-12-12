@@ -74,6 +74,8 @@ func main() {
 	chatMessageRepo := repositories.NewChatMessageRepository(db)
 	userWeightScoreRepo := repositories.NewUserWeightScoreRepository(db)
 	aiGeneratedQuestionRepo := repositories.NewAIGeneratedQuestionRepository(db)
+	predefinedQuestionRepo := repositories.NewPredefinedQuestionRepository(db)
+	jobCategoryRepo := repositories.NewJobCategoryRepository(db)
 	phaseRepo := repositories.NewAnalysisPhaseRepository(db)
 	progressRepo := repositories.NewUserAnalysisProgressRepository(db)
 	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
@@ -83,7 +85,7 @@ func main() {
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo)
+	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo)
 
