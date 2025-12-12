@@ -288,9 +288,13 @@ export function MuiChat() {
           console.log('[MUI Chat] evaluated_categories:', response.evaluated_categories, 'total:', response.total_categories)
           
           // 分析の信頼性をチェック（全カテゴリ評価済み かつ 15問以上回答）
-          const hasReliableData = (response.evaluated_categories >= 10) && (newCount >= 15)
-          
-          if (response.is_complete === true && hasReliableData) {
+            const hasReliableData =
+                typeof response.evaluated_categories === 'number' &&
+                response.evaluated_categories >= 10 &&
+                newCount >= 15;
+
+
+            if (response.is_complete === true && hasReliableData) {
             console.log('[MUI Chat] AI分析完了（信頼性あり） - モーダルを表示します')
             
             // 全フェーズ完了かどうかをチェック

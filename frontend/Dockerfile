@@ -1,28 +1,29 @@
-FROM node:20-alpine
-
-# 作業ディレクトリの設定
+# Build stage
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# 依存関係ファイルのみをコピー
+# パッケージのインストール
 COPY package*.json ./
-
-# 依存関係のインストール (開発に必要なもの全て)
-# ホットリロードのためのファイル監視ツール (chokidar など) もインストールされます
 RUN npm install
 
-# ----------------------------------------------------------------------------
-# 開発・実行ステージ
-# ----------------------------------------------------------------------------
+# ソースコード全体をコピー
+COPY . .
 
-# アプリケーションソースコードは Docker Volume でマウントすることを推奨
+# ビルド
+RUN npm run build
 
-# 開発環境を指定（デフォルトは development ですが、明示的に）
-ENV NODE_ENV development
+# Production stage
+FROM node:20-alpine
+WORKDIR /app
 
-# Next.js のデフォルトポート
+ENV NODE_ENV=production
+
+# 本番環境にもソースコードとビルド成果物を含める
+COPY --from=builder /app /app
+
+# .env が必要であれば下記を有効化（ECSなどでSecrets経由推奨）
+# COPY .env .env
+
+# Next.js の本番サーバを起動
 EXPOSE 3000
-
-# 開発サーバー起動
-# このコマンドはファイル変更を監視し、ホットリロードを有効にします
-# ソースコードはホストマシンから volume mount されていることを前提とします
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]

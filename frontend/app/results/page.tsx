@@ -164,7 +164,17 @@ function ResultsContent() {
         
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
           console.error('[Results] No recommendations available')
-          setError('まだ企業マッチングデータがありません。チャットで診断を完了してください。')
+          console.error('[Results] Debug info - User ID:', userId, 'Session ID:', sessionId)
+          console.error('[Results] Response data:', data)
+          setError(
+            'まだ企業マッチングデータがありません。\n\n' +
+            '診断を完了してから数秒待ち、このページを更新してください。\n' +
+            '診断が未完了の場合は、チャット画面で最低15問に回答してください。\n\n' +
+            `デバッグ情報:\n` +
+            `- ユーザーID: ${userId}\n` +
+            `- セッションID: ${sessionId}\n` +
+            `- レスポンス: ${JSON.stringify(data)}`
+          )
           setLoading(false)
           return
         }
@@ -410,12 +420,31 @@ function ResultsContent() {
         gap: 2,
         p: 3,
       }}>
-        <Typography variant="h6" color="error">
+        <Typography variant="h6" color="error" sx={{ whiteSpace: 'pre-line', textAlign: 'center' }}>
           {error}
         </Typography>
-        <Button variant="outlined" onClick={handleReset}>
-          最初からやり直す
-        </Button>
+        <Stack direction="row" spacing={2}>
+          <Button 
+            variant="contained" 
+            startIcon={<Refresh />}
+            onClick={() => window.location.reload()}
+          >
+            ページを更新
+          </Button>
+          <Button 
+            variant="outlined" 
+            onClick={() => router.push('/chat')}
+          >
+            チャットに戻る
+          </Button>
+          <Button 
+            variant="outlined" 
+            color="error"
+            onClick={handleReset}
+          >
+            最初からやり直す
+          </Button>
+        </Stack>
       </Box>
     )
   }

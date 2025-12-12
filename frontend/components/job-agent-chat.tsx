@@ -23,6 +23,35 @@ type UserScore = {
   reason: string
 }
 
+type ChoiceOption = {
+  number: number
+  text: string
+}
+
+// メッセージから選択肢を抽出する関数
+function extractChoices(content: string): { choices: ChoiceOption[], mainText: string } {
+  const lines = content.split('\n')
+  const choices: ChoiceOption[] = []
+  const mainTextLines: string[] = []
+  
+  for (const line of lines) {
+    // "1. 〜" "2. 〜" のようなパターンを検出
+    const match = line.match(/^(\d+)\.\s*(.+)$/)
+    if (match) {
+      const number = parseInt(match[1])
+      const text = match[2].trim()
+      choices.push({ number, text })
+    } else if (line.trim()) {
+      mainTextLines.push(line)
+    }
+  }
+  
+  return {
+    choices: choices.length >= 3 ? choices : [], // 3つ以上の選択肢がある場合のみ
+    mainText: mainTextLines.join('\n')
+  }
+}
+
 export function JobAgentChat() {
   // セッションIDを最初に初期化（他のstateより先に）
   const [sessionId, setSessionId] = useState<string>(() => {
@@ -65,6 +94,7 @@ export function JobAgentChat() {
   const [isTyping, setIsTyping] = useState(false)
   const [userScores, setUserScores] = useState<UserScore[]>([])
   const [progress, setProgress] = useState({ questions: 0, total: 15, categories: 0, totalCategories: 10 })
+  const [showCustomInput, setShowCustomInput] = useState(false) // カスタム入力モード
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // メッセージが更新されたらキャッシュに保存
@@ -313,6 +343,12 @@ export function JobAgentChat() {
     return <CompanyResults userData={{ scores: userScores }} onResetAction={handleReset} />
   }
 
+  // 最後のメッセージに選択肢があるかチェック
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+  const hasChoicesInLastMessage = lastMessage && lastMessage.role === "agent" 
+    ? extractChoices(lastMessage.content).choices.length > 0 
+    : false
+
   return (
       <div className="flex justify-center items-center h-screen bg-background p-4">
         <Card className="flex flex-col w-full max-w-4xl h-[90vh] border-2">
@@ -377,7 +413,12 @@ export function JobAgentChat() {
               </div>
             ) : (
               <>
-                {messages.map((message) => (
+                {messages.map((message, index) => {
+                  const isLastMessage = index === messages.length - 1
+                  const isAgentMessage = message.role === "agent"
+                  const { choices, mainText } = isAgentMessage ? extractChoices(message.content) : { choices: [], mainText: message.content }
+                  
+                  return (
                     <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
                       <Avatar className={`w-10 h-10 ${message.role === "agent" ? "bg-primary" : "bg-accent"} flex-shrink-0`}>
                         <AvatarFallback>
@@ -389,18 +430,41 @@ export function JobAgentChat() {
                         </AvatarFallback>
                       </Avatar>
                       <div
-                          className={`flex flex-col gap-2 max-w-[75%] ${message.role === "user" ? "items-end" : "items-start"}`}
+                          className={`flex flex-col gap-3 max-w-[75%] ${message.role === "user" ? "items-end" : "items-start"}`}
                       >
                         <div
                             className={`rounded-2xl px-4 py-3 ${
                                 message.role === "agent" ? "bg-muted text-foreground" : "bg-primary text-primary-foreground"
                             }`}
                         >
-                          <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
+                          <p className="text-sm leading-relaxed whitespace-pre-line">
+                            {choices.length > 0 ? mainText : message.content}
+                          </p>
                         </div>
+                        
+                        {/* 選択肢ボタン（エージェントの最後のメッセージで、選択肢がある場合のみ表示） */}
+                        {isAgentMessage && isLastMessage && choices.length > 0 && !isLoadingFromBackend && (
+                          <div className="flex flex-col gap-2 w-full">
+                            {choices.map((choice) => (
+                              <Button
+                                key={choice.number}
+                                variant="outline"
+                                className="justify-start text-left h-auto py-3 px-4 hover:bg-primary hover:text-primary-foreground transition-colors"
+                                onClick={() => {
+                                  handleSend(choice.number.toString())
+                                  setShowCustomInput(false) // 選択肢クリック時はカスタム入力モードをリセット
+                                }}
+                              >
+                                <span className="font-semibold mr-2">{choice.number}.</span>
+                                <span>{choice.text}</span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                ))}
+                  )
+                })}
                 {isTyping && (
                     <div className="flex gap-3">
                       <Avatar className="w-10 h-10 bg-primary flex-shrink-0">
@@ -423,24 +487,53 @@ export function JobAgentChat() {
           </div>
 
           <div className="border-t p-4">
-            <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  handleSend()
-                }}
-                className="flex gap-2"
-            >
-              <Input
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  placeholder="メッセージを入力..."
-                  className="flex-1"
-                  disabled={isLoadingFromBackend || isInitializing}
-              />
-              <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing}>
-                <Send className="w-4 h-4" />
-              </Button>
-            </form>
+            {hasChoicesInLastMessage && !showCustomInput ? (
+              // 選択肢がある場合は「その他を入力」ボタンのみ表示
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowCustomInput(true)}
+                  className="w-full sm:w-auto"
+                >
+                  その他を入力
+                </Button>
+              </div>
+            ) : (
+              // 通常の入力フォーム
+              <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleSend()
+                    setShowCustomInput(false) // 送信後はリセット
+                  }}
+                  className="flex gap-2"
+              >
+                <Input
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    placeholder="メッセージを入力..."
+                    className="flex-1"
+                    disabled={isLoadingFromBackend || isInitializing}
+                    autoFocus={showCustomInput} // カスタム入力モード時は自動フォーカス
+                />
+                <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing}>
+                  <Send className="w-4 h-4" />
+                </Button>
+                {/* カスタム入力モード時はキャンセルボタンを表示 */}
+                {showCustomInput && (
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={() => {
+                      setShowCustomInput(false)
+                      setInputValue("")
+                    }}
+                  >
+                    キャンセル
+                  </Button>
+                )}
+              </form>
+            )}
           </div>
         </Card>
       </div>

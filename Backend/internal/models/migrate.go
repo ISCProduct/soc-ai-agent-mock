@@ -13,6 +13,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&AIGeneratedQuestion{},
 		&WeightRule{},
 		&QuestionWeight{},
+		&PredefinedQuestion{}, // 事前定義質問（ルールベース判定用）
 		&ChatMessage{},
 		&UserWeightScore{},
 		&AnalysisPhase{},

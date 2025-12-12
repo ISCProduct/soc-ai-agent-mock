@@ -17,10 +17,14 @@ type ChatService struct {
 	chatMessageRepo         *repositories.ChatMessageRepository
 	userWeightScoreRepo     *repositories.UserWeightScoreRepository
 	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository
+	predefinedQuestionRepo  *repositories.PredefinedQuestionRepository
+	jobCategoryRepo         *repositories.JobCategoryRepository
 	userRepo                *repositories.UserRepository
 	phaseRepo               *repositories.AnalysisPhaseRepository
 	progressRepo            *repositories.UserAnalysisProgressRepository
 	sessionValidationRepo   *repositories.SessionValidationRepository
+	answerEvaluator         *AnswerEvaluator
+	jobValidator            *JobCategoryValidator
 }
 
 func NewChatService(
@@ -29,6 +33,8 @@ func NewChatService(
 	chatMessageRepo *repositories.ChatMessageRepository,
 	userWeightScoreRepo *repositories.UserWeightScoreRepository,
 	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository,
+	predefinedQuestionRepo *repositories.PredefinedQuestionRepository,
+	jobCategoryRepo *repositories.JobCategoryRepository,
 	userRepo *repositories.UserRepository,
 	phaseRepo *repositories.AnalysisPhaseRepository,
 	progressRepo *repositories.UserAnalysisProgressRepository,
@@ -40,10 +46,14 @@ func NewChatService(
 		chatMessageRepo:         chatMessageRepo,
 		userWeightScoreRepo:     userWeightScoreRepo,
 		aiGeneratedQuestionRepo: aiGeneratedQuestionRepo,
+		predefinedQuestionRepo:  predefinedQuestionRepo,
+		jobCategoryRepo:         jobCategoryRepo,
 		userRepo:                userRepo,
 		phaseRepo:               phaseRepo,
 		progressRepo:            progressRepo,
 		sessionValidationRepo:   sessionValidationRepo,
+		answerEvaluator:         NewAnswerEvaluator(),
+		jobValidator:            NewJobCategoryValidator(aiClient, jobCategoryRepo),
 	}
 }
 
@@ -130,6 +140,59 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	history, err := s.chatMessageRepo.FindRecentBySessionID(req.SessionID, 100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chat history: %w", err)
+	}
+
+	// 2-1. 最初の回答（職種回答）の判定
+	if len(history) == 2 { // 初回質問 + 初回回答
+		fmt.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
+		jobValidation, err := s.jobValidator.ValidateJobCategory(ctx, req.Message)
+		if err != nil {
+			fmt.Printf("[JobValidation] Error: %v\n", err)
+			// エラーでも続行
+		} else if jobValidation != nil {
+			if jobValidation.IsValid && len(jobValidation.MatchedCategories) > 0 {
+				// 明確に職種が特定できた場合
+				fmt.Printf("[JobValidation] Valid job category matched: %d categories\n", len(jobValidation.MatchedCategories))
+				// 診断開始メッセージと最初の質問
+				response := "ありがとうございます！それでは、適性診断を始めますね。"
+
+				assistantMsg := &models.ChatMessage{
+					SessionID: req.SessionID,
+					UserID:    req.UserID,
+					Role:      "assistant",
+					Content:   response,
+				}
+				s.chatMessageRepo.Create(assistantMsg)
+
+				return &ChatResponse{
+					Response:            response,
+					IsComplete:          false,
+					TotalQuestions:      15,
+					AnsweredQuestions:   0,
+					TotalCategories:     10,
+					EvaluatedCategories: 0,
+				}, nil
+
+			} else if jobValidation.NeedsClarification && jobValidation.SuggestedQuestion != "" {
+				// 職種が曖昧な場合は選択肢を提示
+				fmt.Printf("[JobValidation] Needs clarification, presenting options\n")
+
+				assistantMsg := &models.ChatMessage{
+					SessionID: req.SessionID,
+					UserID:    req.UserID,
+					Role:      "assistant",
+					Content:   jobValidation.SuggestedQuestion,
+				}
+				s.chatMessageRepo.Create(assistantMsg)
+
+				return &ChatResponse{
+					Response:          jobValidation.SuggestedQuestion,
+					IsComplete:        false,
+					TotalQuestions:    15,
+					AnsweredQuestions: 0,
+				}, nil
+			}
+		}
 	}
 
 	// 2.5. 回答の妥当性チェック（保存後のhistoryを使用）
@@ -315,7 +378,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		fmt.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
 	}
 
-	// 常にAIで戦略的に質問を生成
+	// 常にまずルールベース質問を試し、なければAIで生成
 	var questionWeightID uint
 	var aiResponse string
 
@@ -325,10 +388,21 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		recentHistory = history[len(history)-10:]
 	}
 
-	fmt.Printf("Generating strategic question with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
-	aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID, currentPhase)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate question: %w", err)
+	// まず、ルールベース質問から選択を試みる
+	fmt.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
+	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, req.JobCategoryID, askedTexts)
+
+	if err == nil && predefinedQ != nil {
+		fmt.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
+		aiResponse = predefinedQ.QuestionText
+		questionWeightID = predefinedQ.ID
+	} else {
+		// ルールベース質問がない場合、AIで生成
+		fmt.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
+		aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID, currentPhase)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate question: %w", err)
+		}
 	}
 
 	// 5. フェーズベースの完了判定
@@ -619,16 +693,16 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	}
 
 	categoryDescriptions := map[string]string{
-		"技術志向":        "プログラミング、新技術への興味、技術的深掘り、保有資格、技術経験 → 技術主導企業かサポート企業か",
-		"コミュニケーション能力": "対話力、説明力、協調性、プレゼン経験 → チーム重視企業か個人裁量企業か",
-		"リーダーシップ":     "主導性、意思決定、メンバー育成、リーダー経験 → マネジメント志向かスペシャリスト志向か",
-		"チームワーク":      "協働、役割認識、チーム貢献、チームプロジェクト経験 → 大規模チーム企業か少数精鋭企業か",
-		"問題解決力":       "論理思考、課題分析、解決策創出、問題解決の実績 → コンサル系か開発系か",
-		"創造性・発想力":     "独創性、革新性、新アプローチ、創作活動やアイデア実現の経験 → スタートアップか大企業か",
-		"計画性・実行力":     "目標設定、タスク管理、完遂力、プロジェクト管理経験 → プロジェクト型企業か運用型企業か",
-		"学習意欲・成長志向":   "継続学習、成長意識、フィードバック受容、資格取得や自己学習の実績 → 教育重視企業か実践重視企業か",
-		"ストレス耐性・粘り強さ": "困難対処、プレッシャー対応、困難を乗り越えた経験 → 高負荷環境かワークライフバランス重視か",
-		"ビジネス思考・目標志向": "ビジネス価値理解、成果志向、ビジネス関連の経験や学習 → 事業会社か受託開発か",
+		"技術志向":       "プログラミングや技術への興味、学習経験（授業、趣味、独学）→ 技術主導企業か事業主導企業か",
+		"コミュニケーション力": "対話力、説明力、プレゼン経験（授業発表、サークル）→ チーム重視企業か個人裁量企業か",
+		"リーダーシップ志向":  "主導性、提案力、まとめ役経験（グループワーク、サークル）→ マネジメント志向かスペシャリスト志向か",
+		"チームワーク志向":   "協力、役割認識、グループ活動経験（授業、サークル、バイト）→ 大規模チーム企業か少数精鋭企業か",
+		"創造性志向":      "独創性、アイデア発想、工夫した経験（課題、趣味）→ スタートアップか大企業か",
+		"安定志向":       "長期的キャリア観、安定性重視 → 大手企業かベンチャーか",
+		"成長志向":       "学習意欲、自己成長、新しい挑戦（資格、自主学習）→ 教育重視企業か実践重視企業か",
+		"チャレンジ志向":    "困難への挑戦、失敗を恐れない姿勢 → 挑戦推奨文化か安定志向文化か",
+		"細部志向":       "丁寧さ、正確性、品質へのこだわり → 品質重視企業かスピード重視企業か",
+		"ワークライフバランス": "仕事と私生活のバランス観 → ワークライフバランス重視企業か成果主義企業か",
 	}
 
 	// フェーズ情報を追加
@@ -644,8 +718,8 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			currentPhase.QuestionsAsked+1)
 	}
 
-	prompt := fmt.Sprintf(`あなたは就職活動の適性診断と企業マッチングの専門家です。
-これまでの会話と評価状況を分析し、**企業選定に直結する戦略的な質問**を1つ生成してください。
+	prompt := fmt.Sprintf(`あなたは新卒学生向けの就職適性診断の専門家です。
+これまでの会話と評価状況を分析し、**学生が答えやすく、企業選定に役立つ質問**を1つ生成してください。
 %s
 ## これまでの会話
 %s
@@ -660,77 +734,75 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 ## 対象カテゴリ: %s
 %s
 
-## 企業選定との関連性を重視した質問作成ガイドライン
+## 【重要】新卒学生向け質問作成ガイドライン
 
-### 1. **企業タイプの絞り込みに直結**
-質問への回答が、以下のような企業選定の判断材料になること：
-- スタートアップ vs 大企業
-- 自社開発 vs 受託開発
-- 技術特化 vs ビジネス重視
-- グローバル vs 国内
-- チーム型 vs 個人裁量型
+### 1. **実務経験を前提としない**
+❌ 悪い例: 「プロジェクトリーダーとしての経験は？」
+✅ 良い例: 「グループ活動で、自分から提案したことはありますか？」
 
-### 2. **具体的な状況設定**
-抽象的な質問ではなく、実際の業務シーンを想定：
-- 「新しいプロジェクトが始まるとき、あなたは...」
-- 「チームで意見が分かれたとき、あなたは...」
-- 「締め切りが迫っているとき、あなたは...」
+❌ 悪い例: 「業務での課題解決経験は？」
+✅ 良い例: 「授業やサークルで困ったとき、どう対処しましたか？」
 
-### 3. **段階的な選択肢の提示**
-完全なオープン質問より、選択肢や具体例を示す：
-- 「A、B、Cのような状況で、どのアプローチを取りますか？」
-- 「1〜5のうち、どれに近いですか？」
+### 2. **学生生活で答えられる質問**
+以下のような場面を想定：
+- 授業、ゼミ、グループワーク
+- サークル、部活動
+- アルバイト
+- 趣味、個人の活動
+- 資格勉強、自主学習
 
-### 4. **深掘りと文脈理解**
-これまでの回答を踏まえた自然な流れ：
-- 前の回答で触れた内容を掘り下げる
-- 矛盾や曖昧な点を明確にする
+### 3. **具体的で答えやすい**
+抽象的な質問より、具体的なシーンを想定：
+✅ 「グループワークで意見が分かれたとき、どうしましたか？」
+✅ 「プログラミングを学び始めたきっかけは何ですか？」
+✅ 「サークルやバイトで、どんな役割が多かったですか？」
 
-### 5. **企業文化との適合性を判定**
-- 失敗への向き合い方 → 挑戦を推奨する文化 vs 安定志向
-- 意思決定のスタイル → トップダウン vs ボトムアップ
-- 働き方の優先順位 → 成果重視 vs プロセス重視
+### 4. **小さな経験も評価**
+「どんな小さなことでも構いません」と添える：
+✅ 「リーダー経験がなくても、自分から提案したことはありますか？」
+✅ 「プログラミング経験が少なくても、興味はありますか？」
 
-## 質問の例（良い例）
+### 5. **選択肢や例を示す**
+完全にオープンではなく、具体例を示す：
+✅ 「勉強するとき、A) 一人で集中する、B) 友人と一緒に、C) 先生に質問、どれが多いですか？」
 
-**技術志向を評価する場合:**
-「新しい技術やツールを学ぶとき、どのようなアプローチを取りますか？
-A) 公式ドキュメントを読み込んで体系的に理解する
-B) まず実際に手を動かしてみて、必要に応じて調べる
-C) チュートリアルや解説記事を参考に学ぶ
-D) 経験者に教えてもらいながら学ぶ」
+## 質問の例（新卒向け・良い例）
 
-**チームワークを評価する場合:**
-「チームメンバーが困っているとき、あなたはどのように行動しますか？具体的なエピソードがあれば教えてください。」
+**技術志向:**
+「プログラミングや技術的なことに興味はありますか？もし学んだことがあれば、授業、趣味、独学など、どんな形でも良いので教えてください。」
 
-**ビジネス思考を評価する場合:**
-「作ったシステムやプロダクトについて、どのような点を最も重視しますか？
-- 技術的な完成度
-- ユーザーの使いやすさ
-- ビジネスへの貢献
-- 保守性や拡張性」
+**チームワーク:**
+「グループワークやサークル活動で、メンバーと協力したことはありますか？その時、あなたはどんな役割でしたか？」
+
+**リーダーシップ:**
+「グループで何かをするとき、自分から提案したり、まとめ役をしたことはありますか？どんな小さなことでも構いません。」
+
+**問題解決:**
+「課題やレポートで行き詰まったとき、どうやって解決しますか？最近の例があれば教えてください。」
+
+**学習意欲:**
+「新しいことを学ぶのは好きですか？最近、何か新しく始めたことや、挑戦したことはありますか？」
+
+**コミュニケーション:**
+「人と話すことや、自分の考えを伝えることは得意ですか？授業やサークルでの発表、アルバイトでの接客など、経験があれば教えてください。」
+
+## 【重要】避けるべき表現
+
+❌ 「プロジェクト」→ ✅ 「グループワーク」「課題」
+❌ 「業務」→ ✅ 「活動」「勉強」
+❌ 「クライアント」→ ✅ 「相手」「メンバー」
+❌ 「マネジメント」→ ✅ 「まとめ役」「リーダー」
+❌ 「実績」→ ✅ 「経験」「やったこと」
+❌ 「スキル」→ ✅ 「できること」「学んだこと」
 
 ## 【重要】質問生成の制約
 1. **重複厳禁**: 既出質問と同じ内容や類似する質問は絶対に生成しないこと
 2. **簡潔明瞭**: 質問は1つのみ、説明や前置きは不要
-3. **回答可能性**: 学生が具体的に答えられる質問
-4. **目的の明確化**: 何を評価したいかを明確に
+3. **学生が答えられる**: 実務経験不要、学生生活で答えられる内容
+4. **具体例を促す**: 「どんな小さなことでも」「例えば授業やサークルで」
 5. **文脈の活用**: これまでの会話の流れを自然に継続
 6. **進捗表示禁止**: 質問に進捗状況（例: 📊 進捗: X/10カテゴリ評価済み）を含めないこと
-
-## 質問の例（良い例）
-
-**技術志向を評価する場合:**
-「プログラミングを学ぶとき、あなたはどのようなアプローチを取ることが多いですか？具体的な経験があれば教えてください。」
-
-**チームワークを評価する場合:**
-「これまでのプロジェクトや活動で、チームメンバーと協力して成果を出した経験について教えてください。あなたはどのような役割を果たしましたか？」
-
-**問題解決力を評価する場合:**
-「困難な課題に直面したとき、あなたはどのように解決策を見つけますか？最近の具体例があれば教えてください。」
-
-**学習意欲・成長志向を評価する場合:**
-「これまでに取得した資格や認定、または現在勉強中のものがあれば教えてください。なぜそれを選んだのかも含めて。」
+7. **親しみやすい言葉**: 堅苦しくなく、話しかけるような口調
 
 **技術志向・専門性を評価する場合:**
 「これまでに経験したプロジェクトや開発、制作活動について具体的に教えてください。使用した技術やツール、あなたが担当した役割も含めて。」
@@ -927,28 +999,26 @@ func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (
 		userName = user.Name
 	}
 
-	// 初回メッセージを生成
-	initialPrompt := fmt.Sprintf(`あなたは「ソフィア」という名前のIT業界専門キャリアエージェントです。
-これから就職活動中の学生と会話を始めます。
-
-## ユーザー情報
-- ユーザー名: %s
-
-## 最初のメッセージの方針
-- 簡潔に自己紹介する（「初めまして、ソフィアです」程度）
-- IT業界のどの分野に興味があるか聞く
-- シンプルで答えやすい質問にする
-
-**挨拶と質問を簡潔に生成してください。**`, userName)
-
-	response, err := s.aiClient.Responses(ctx, initialPrompt)
+	// 職種選択の質問を生成
+	jobQuestion, err := s.jobValidator.GenerateJobSelectionQuestion(ctx)
 	if err != nil {
-		// AIエラー時のフォールバック
-		response = fmt.Sprintf("初めまして、ソフィアです。IT業界のどの分野に興味がありますか？", userName)
+		// エラー時のフォールバック
+		jobQuestion = `初めまして！あなたの適性診断をサポートします。
+
+まず、どの職種に興味がありますか？以下から選んでください：
+
+1. エンジニア（プログラミング、開発）
+2. 営業（顧客対応、提案）
+3. マーケティング（企画、分析）
+4. 人事（採用、育成）
+5. その他・まだ決めていない
+
+番号で答えても、職種名で答えても構いません。`
+	} else {
+		jobQuestion = fmt.Sprintf("初めまして、%sさん！あなたの適性診断をサポートします。\n\n%s", userName, jobQuestion)
 	}
 
-	response = strings.TrimSpace(response)
-	response = strings.Trim(response, `"「」`)
+	response := jobQuestion
 
 	// 初回メッセージを保存
 	assistantMsg := &models.ChatMessage{
@@ -1028,49 +1098,77 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	var prompt string
 	if hasLowConfidenceAnswer {
 		// わからない回答の場合は、同じカテゴリで別の角度から質問
-		prompt = fmt.Sprintf(`あなたは就活適性診断のための優秀なインタビュアーです。
+		prompt = fmt.Sprintf(`あなたは新卒学生向けの適性診断インタビュアーです。
 
 ## これまでの会話
 %s
 
 ## 状況
-ユーザーが前の質問「%s」に答えられなかったようです。
-同じカテゴリで、より答えやすい質問を生成してください。
+学生が前の質問「%s」に答えられなかったようです。
+同じカテゴリで、**より答えやすい質問**を生成してください。
 
-## 質問作成のガイドライン
-1. **具体的な状況設定**: 抽象的な質問ではなく、具体的なシーンを想定した質問
-2. **経験ベース**: 「もし〜だったら」より「今までに〜したことは」という形式
-3. **段階的アプローチ**: いきなり難しい質問ではなく、小さな経験から聞く
-4. **選択肢を提示**: 完全にオープンな質問ではなく、いくつかの例を示す
-5. **日常的な例**: 特別な経験でなくても答えられる質問
+## 【重要】新卒学生向け質問ガイドライン
 
-## 例
-悪い例: 「あなたのリーダーシップについて教えてください」
-良い例: 「グループワークや部活動で、自分から提案したり、メンバーをまとめたりした経験はありますか？どんな小さなことでも構いません」
+### 1. 実務経験を前提としない
+❌ 「プロジェクトでの経験は？」
+✅ 「授業やサークルでの経験は？」
+
+### 2. より具体的なシーンを提示
+❌ 「リーダーシップについて教えて」
+✅ 「グループワークで、自分から提案したことはありますか？」
+
+### 3. 小さな経験も評価
+「どんな小さなことでも構いません」と添える
+
+### 4. 身近な例を挙げる
+「例えば、授業、サークル、アルバイト、趣味など」
+
+### 5. 選択肢や例を示す
+完全にオープンではなく、具体例を示す
+
+## 質問の例（答えやすい良い例）
+
+**技術志向:**
+「プログラミングに興味はありますか？授業で習った程度でも、触ったことがあれば教えてください。」
+
+**チームワーク:**
+「グループで作業するとき、どんな役割が多いですか？例えば、まとめ役、アイデアを出す人、サポート役など。」
+
+**リーダーシップ:**
+「友達と遊ぶ計画を立てるとき、自分から提案することはありますか？」
+
+**コミュニケーション:**
+「授業で発表したり、アルバイトで接客したりする経験はありますか？」
+
+**避けるべき言葉:**
+- プロジェクト → グループワーク、課題
+- 業務 → 活動、勉強
+- マネジメント → まとめ役
+- 実績 → 経験、やったこと
 
 業界ID: %d, 職種ID: %d
 
-**質問のみ**を1つ返してください。`, historyText, lastQuestion, industryID, jobCategoryID)
+**質問のみ**を1つ返してください。説明や前置きは不要です。`, historyText, lastQuestion, industryID, jobCategoryID)
 	} else if len(unevaluatedCategories) > 0 {
 		// 未評価のカテゴリがある場合は、それを重点的に評価
 		targetCategory := unevaluatedCategories[0]
 
 		categoryDescriptions := map[string]string{
-			"技術志向":        "プログラミング、技術学習、技術的課題への興味",
-			"コミュニケーション能力": "他者との対話、説明力、協調性",
-			"リーダーシップ":     "チームを率いる、意思決定、メンバーのサポート",
-			"チームワーク":      "協力、役割分担、チーム目標への貢献",
-			"問題解決力":       "論理的思考、課題分析、解決策の創出",
-			"創造性・発想力":     "アイデア創出、新しいアプローチ、革新的思考",
-			"計画性・実行力":     "目標設定、計画立案、タスク管理、完遂力",
-			"学習意欲・成長志向":   "継続学習、フィードバック受容、成長への意識",
-			"ストレス耐性・粘り強さ": "困難への対処、プレッシャー対応、粘り強さ",
-			"ビジネス思考・目標志向": "ビジネス価値理解、成果志向、戦略的思考",
+			"技術志向":       "プログラミング、技術学習への興味（授業、趣味、独学）",
+			"コミュニケーション力": "人と話すこと、説明すること、協力すること",
+			"リーダーシップ志向":  "自分から提案、まとめ役、メンバーのサポート",
+			"チームワーク志向":   "グループでの協力、役割分担、助け合い",
+			"創造性志向":      "アイデア発想、工夫、新しいアプローチ",
+			"安定志向":       "長期的なキャリア観、安定性への考え方",
+			"成長志向":       "学習意欲、自己成長、新しい挑戦",
+			"チャレンジ志向":    "困難への挑戦、失敗を恐れない姿勢",
+			"細部志向":       "丁寧さ、正確性、品質へのこだわり",
+			"ワークライフバランス": "仕事と私生活のバランス観",
 		}
 
 		description := categoryDescriptions[targetCategory]
 
-		prompt = fmt.Sprintf(`あなたは就活適性診断のための優秀なインタビュアーです。
+		prompt = fmt.Sprintf(`あなたは新卒学生向けの適性診断インタビュアーです。
 
 ## これまでの会話
 %s
@@ -1078,21 +1176,42 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 ## 次に評価すべきカテゴリ
 **%s** (%s)
 
-## 質問作成のガイドライン
-1. **自然な流れ**: これまでの会話の流れを踏まえ、唐突でない質問
-2. **具体性**: 抽象的ではなく、具体的な経験や行動を引き出す
-3. **深掘り**: 表面的でなく、本質的な適性を見極められる質問
-4. **答えやすさ**: 学生が具体的なエピソードで答えられる質問
-5. **複数の観点**: 1つの質問で複数の側面を評価できるように工夫
+## 【重要】新卒学生向け質問ガイドライン
 
-## 良い質問の例
-- 「プロジェクトで予期せぬ問題が発生したとき、どのように対処しましたか？具体的なエピソードを教えてください」
-- 「チームメンバーと意見が対立したとき、どのように解決しましたか？」
-- 「最近、自分から進んで学んだことは何ですか？それを学ぼうと思ったきっかけは？」
+### 1. 実務経験を前提としない
+学生生活で答えられる質問：
+- 授業、ゼミ、グループワーク
+- サークル、部活動
+- アルバイト
+- 趣味、個人活動
+
+### 2. 具体的で答えやすい
+❌ 「プロジェクトでの問題解決経験は？」
+✅ 「課題やレポートで行き詰まったとき、どうしましたか？」
+
+### 3. 小さな経験も評価
+「どんな小さなことでも構いません」と添える
+
+### 4. 自然な会話の流れ
+これまでの会話を踏まえた質問
+
+## 良い質問の例（新卒向け）
+
+**技術志向:**
+「プログラミングの授業や独学で、楽しかったことや苦労したことはありますか？」
+
+**チームワーク:**
+「グループワークで、メンバーと意見が分かれたとき、どうしましたか？」
+
+**リーダーシップ:**
+「サークルや友人グループで、自分から企画や提案をしたことはありますか？」
+
+**成長志向:**
+「最近、新しく学んだことや挑戦したことはありますか？きっかけも教えてください。」
 
 業界ID: %d, 職種ID: %d
 
-**質問のみ**を1つ返してください。`, historyText, targetCategory, description, industryID, jobCategoryID)
+**質問のみ**を1つ返してください。説明や前置きは不要です。`, historyText, targetCategory, description, industryID, jobCategoryID)
 	} else {
 		// 全カテゴリ評価済みの場合は、深掘り質問
 		// スコアが高いカテゴリをさらに深掘り
@@ -1105,25 +1224,51 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 			}
 		}
 
-		prompt = fmt.Sprintf(`あなたは就活適性診断のための優秀なインタビュアーです。
+		prompt = fmt.Sprintf(`あなたは新卒学生向けの適性診断インタビュアーです。
 
 ## これまでの会話
 %s
 
 ## 現在の評価状況
-ユーザーの強みとして「%s」が見えてきました（スコア: %d）。
-この強みをさらに深掘りし、具体的なエピソードや行動特性を引き出す質問を作成してください。
+学生の強みとして「%s」が見えてきました（スコア: %d）。
+この強みをさらに深掘りし、具体的なエピソードや考え方を引き出す質問を作成してください。
 
-## 質問作成のガイドライン
-1. **深い洞察**: 表面的でなく、本質的な能力や価値観を探る
-2. **具体的エピソード**: 実際の経験に基づいた詳細を引き出す
-3. **行動特性**: どのように考え、行動したかを明確にする
-4. **強みの確認**: その強みが本物かを検証できる質問
-5. **キャリア適合**: その強みがキャリアでどう活きるか考えさせる
+## 【重要】新卒学生向け深掘り質問ガイドライン
+
+### 1. 実務経験を前提としない
+✅ 授業、サークル、アルバイト、趣味での経験を聞く
+
+### 2. 具体的なエピソードを引き出す
+「その中で、特に印象に残っている経験はありますか？」
+「それをどう感じましたか？」
+
+### 3. 考え方や価値観を探る
+「なぜそう思ったのですか？」
+「それがあなたにとって大切な理由は？」
+
+### 4. 強みの本質を確認
+表面的でなく、本質的な能力や価値観を探る
+
+### 5. 小さな経験も大切に
+「どんな小さなことでも構いません」
+
+## 良い深掘り質問の例
+
+**技術志向が強い場合:**
+「プログラミングを学ぶ中で、一番楽しかった瞬間や達成感を感じたことはありますか？」
+
+**チームワークが強い場合:**
+「グループ活動で、メンバーと協力してうまくいったとき、どんな気持ちでしたか？」
+
+**リーダーシップが強い場合:**
+「自分から提案したとき、周りの反応はどうでしたか？やりがいを感じましたか？」
+
+**成長志向が強い場合:**
+「新しいことを学び続けるモチベーションは何ですか？」
 
 業界ID: %d, 職種ID: %d
 
-**質問のみ**を1つ返してください。`, historyText, highestCategory, highestScore, industryID, jobCategoryID)
+**質問のみ**を1つ返してください。説明や前置きは不要です。`, historyText, highestCategory, highestScore, industryID, jobCategoryID)
 	}
 
 	questionText, err := s.aiClient.Responses(ctx, prompt)
@@ -1722,4 +1867,40 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 	}
 
 	return nil
+}
+
+// tryGetPredefinedQuestion ルールベースの事前定義質問を取得
+func (s *ChatService) tryGetPredefinedQuestion(userID uint, sessionID string, prioritizeCategory string, industryID, jobCategoryID uint, askedTexts map[string]bool) (*models.PredefinedQuestion, error) {
+	// 既に使用した事前定義質問のIDリストを取得
+	askedIDs := []uint{}
+
+	// すべての事前定義質問を取得して、質問文でフィルタ
+	allQuestions, err := s.predefinedQuestionRepo.FindActiveQuestions("新卒", &industryID, &jobCategoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 既に聞いた質問を除外
+	for _, q := range allQuestions {
+		if _, asked := askedTexts[q.QuestionText]; asked {
+			askedIDs = append(askedIDs, q.ID)
+		}
+	}
+
+	// 優先カテゴリで質問を検索
+	question, err := s.predefinedQuestionRepo.GetNextQuestion(
+		askedIDs,
+		"新卒",
+		&industryID,
+		&jobCategoryID,
+		prioritizeCategory,
+	)
+
+	if err != nil {
+		// 質問が見つからない場合はnilを返す（エラーではない）
+		fmt.Printf("[RuleBased] No more predefined questions available: %v\n", err)
+		return nil, nil
+	}
+
+	return question, nil
 }

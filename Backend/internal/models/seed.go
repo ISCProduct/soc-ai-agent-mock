@@ -39,6 +39,11 @@ func SeedData(db *gorm.DB) error {
 		return err
 	}
 
+	// 事前定義質問データ（ルールベース判定用）
+	if err := SeedPredefinedQuestions(db); err != nil {
+		return err
+	}
+
 	// 基本企業データ（20社）
 	if err := SeedCompanies(db); err != nil {
 		return err
