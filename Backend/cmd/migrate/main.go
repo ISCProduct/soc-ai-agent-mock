@@ -12,25 +12,28 @@ import (
 )
 
 func main() {
-	// .envファイルを読み込み
-	// 実行ディレクトリがBackend/cmd/migrateの場合は../../.envを、Backendの場合は.envを読み込む
-	envPaths := []string{
-		".env",
-		"../.env",
-		"../../.env",
-	}
+	env := os.Getenv("APP_ENV")
 
-	envLoaded := false
-	for _, envPath := range envPaths {
-		if err := godotenv.Load(envPath); err == nil {
-			log.Printf("Loaded .env file from: %s", envPath)
-			envLoaded = true
-			break
+	if env != "production" {
+		// ローカル開発環境では .env ファイルを読み込む
+		envPaths := []string{
+			".env",
+			"../.env",
+			"../../.env",
 		}
-	}
 
-	if !envLoaded {
-		log.Println("No .env file found, using environment variables")
+		envLoaded := false
+		for _, envPath := range envPaths {
+			if err := godotenv.Load(envPath); err == nil {
+				log.Printf("Loaded .env file from: %s", envPath)
+				envLoaded = true
+				break
+			}
+		}
+
+		if !envLoaded {
+			log.Println("Warning: .env file not found. Skipping.")
+		}
 	}
 
 	// データベース接続

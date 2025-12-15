@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -17,16 +18,28 @@ type Config struct {
 }
 
 func LoadConfig() (*Config, error) {
-	_ = godotenv.Load() // .env があれば読み込む（本番では無視）
+	env := os.Getenv("APP_ENV")
+
+	if env != "production" {
+		// ローカル開発環境では .env ファイルを読み込む
+		err := godotenv.Load()
+		if err != nil {
+			log.Println("Warning: .env file not found. Skipping.")
+		}
+	}
 
 	cfg := &Config{
-		DBUser: get("DB_USER", "app_user"),
-		DBPass: get("DB_PASS", "app_pass"),
-		// 明示的に IPv4 のループバックをデフォルトにする
-		DBHost:     get("DB_HOST", "127.0.0.1"),
-		DBPort:     get("DB_PORT", "3306"),
-		DBName:     get("DB_NAME", "app_db"),
+		DBUser:     os.Getenv("DB_USER"),
+		DBPass:     os.Getenv("DB_PASSWORD"),
+		DBHost:     os.Getenv("DB_HOST"),
+		DBPort:     os.Getenv("DB_PORT"),
+		DBName:     os.Getenv("DB_NAME"),
 		ServerPort: get("SERVER_PORT", "80"),
+	}
+
+	// 必須値チェック
+	if cfg.DBHost == "" || cfg.DBPort == "" || cfg.DBUser == "" || cfg.DBPass == "" || cfg.DBName == "" {
+		log.Fatal("Missing one or more required environment variables for database connection")
 	}
 
 	return cfg, nil
