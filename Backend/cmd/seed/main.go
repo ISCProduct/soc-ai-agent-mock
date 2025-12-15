@@ -9,12 +9,7 @@ import (
 )
 
 func main() {
-	// .env ファイルを読み込む
-	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: .env file not found: %v", err)
-	}
-
-	// 設定を読み込む
+	// 設定を読み込む（環境変数の読み込みはconfig.LoadConfig内で実施）
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
