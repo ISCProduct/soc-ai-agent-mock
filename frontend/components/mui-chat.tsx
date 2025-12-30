@@ -29,6 +29,17 @@ interface Message {
   timestamp: Date
 }
 
+interface PhaseProgress {
+  phase_name: string
+  display_name: string
+  questions_asked: number
+  valid_answers: number
+  completion_score: number
+  is_completed: boolean
+  min_questions: number
+  max_questions: number
+}
+
 interface ChoiceOption {
   number: number
   text: string
@@ -154,6 +165,8 @@ export function MuiChat() {
           const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
           const restoredTotalQuestions = savedTotalQuestions ? parseInt(savedTotalQuestions) : 15
           setTotalQuestions(restoredTotalQuestions)
+          const savedPhases = sessionStorage.getItem('phaseProgress')
+          const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
           
           // 進捗状況を通知（履歴復元時）
           setTimeout(() => {
@@ -162,6 +175,7 @@ export function MuiChat() {
                 messageCount: restoredMessages.length,
                 questionCount: userQuestionCount,
                 totalQuestions: restoredTotalQuestions,
+                phases: restoredPhases,
               } 
             }))
             console.log('[MUI Chat] Progress restored:', userQuestionCount, '/', restoredTotalQuestions)
@@ -288,6 +302,9 @@ export function MuiChat() {
           
           // totalQuestionsをsessionStorageに保存
           sessionStorage.setItem('totalQuestions', String(newTotalQuestions))
+          if (response.all_phases) {
+            sessionStorage.setItem('phaseProgress', JSON.stringify(response.all_phases))
+          }
           
           // 進捗状況を親コンポーネントに通知（非同期で実行）
           setTimeout(() => {
@@ -296,6 +313,7 @@ export function MuiChat() {
                 messageCount: newMessages.length,
                 questionCount: newCount,
                 totalQuestions: newTotalQuestions,
+                phases: response.all_phases ?? null,
               } 
             }))
           }, 0)

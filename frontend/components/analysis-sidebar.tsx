@@ -44,6 +44,17 @@ interface AnalysisStep {
     progress?: number
 }
 
+interface PhaseProgress {
+    phase_name: string
+    display_name: string
+    questions_asked: number
+    valid_answers: number
+    completion_score: number
+    is_completed: boolean
+    min_questions: number
+    max_questions: number
+}
+
 interface AnalysisSidebarProps {
     user: User
     onLogout: () => void
@@ -53,6 +64,7 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
+    const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
     const router = useRouter()
 
     useEffect(() => {
@@ -60,6 +72,9 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
             setMessageCount(event.detail.messageCount || 0)
             setQuestionCount(event.detail.questionCount || 0)
             setTotalQuestions(event.detail.totalQuestions || 15)
+            if (event.detail.phases) {
+                setPhases(event.detail.phases as PhaseProgress[])
+            }
         }
 
         window.addEventListener('chatProgress', handleChatProgress as EventListener)
@@ -88,35 +103,52 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
     }
 
     const progress = calculateProgress()
+    const phaseProgressFor = (phaseName: string) => {
+        if (!phases) return null
+        return phases.find(p => p.phase_name === phaseName) || null
+    }
+    const getPhasePercent = (phaseName: string, fallback: number) => {
+        const phase = phaseProgressFor(phaseName)
+        if (!phase) return fallback
+        if (phase.max_questions <= 0) return 0
+        return Math.min(100, Math.floor((phase.questions_asked / phase.max_questions) * 100))
+    }
+    const getPhaseStatus = (phaseName: string, defaultLabel: string) => {
+        const phase = phaseProgressFor(phaseName)
+        if (!phase) return defaultLabel
+        if (phase.is_completed) return defaultLabel.replace('進行中', '完了').replace('待機中', '完了')
+        if (phase.questions_asked > 0) return defaultLabel.replace('待機中', '進行中')
+        return defaultLabel
+    }
 
     const analysisSteps: AnalysisStep[] = [
         {
             id: 'job',
-            label: progress.job === 100 ? '職種分析完了' : '職種分析進行中',
+            label: getPhaseStatus('job_analysis', progress.job === 100 ? '職種分析完了' : '職種分析進行中'),
             icon: <Work/>,
-            completed: progress.job === 100,
-            progress: progress.job < 100 ? progress.job : undefined,
+            completed: getPhasePercent('job_analysis', progress.job) === 100,
+            progress: getPhasePercent('job_analysis', progress.job) < 100 ? getPhasePercent('job_analysis', progress.job) : undefined,
         },
         {
             id: 'interest',
-            label: progress.interest === 100 ? '興味分析完了' : progress.interest > 0 ? '興味分析進行中' : '興味分析待機中',
+            label: getPhaseStatus('interest_analysis', progress.interest === 100 ? '興味分析完了' : progress.interest > 0 ? '興味分析進行中' : '興味分析待機中'),
             icon: <Psychology/>,
-            completed: progress.interest === 100,
-            progress: progress.interest > 0 && progress.interest < 100 ? progress.interest : undefined,
+            completed: getPhasePercent('interest_analysis', progress.interest) === 100,
+            progress: getPhasePercent('interest_analysis', progress.interest) > 0 && getPhasePercent('interest_analysis', progress.interest) < 100 ? getPhasePercent('interest_analysis', progress.interest) : undefined,
         },
         {
             id: 'aptitude',
-            label: progress.aptitude === 100 ? '適性分析完了' : progress.aptitude > 0 ? '適性分析進行中' : '適性分析待機中',
+            label: getPhaseStatus('aptitude_analysis', progress.aptitude === 100 ? '適性分析完了' : progress.aptitude > 0 ? '適性分析進行中' : '適性分析待機中'),
             icon: <TrendingUp/>,
-            completed: progress.aptitude === 100,
-            progress: progress.aptitude > 0 && progress.aptitude < 100 ? progress.aptitude : undefined,
+            completed: getPhasePercent('aptitude_analysis', progress.aptitude) === 100,
+            progress: getPhasePercent('aptitude_analysis', progress.aptitude) > 0 && getPhasePercent('aptitude_analysis', progress.aptitude) < 100 ? getPhasePercent('aptitude_analysis', progress.aptitude) : undefined,
         },
         {
             id: 'future',
-            label: progress.future === 100 ? '将来分析完了' : progress.future > 0 ? '将来分析進行中' : '将来分析待機中',
+            label: getPhaseStatus('future_analysis', progress.future === 100 ? '将来分析完了' : progress.future > 0 ? '将来分析進行中' : '将来分析待機中'),
             icon: <EmojiEvents/>,
-            completed: progress.future === 100,
-            progress: progress.future > 0 && progress.future < 100 ? progress.future : undefined,
+            completed: getPhasePercent('future_analysis', progress.future) === 100,
+            progress: getPhasePercent('future_analysis', progress.future) > 0 && getPhasePercent('future_analysis', progress.future) < 100 ? getPhasePercent('future_analysis', progress.future) : undefined,
         },
     ]
 
