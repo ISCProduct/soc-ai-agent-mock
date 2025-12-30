@@ -10,8 +10,6 @@ import (
 	"Backend/internal/services"
 	"log"
 	"net/http"
-
-	"github.com/joho/godotenv"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -74,13 +72,14 @@ func main() {
 	phaseRepo := repositories.NewAnalysisPhaseRepository(db)
 	progressRepo := repositories.NewUserAnalysisProgressRepository(db)
 	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
+	conversationContextRepo := repositories.NewConversationContextRepository(db)
 	companyRepo := repositories.NewCompanyRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo)
+	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo)
 

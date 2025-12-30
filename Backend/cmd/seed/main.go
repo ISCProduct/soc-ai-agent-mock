@@ -4,8 +4,6 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"log"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {

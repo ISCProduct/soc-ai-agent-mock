@@ -12,6 +12,7 @@ import {
   Tab,
   Divider,
   Alert,
+  MenuItem,
 } from '@mui/material'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
@@ -26,6 +27,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [targetLevel, setTargetLevel] = useState('新卒')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -49,7 +51,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     setError('')
     setLoading(true)
     try {
-      const response = await authService.register(email, password, name)
+      const response = await authService.register(email, password, name, targetLevel)
       authService.saveAuth(response)
       onAuthSuccess(response)
     } catch (err: any) {
@@ -138,6 +140,17 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 required
                 sx={{ mb: 3 }}
               />
+              <TextField
+                fullWidth
+                select
+                label="区分"
+                value={targetLevel}
+                onChange={(e) => setTargetLevel(e.target.value)}
+                sx={{ mb: 3 }}
+              >
+                <MenuItem value="新卒">新卒</MenuItem>
+                <MenuItem value="中途">中途</MenuItem>
+              </TextField>
               <Button
                 type="submit"
                 fullWidth

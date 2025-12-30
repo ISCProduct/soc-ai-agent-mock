@@ -22,9 +22,8 @@ services:
       options:
         max-size: "${LOG_MAX_SIZE:-10m}"
         max-file: "${LOG_MAX_FILE:-3}"
-    # 開発時はコンテナ再起動で変更を反映
-    # docker compose restart app で更新されたコードが反映されます
-    command: /bin/server
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
 
   # MySQL Database
   db:
@@ -71,6 +70,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}
+      - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
     depends_on:
       app:
         condition: service_started

@@ -28,6 +28,7 @@ import {
     EmojiEvents,
     Logout,
     History,
+    ManageAccounts,
 
 } from '@mui/icons-material'
 import {User} from '@/lib/auth'
@@ -268,6 +269,26 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
                         </ListItemIcon>
                         <ListItemText
                             primary="チャット履歴"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/onboarding')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <ManageAccounts color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="プロフィール設定"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,

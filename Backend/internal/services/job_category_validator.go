@@ -88,11 +88,11 @@ func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnsw
 - is_valid: false
 - matched_ids: []
 - needs_clarification: true
-- suggested_question: 主要な職種から選んでもらう質問文
+- suggested_question: 最適な職種を分析するための質問文（好みや得意なことを聞く）
 
 例:
-回答「まだ決めていない」→ 主要職種から選択を促す
-回答「わからない」→ 興味のある分野から選択を促す
+回答「まだ決めていない」→ どんな活動が好きかを聞く
+回答「わからない」→ 具体的な選択肢で興味の方向性を聞く
 
 ## 出力形式（JSON）
 {
@@ -107,6 +107,7 @@ func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnsw
 - 3〜5個の選択肢を提示
 - 「どれに興味がありますか？」「どれが近いですか？」など
 - 選択肢は具体的に列挙
+- 職種未決定の場合は「好きな作業のタイプ」を聞く
 
 例:
 「以下のうち、どの職種に興味がありますか？
@@ -115,6 +116,12 @@ func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnsw
 3. マーケティング（企画、分析）
 4. 人事（採用、育成）
 5. まだ決めていない」
+
+「まだ決めていない場合、どんな作業が好きですか？
+A) 人と話したり調整する
+B) 数字やデータを分析する
+C) ものづくりや工夫を考える
+D) 調べてまとめる」
 
 JSONのみを返してください。説明は不要です。`, userAnswer, string(categoryJSON))
 

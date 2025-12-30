@@ -21,6 +21,9 @@ type PredefinedQuestion struct {
 	// 追加質問設定
 	FollowUpRules string `gorm:"type:json" json:"follow_up_rules"` // 追加質問のルール
 
+	// フェーズ制御: JSON配列で保存（例: ["job_analysis","interest_analysis"]）。未設定は全フェーズ許可
+	AllowedPhases string `gorm:"type:json" json:"allowed_phases"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
