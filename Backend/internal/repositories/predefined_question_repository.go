@@ -2,7 +2,9 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"encoding/json"
 	"gorm.io/gorm"
+	"strings"
 )
 
 type PredefinedQuestionRepository struct {
@@ -26,8 +28,29 @@ func (r *PredefinedQuestionRepository) FindByCategory(category string, targetLev
 	return questions, err
 }
 
-// FindActiveQuestions アクティブな質問を取得
-func (r *PredefinedQuestionRepository) FindActiveQuestions(targetLevel string, industryID *uint, jobCategoryID *uint) ([]*models.PredefinedQuestion, error) {
+// helper: allowedForPhase checks AllowedPhases JSON; if empty -> allowed
+func allowedForPhase(raw string, currentPhase string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return true
+	}
+	var phases []string
+	if err := json.Unmarshal([]byte(raw), &phases); err != nil {
+		// if parse error, be permissive
+		return true
+	}
+	if currentPhase == "" {
+		return true
+	}
+	for _, p := range phases {
+		if p == currentPhase {
+			return true
+		}
+	}
+	return false
+}
+
+// FindActiveQuestions アクティブな質問を取得（currentPhase: 現在のフェーズ名）
+func (r *PredefinedQuestionRepository) FindActiveQuestions(targetLevel string, industryID *uint, jobCategoryID *uint, currentPhase string) ([]*models.PredefinedQuestion, error) {
 	var questions []*models.PredefinedQuestion
 
 	query := r.db.Where("is_active = ?", true)
@@ -45,7 +68,19 @@ func (r *PredefinedQuestionRepository) FindActiveQuestions(targetLevel string, i
 	}
 
 	err := query.Order("priority DESC, id ASC").Find(&questions).Error
-	return questions, err
+	if err != nil {
+		return nil, err
+	}
+
+	// filter by AllowedPhases
+	filtered := make([]*models.PredefinedQuestion, 0, len(questions))
+	for _, q := range questions {
+		if allowedForPhase(q.AllowedPhases, currentPhase) {
+			filtered = append(filtered, q)
+		}
+	}
+
+	return filtered, nil
 }
 
 // FindByID IDで質問を取得
@@ -72,6 +107,7 @@ func (r *PredefinedQuestionRepository) GetNextQuestion(
 	industryID *uint,
 	jobCategoryID *uint,
 	prioritizeCategory string,
+	currentPhase string,
 ) (*models.PredefinedQuestion, error) {
 	var question models.PredefinedQuestion
 
@@ -104,14 +140,23 @@ func (r *PredefinedQuestionRepository) GetNextQuestion(
 			Order("priority DESC, id ASC").
 			First(&priorityQuestion).Error
 
-		if err == nil {
+		if err == nil && allowedForPhase(priorityQuestion.AllowedPhases, currentPhase) {
 			return &priorityQuestion, nil
 		}
 	}
 
 	// 優先度順に取得
 	err := query.Order("priority DESC, id ASC").First(&question).Error
-	return &question, err
+	if err != nil {
+		return nil, err
+	}
+
+	if !allowedForPhase(question.AllowedPhases, currentPhase) {
+		// not allowed for current phase, return nil to indicate none
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	return &question, nil
 }
 
 // CountByCategory カテゴリごとの質問数を取得

@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Box, CircularProgress, Typography, Alert } from '@mui/material'
+import { authService } from '@/lib/auth'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
 
@@ -40,13 +41,15 @@ function OAuthCallbackContent() {
         const userData = { ...userDataRaw, name: fixMojibake(userDataRaw.name) }
         
         // ローカルストレージに保存
-        localStorage.setItem('user', JSON.stringify(userData))
-        if (userData.token) {
-          localStorage.setItem('token', userData.token)
-        }
+        authService.saveAuth(userData)
         localStorage.removeItem('oauth_state')
 
-        // ホームページにリダイレクト
+        // target_level が未設定ならオンボーディングへ
+        if (userData.target_level !== '新卒' && userData.target_level !== '中途') {
+          router.push('/onboarding')
+          return
+        }
+
         router.push('/')
       } catch (err: any) {
         setError('認証データの処理に失敗しました: ' + err.message)

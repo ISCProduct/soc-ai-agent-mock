@@ -24,6 +24,7 @@ export interface User {
   email: string
   name: string
   is_guest: boolean
+  target_level?: string
   oauth_provider?: string
   avatar_url?: string
 }
@@ -33,6 +34,7 @@ export interface AuthResponse {
   email: string
   name: string
   is_guest: boolean
+  target_level?: string
   oauth_provider?: string
   avatar_url?: string
   token?: string
@@ -52,11 +54,11 @@ export const authService = {
     return res.json()
   },
 
-  async register(email: string, password: string, name: string): Promise<AuthResponse> {
+  async register(email: string, password: string, name: string, targetLevel: string): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, target_level: targetLevel }),
     })
     if (!res.ok) {
       const error = await res.text()
@@ -79,6 +81,19 @@ export const authService = {
     return res.json()
   },
 
+  async updateProfile(userId: number, name: string, targetLevel: string): Promise<AuthResponse> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name, target_level: targetLevel }),
+    })
+    if (!res.ok) {
+      const error = await res.text()
+      throw new Error(error || 'Failed to update profile')
+    }
+    return res.json()
+  },
+
   async getGoogleAuthUrl(): Promise<{ auth_url: string; state: string }> {
     const res = await fetch(`${BACKEND_URL}/api/auth/google`)
     if (!res.ok) throw new Error('Failed to get Google auth URL')
@@ -97,6 +112,7 @@ export const authService = {
       email: authResponse.email,
       name: fixMojibake(authResponse.name),
       is_guest: authResponse.is_guest,
+      target_level: authResponse.target_level,
       oauth_provider: authResponse.oauth_provider,
       avatar_url: authResponse.avatar_url,
     }

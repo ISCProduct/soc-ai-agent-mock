@@ -69,7 +69,7 @@ export function JobAgentChat() {
   
   const [userId] = useState(1)
   const [industryId] = useState(1)
-  const [jobCategoryId] = useState(1)
+  const [jobCategoryId] = useState(0)
   const [isLoadingFromBackend, setIsLoadingFromBackend] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)
 

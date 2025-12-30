@@ -7,21 +7,33 @@ import (
 
 // SeedPredefinedQuestions 事前定義質問のシードデータ
 func SeedPredefinedQuestions(db *gorm.DB) error {
-	// 既存データをチェック
-	var count int64
-	db.Model(&PredefinedQuestion{}).Count(&count)
-	if count > 0 {
-		println("Predefined questions already exist, skipping seed")
-		return nil
-	}
+	// 既存データを削除（強制的に再投入するため）
+	db.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&PredefinedQuestion{})
+	println("Existing predefined questions deleted")
 
+	// エンジニア職種のIDを取得（もし存在すれば）
+	var engineerCategory JobCategory
+	db.Where("code = ?", "ENG").First(&engineerCategory)
+	var softwareEngCategory JobCategory
+	db.Where("code = ?", "ENG-SW").First(&softwareEngCategory)
+	var webEngCategory JobCategory
+	db.Where("code = ?", "ENG-WEB").First(&webEngCategory)
+
+	defaultPhases := "[\"job_analysis\",\"interest_analysis\",\"aptitude_analysis\",\"future_analysis\"]"
 	questions := []PredefinedQuestion{
-		// 技術志向の質問
+		// 技術志向の質問（エンジニア職種向け）
 		{
 			Category:     "技術志向",
 			QuestionText: "プログラミングや技術的なことを学ぶのは好きですか？もし好きであれば、どんなことを学んできましたか？（授業、趣味、独学など何でも構いません）",
 			TargetLevel:  "新卒",
-			Priority:     10,
+			JobCategoryID: func() *uint {
+				if engineerCategory.ID != 0 {
+					return &engineerCategory.ID
+				}
+				return nil
+			}(),
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"プログラミング", "コーディング", "開発", "アプリ", "Web", "システム",
 				"Python", "Java", "JavaScript", "Go", "C", "Ruby",
@@ -73,12 +85,46 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 			IsActive: true,
 		},
 
-		// チームワーク志向の質問
+		// 技術志向の質問（営業職種向け）
 		{
-			Category:     "チームワーク志向",
-			QuestionText: "グループワークやチーム活動をした経験はありますか？その時、あなたはどんな役割でしたか？（授業、サークル、アルバイトなど何でも構いません）",
+			Category:     "技術志向",
+			QuestionText: "最新のIT技術やツールを使って業務を効率化することに興味はありますか？（例えばChatGPTやExcel、便利なアプリなど）",
 			TargetLevel:  "新卒",
-			Priority:     10,
+			JobCategoryID: func() *uint {
+				if engineerCategory.ID != 0 {
+					var salesCategory JobCategory
+					db.Where("code = ?", "SALES").First(&salesCategory)
+					if salesCategory.ID != 0 {
+						return &salesCategory.ID
+					}
+				}
+				return nil
+			}(),
+			Priority:      9,
+			AllowedPhases: defaultPhases,
+			PositiveKeywords: mustMarshalJSON([]string{
+				"効率化", "IT", "ツール", "ChatGPT", "AI", "Excel", "アプリ", "便利", "自動化",
+			}),
+			NegativeKeywords: mustMarshalJSON([]string{
+				"苦手", "使わない", "わからない", "面倒",
+			}),
+			ScoreRules: mustMarshalJSON([]ScoreRule{
+				{
+					Condition:   "contains_any",
+					Keywords:    []string{"効率化", "興味", "使ってみたい", "便利"},
+					ScoreChange: 3,
+					Description: "IT利活用への関心",
+				},
+			}),
+			FollowUpRules: mustMarshalJSON([]FollowUpRule{}),
+			IsActive:      true,
+		},
+		{
+			Category:      "チームワーク志向",
+			QuestionText:  "グループワークやチーム活動をした経験はありますか？その時、あなたはどんな役割でしたか？（授業、サークル、アルバイトなど何でも構いません）",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"協力", "サポート", "コミュニケーション", "相談", "分担", "チーム",
 				"グループ", "メンバー", "助け合い", "連携", "協調",
@@ -119,10 +165,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// リーダーシップ志向の質問
 		{
-			Category:     "リーダーシップ志向",
-			QuestionText: "グループで何かをする時、自分から提案したり、まとめ役をしたことはありますか？どんな小さなことでも構いません。",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "リーダーシップ志向",
+			QuestionText:  "グループで何かをする時、自分から提案したり、まとめ役をしたことはありますか？どんな小さなことでも構いません。",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"提案", "まとめ", "リーダー", "率先", "主導", "指示", "決定",
 				"責任", "先導", "引っ張る",
@@ -157,10 +204,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// 創造性志向の質問
 		{
-			Category:     "創造性志向",
-			QuestionText: "新しいアイデアを考えたり、今までにない方法で問題を解決したことはありますか？どんな工夫をしましたか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "創造性志向",
+			QuestionText:  "新しいアイデアを考えたり、今までにない方法で問題を解決したことはありますか？どんな工夫をしましたか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"アイデア", "工夫", "考えた", "発想", "創造", "新しい", "独自",
 				"オリジナル", "ユニーク", "改善",
@@ -195,10 +243,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// 安定志向の質問
 		{
-			Category:     "安定志向",
-			QuestionText: "将来のキャリアについて、安定して長く働ける環境と、チャレンジングだけど変化が多い環境、どちらに魅力を感じますか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "安定志向",
+			QuestionText:  "将来のキャリアについて、安定して長く働ける環境と、チャレンジングだけど変化が多い環境、どちらに魅力を感じますか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"安定", "長期", "継続", "福利厚生", "保険", "退職金",
 				"ワークライフバランス", "定着", "腰を据えて",
@@ -226,10 +275,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// 成長志向の質問
 		{
-			Category:     "成長志向",
-			QuestionText: "新しいスキルを学んだり、自分を成長させることは好きですか？最近、何か新しいことに挑戦しましたか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "成長志向",
+			QuestionText:  "新しいスキルを学んだり、自分を成長させることは好きですか？最近、何か新しいことに挑戦しましたか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"学習", "成長", "挑戦", "スキル", "資格", "勉強", "自己啓発",
 				"向上", "習得", "研鑽",
@@ -264,10 +314,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// ワークライフバランスの質問
 		{
-			Category:     "ワークライフバランス",
-			QuestionText: "仕事とプライベートのバランスについてどう考えていますか？仕事以外の時間も大切にしたいですか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "ワークライフバランス",
+			QuestionText:  "仕事とプライベートのバランスについてどう考えていますか？仕事以外の時間も大切にしたいですか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"バランス", "プライベート", "趣味", "家族", "友人", "休日",
 				"リフレッシュ", "余暇", "自分の時間", "オフ", "健康",
@@ -308,10 +359,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// チャレンジ志向の質問
 		{
-			Category:     "チャレンジ志向",
-			QuestionText: "難しい課題や新しいことに挑戦するのは好きですか？失敗を恐れずにトライすることができますか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "チャレンジ志向",
+			QuestionText:  "難しい課題や新しいことに挑戦するのは好きですか？失敗を恐れずにトライすることができますか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"挑戦", "チャレンジ", "トライ", "新しい", "難しい", "やってみる",
 				"失敗", "経験", "冒険", "果敢", "積極的",
@@ -358,10 +410,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// 細部志向の質問
 		{
-			Category:     "細部志向",
-			QuestionText: "物事を進めるとき、細かいところまで気を配るタイプですか？それとも、全体像を重視するタイプですか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "細部志向",
+			QuestionText:  "物事を進めるとき、細かいところまで気を配るタイプですか？それとも、全体像を重視するタイプですか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"細かい", "丁寧", "正確", "確認", "チェック", "詳細", "気を配る",
 				"ミス", "品質", "完璧", "慎重",
@@ -402,10 +455,11 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 
 		// コミュニケーション力の質問
 		{
-			Category:     "コミュニケーション力",
-			QuestionText: "人と話すことや、自分の考えを伝えることは得意ですか？どんな場面でコミュニケーションを取ることが多いですか？",
-			TargetLevel:  "新卒",
-			Priority:     10,
+			Category:      "コミュニケーション力",
+			QuestionText:  "人と話すことや、自分の考えを伝えることは得意ですか？どんな場面でコミュニケーションを取ることが多いですか？",
+			TargetLevel:   "新卒",
+			Priority:      10,
+			AllowedPhases: defaultPhases,
 			PositiveKeywords: mustMarshalJSON([]string{
 				"話す", "伝える", "コミュニケーション", "説明", "相談", "対話",
 				"プレゼン", "発表", "交流", "議論", "聞く", "理解",

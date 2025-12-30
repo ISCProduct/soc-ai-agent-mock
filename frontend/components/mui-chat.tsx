@@ -29,6 +29,23 @@ interface Message {
   timestamp: Date
 }
 
+interface ChoiceOption {
+  number: number
+  text: string
+}
+
+function extractChoices(content: string): ChoiceOption[] {
+  const lines = content.split('\n')
+  const choices: ChoiceOption[] = []
+  for (const line of lines) {
+    const match = line.match(/^(\d+)\.\s*(.+)$/)
+    if (match) {
+      choices.push({ number: parseInt(match[1], 10), text: match[2].trim() })
+    }
+  }
+  return choices
+}
+
 // ローディングメッセージコンポーネント
 function TypingIndicator() {
   return (
@@ -201,8 +218,9 @@ export function MuiChat() {
     initializeChat()
   }, [])
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading || !sessionId || !userId) return
+  const handleSend = async (overrideMessage?: string) => {
+    const messageText = (overrideMessage ?? input).trim()
+    if (!messageText || isLoading || !sessionId || !userId) return
     
     // 分析完了後はメッセージ送信を無効化
     if (analysisComplete) {
@@ -213,7 +231,7 @@ export function MuiChat() {
     const userMessage: Message = {
       id: String(Date.now()),
       role: 'user',
-      content: input,
+      content: messageText,
       timestamp: new Date(),
     }
 
@@ -226,9 +244,9 @@ export function MuiChat() {
       const chatRequest: ChatRequest = {
         user_id: userId,
         session_id: sessionId,
-        message: input,
+        message: messageText,
         industry_id: 1, // IT業界
-        job_category_id: 1, // 開発職
+        job_category_id: 0, // 未設定（バックエンドで判定）
       }
       
       const response: ChatResponse = await sendChatMessage(chatRequest)
@@ -446,6 +464,9 @@ export function MuiChat() {
     '両方に興味がある',
     'まだ決めていない',
   ]
+  const lastAssistantMessage = [...messages].reverse().find((msg) => msg.role === 'assistant')
+  const choiceOptions = lastAssistantMessage ? extractChoices(lastAssistantMessage.content) : []
+  const showChoiceButtons = choiceOptions.length >= 2 && !analysisComplete
 
   if (!mounted) {
     return null
@@ -818,47 +839,64 @@ export function MuiChat() {
             </Typography>
           </Box>
         ) : (
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField
-              fullWidth
-              placeholder="メッセージを入力..."
-              value={input}
-              onChange={(e) => {
-                console.log('[MUI Chat] Rendering input field (analysisComplete=false)')
-                setInput(e.target.value)
-              }}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              disabled={isLoading}
-              variant="outlined"
-              size="small"
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: 2,
-                },
-              }}
-            />
-            <IconButton
-              color="primary"
-              onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              sx={{
-                bgcolor: '#1976d2',
-                color: '#fff',
-                '&:hover': {
-                  bgcolor: '#1565c0',
-                },
-                '&.Mui-disabled': {
-                  bgcolor: '#e0e0e0',
-                },
-              }}
-            >
-              <Send />
-            </IconButton>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {showChoiceButtons && (
+              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+                {choiceOptions.map((choice) => (
+                  <Button
+                    key={`${choice.number}-${choice.text}`}
+                    variant="outlined"
+                    onClick={() => handleSend(choice.text)}
+                    disabled={isLoading}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    {choice.number}. {choice.text}
+                  </Button>
+                ))}
+              </Stack>
+            )}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField
+                fullWidth
+                placeholder="メッセージを入力..."
+                value={input}
+                onChange={(e) => {
+                  console.log('[MUI Chat] Rendering input field (analysisComplete=false)')
+                  setInput(e.target.value)
+                }}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSend()
+                  }
+                }}
+                disabled={isLoading}
+                variant="outlined"
+                size="small"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                  },
+                }}
+              />
+              <IconButton
+                color="primary"
+                onClick={() => handleSend()}
+                disabled={!input.trim() || isLoading}
+                sx={{
+                  bgcolor: '#1976d2',
+                  color: '#fff',
+                  '&:hover': {
+                    bgcolor: '#1565c0',
+                  },
+                  '&.Mui-disabled': {
+                    bgcolor: '#e0e0e0',
+                  },
+                }}
+              >
+                <Send />
+              </IconButton>
+            </Box>
           </Box>
         )}
       </Box>

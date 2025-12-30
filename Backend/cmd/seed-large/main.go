@@ -6,8 +6,6 @@ import (
 	"log"
 	"math/rand"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {

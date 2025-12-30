@@ -6,7 +6,9 @@ import (
 	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -23,6 +25,7 @@ type ChatService struct {
 	phaseRepo               *repositories.AnalysisPhaseRepository
 	progressRepo            *repositories.UserAnalysisProgressRepository
 	sessionValidationRepo   *repositories.SessionValidationRepository
+	conversationContextRepo *repositories.ConversationContextRepository
 	answerEvaluator         *AnswerEvaluator
 	jobValidator            *JobCategoryValidator
 }
@@ -39,6 +42,7 @@ func NewChatService(
 	phaseRepo *repositories.AnalysisPhaseRepository,
 	progressRepo *repositories.UserAnalysisProgressRepository,
 	sessionValidationRepo *repositories.SessionValidationRepository,
+	conversationContextRepo *repositories.ConversationContextRepository,
 ) *ChatService {
 	return &ChatService{
 		aiClient:                aiClient,
@@ -52,6 +56,7 @@ func NewChatService(
 		phaseRepo:               phaseRepo,
 		progressRepo:            progressRepo,
 		sessionValidationRepo:   sessionValidationRepo,
+		conversationContextRepo: conversationContextRepo,
 		answerEvaluator:         NewAnswerEvaluator(),
 		jobValidator:            NewJobCategoryValidator(aiClient, jobCategoryRepo),
 	}
@@ -142,8 +147,25 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to get chat history: %w", err)
 	}
 
-	// 2-1. 最初の回答（職種回答）の判定
-	if len(history) == 2 { // 初回質問 + 初回回答
+	// 2-1. 職種の解決（未設定なら判定し、セッションに保存）
+	jobCategoryID := req.JobCategoryID
+	storedJobCategoryID := uint(0)
+	if s.conversationContextRepo != nil {
+		if id, err := s.conversationContextRepo.GetJobCategoryID(req.SessionID); err == nil {
+			storedJobCategoryID = id
+		}
+	}
+	if jobCategoryID == 0 {
+		jobCategoryID = storedJobCategoryID
+	}
+	if jobCategoryID != 0 && s.conversationContextRepo != nil && storedJobCategoryID != jobCategoryID {
+		if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
+			fmt.Printf("Warning: failed to store job category: %v\n", err)
+		}
+	}
+
+	jobJustResolved := false
+	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
 		fmt.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
 		jobValidation, err := s.jobValidator.ValidateJobCategory(ctx, req.Message)
 		if err != nil {
@@ -153,26 +175,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 			if jobValidation.IsValid && len(jobValidation.MatchedCategories) > 0 {
 				// 明確に職種が特定できた場合
 				fmt.Printf("[JobValidation] Valid job category matched: %d categories\n", len(jobValidation.MatchedCategories))
-				// 診断開始メッセージと最初の質問
-				response := "ありがとうございます！それでは、適性診断を始めますね。"
-
-				assistantMsg := &models.ChatMessage{
-					SessionID: req.SessionID,
-					UserID:    req.UserID,
-					Role:      "assistant",
-					Content:   response,
+				jobCategoryID = jobValidation.MatchedCategories[0].ID
+				jobJustResolved = true
+				if s.conversationContextRepo != nil {
+					if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
+						fmt.Printf("Warning: failed to store job category: %v\n", err)
+					}
 				}
-				s.chatMessageRepo.Create(assistantMsg)
-
-				return &ChatResponse{
-					Response:            response,
-					IsComplete:          false,
-					TotalQuestions:      15,
-					AnsweredQuestions:   0,
-					TotalCategories:     10,
-					EvaluatedCategories: 0,
-				}, nil
-
 			} else if jobValidation.NeedsClarification && jobValidation.SuggestedQuestion != "" {
 				// 職種が曖昧な場合は選択肢を提示
 				fmt.Printf("[JobValidation] Needs clarification, presenting options\n")
@@ -183,7 +192,9 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 					Role:      "assistant",
 					Content:   jobValidation.SuggestedQuestion,
 				}
-				s.chatMessageRepo.Create(assistantMsg)
+				if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+					fmt.Printf("Warning: failed to save assistant message: %v\n", err)
+				}
 
 				return &ChatResponse{
 					Response:          jobValidation.SuggestedQuestion,
@@ -238,32 +249,42 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	if err != nil {
 		// 全フェーズ完了の場合は特別な応答を返す
 		if err.Error() == "all phases completed" {
-			completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
+			userAnswerCount := countUserAnswers(history)
+			if userAnswerCount < 15 {
+				fmt.Printf("All phases completed but only %d answers; continuing questions\n", userAnswerCount)
+				currentPhase, err = s.getLastPhaseProgress(req.UserID, req.SessionID)
+				if err != nil || currentPhase == nil {
+					return nil, fmt.Errorf("failed to get fallback phase: %w", err)
+				}
+			} else {
+				completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
 
-			// 完了メッセージを保存
-			assistantMsg := &models.ChatMessage{
-				SessionID: req.SessionID,
-				UserID:    req.UserID,
-				Role:      "assistant",
-				Content:   completionMsg,
-			}
-			if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-				fmt.Printf("Warning: failed to save completion message: %v\n", err)
-			}
+				// 完了メッセージを保存
+				assistantMsg := &models.ChatMessage{
+					SessionID: req.SessionID,
+					UserID:    req.UserID,
+					Role:      "assistant",
+					Content:   completionMsg,
+				}
+				if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+					fmt.Printf("Warning: failed to save completion message: %v\n", err)
+				}
 
-			allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-			return &ChatResponse{
-				Response:            completionMsg,
-				IsComplete:          true,
-				TotalQuestions:      15,
-				AnsweredQuestions:   15,
-				EvaluatedCategories: 10,
-				TotalCategories:     10,
-				AllPhases:           allPhases,
-				CurrentPhase:        currentPhaseInfo,
-			}, nil
+				allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+				return &ChatResponse{
+					Response:            completionMsg,
+					IsComplete:          true,
+					TotalQuestions:      15,
+					AnsweredQuestions:   15,
+					EvaluatedCategories: 10,
+					TotalCategories:     10,
+					AllPhases:           allPhases,
+					CurrentPhase:        currentPhaseInfo,
+				}, nil
+			}
+		} else {
+			return nil, fmt.Errorf("failed to get current phase: %w", err)
 		}
-		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
 
 	// 2.7. フェーズ進捗を更新（有効な回答のみ）
@@ -278,13 +299,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	if len(trimmedAnswer) <= 3 && s.isChoiceAnswer(trimmedAnswer) {
 		fmt.Printf("[ProcessChat] Processing as choice answer\n")
 		// 選択肢回答の場合は直接スコアを計算
-		if err := s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history); err != nil {
+		if err := s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID); err != nil {
 			fmt.Printf("Warning: failed to process choice answer: %v\n", err)
 		}
 	} else {
 		fmt.Printf("[ProcessChat] Processing as text answer\n")
 		// 通常の回答分析
-		if err := s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message); err != nil {
+		if err := s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID); err != nil {
 			// ログに記録するが、処理は継続
 			fmt.Printf("Warning: failed to update weights: %v\n", err)
 		}
@@ -319,6 +340,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	fmt.Printf("Total asked questions for duplicate check: %d\n", len(askedTexts))
 
 	// 5. 現在のスコアを分析して、次に評価すべきカテゴリを決定
+	targetLevel := s.getUserTargetLevel(req.UserID)
 	scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	if err != nil {
 		fmt.Printf("Warning: failed to get scores for question selection: %v\n", err)
@@ -334,12 +356,8 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		}
 	}
 
-	// 全カテゴリ
-	allCategories := []string{
-		"技術志向", "コミュニケーション能力", "リーダーシップ", "チームワーク",
-		"問題解決力", "創造性・発想力", "計画性・実行力", "学習意欲・成長志向",
-		"ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
-	}
+	// 全カテゴリ（職種に応じて並び順を調整）
+	allCategories := s.getCategoryOrder(jobCategoryID)
 
 	// 未評価カテゴリを優先的に選択
 	var targetCategory string
@@ -390,7 +408,11 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	// まず、ルールベース質問から選択を試みる
 	fmt.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
-	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, req.JobCategoryID, askedTexts)
+	currentPhaseName := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		currentPhaseName = currentPhase.Phase.PhaseName
+	}
+	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, jobCategoryID, targetLevel, askedTexts, currentPhaseName)
 
 	if err == nil && predefinedQ != nil {
 		fmt.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
@@ -399,9 +421,16 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	} else {
 		// ルールベース質問がない場合、AIで生成
 		fmt.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
-		aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, req.JobCategoryID, currentPhase)
+		aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate question: %w", err)
+			// エラーは致命的にせずフォールバック質問を設定
+			fmt.Printf("Warning: failed to generate question via AI: %v\n", err)
+			fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+			if fallbackQuestion != "" {
+				aiResponse = fallbackQuestion
+			} else {
+				aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
+			}
 		}
 	}
 
@@ -437,15 +466,41 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 診断完了時のメッセージは追加しない（次の回答時に完了判定する）
 
 	// 6. AIの応答を保存
-	assistantMsg := &models.ChatMessage{
-		SessionID:        req.SessionID,
-		UserID:           req.UserID,
-		Role:             "assistant",
-		Content:          aiResponse,
-		QuestionWeightID: questionWeightID,
-	}
-	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-		return nil, fmt.Errorf("failed to save assistant message: %w", err)
+	// Guard: do not save empty assistant messages
+	if strings.TrimSpace(aiResponse) != "" {
+		if jobJustResolved {
+			aiResponse = "ありがとうございます！それでは、適性診断を始めますね。\n\n" + aiResponse
+		}
+		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) {
+			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
+			if err != nil || strings.TrimSpace(simple) == "" {
+				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+			}
+			if strings.TrimSpace(simple) == "" {
+				simple = simplifyNewGradQuestion(aiResponse)
+			}
+			aiResponse = simple
+		}
+		// 新卒向けに表現を調整（全フェーズ共通）
+		if targetLevel == "新卒" {
+			aiResponse = sanitizeForNewGrad(aiResponse)
+		}
+
+		assistantMsg := &models.ChatMessage{
+			SessionID:        req.SessionID,
+			UserID:           req.UserID,
+			Role:             "assistant",
+			Content:          aiResponse,
+			QuestionWeightID: questionWeightID,
+		}
+		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+			fmt.Printf("Warning: failed to save assistant message: %v\n", err)
+			// 続行は可能にする
+		}
+	} else {
+		// フォールバック: 空のAI応答の場合は簡易質問を返す
+		fmt.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
+		aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
 	}
 
 	// 7. 現在のスコアを取得
@@ -478,7 +533,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 }
 
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新
-func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string) error {
+func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) error {
 	// 回答の妥当性を事前チェック
 	messageTrimmed := strings.TrimSpace(message)
 
@@ -522,110 +577,54 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		return nil
 	}
 
-	// 会話履歴を取得して文脈を理解（最新5件のみ）
+	// 会話履歴から直近の質問を取得
 	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
 	if err != nil {
 		fmt.Printf("Warning: failed to get history for analysis: %v\n", err)
 		history = []models.ChatMessage{}
 	}
 
-	// 会話履歴から質問と回答のペアを抽出
-	conversationContext := ""
+	lastQuestion := ""
 	for i := len(history) - 1; i >= 0; i-- {
-		msg := history[i]
-		if msg.Role == "assistant" || msg.Role == "user" {
-			conversationContext += fmt.Sprintf("%s: %s\n", msg.Role, msg.Content)
+		if history[i].Role == "assistant" {
+			lastQuestion = history[i].Content
+			break
 		}
 	}
 
-	// 簡潔な分析プロンプト
-	prompt := fmt.Sprintf(`あなたは就職活動の適性診断専門家です。以下の回答を分析し、スコアリングしてください。
+	if strings.TrimSpace(lastQuestion) == "" {
+		fmt.Printf("Warning: no previous question found for scoring\n")
+		return nil
+	}
+	if s.isJobSelectionQuestion(lastQuestion) {
+		fmt.Printf("Skipping analysis for job selection question\n")
+		return nil
+	}
 
-## 会話
-%s
+	if jobCategoryID == 0 {
+		fmt.Printf("Skipping job-fit scoring because job category is not set\n")
+		return nil
+	}
 
-## 最新回答
-%s
+	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
+	isChoice := !isTextBasedQuestion(lastQuestion)
 
-## 評価カテゴリ（-10〜+10で評価）
-
-1. 技術志向: プログラミング・技術への興味、保有資格（基本情報技術者、応用情報技術者、AWS認定など）、技術プロジェクト経験
-2. コミュニケーション能力: 対話力・説明力、プレゼンテーション経験
-3. リーダーシップ: 主導性・意思決定力、リーダーとしての実績
-4. チームワーク: 協働・協調性、チームプロジェクトでの貢献
-5. 問題解決力: 論理思考・分析力、困難な課題を解決した経験
-6. 創造性・発想力: 独創性・革新性、アイデアを形にした実績
-7. 計画性・実行力: 目標設定・タスク管理、プロジェクトマネジメント経験
-8. 学習意欲・成長志向: 継続学習・成長意識、資格取得への取り組み、オンライン講座や独学の実績
-9. ストレス耐性・粘り強さ: 困難対処・プレッシャー対応、困難を乗り越えた経験
-10. ビジネス思考・目標志向: ビジネス価値理解・成果志向、ビジネス関連の学習や経験
-
-## 評価のポイント
-- **資格・認定**: 明示的に資格名が出た場合は該当カテゴリのスコアを大幅にプラス（+5〜+8）
-- **具体的な経験**: プロジェクト、インターン、アルバイト、サークル活動などの具体的な経験は信頼性が高い（+3〜+7）
-- **抽象的な表現**: 「興味がある」「好きです」などの抽象的な表現は控えめに評価（+1〜+3）
-- **判断材料がない場合は0点**
-
-## 重要
-- 必ずJSON形式で返す
-- 短く簡潔な理由を記載（資格や経験を具体的に言及）
-
-## 出力形式（この形式を厳守）
-{
-  "技術志向": {"score": 0, "reason": "理由"},
-  "コミュニケーション能力": {"score": 0, "reason": "理由"},
-  "リーダーシップ": {"score": 0, "reason": "理由"},
-  "チームワーク": {"score": 0, "reason": "理由"},
-  "問題解決力": {"score": 0, "reason": "理由"},
-  "創造性・発想力": {"score": 0, "reason": "理由"},
-  "計画性・実行力": {"score": 0, "reason": "理由"},
-  "学習意欲・成長志向": {"score": 0, "reason": "理由"},
-  "ストレス耐性・粘り強さ": {"score": 0, "reason": "理由"},
-  "ビジネス思考・目標志向": {"score": 0, "reason": "理由"}
-}`, conversationContext, message)
-
-	response, err := s.aiClient.Responses(ctx, prompt)
+	evaluation, err := s.evaluateJobFitScoreWithAI(ctx, jobCategoryID, lastQuestion, message, isChoice)
 	if err != nil {
-		return err
+		fmt.Printf("Warning: failed to evaluate job fit: %v\n", err)
+		return nil
 	}
 
-	// JSONパース
-	type ScoreDetail struct {
-		Score  int    `json:"score"`
-		Reason string `json:"reason"`
-	}
-	var scores map[string]ScoreDetail
-
-	// JSONブロックを抽出
-	jsonStart := strings.Index(response, "{")
-	jsonEnd := strings.LastIndex(response, "}")
-	if jsonStart == -1 || jsonEnd == -1 {
-		fmt.Printf("Warning: No JSON found in AI response, skipping score update\n")
-		return nil // JSONが見つからない場合はスキップ（エラーにしない）
-	}
-	jsonStr := response[jsonStart : jsonEnd+1]
-
-	if err := json.Unmarshal([]byte(jsonStr), &scores); err != nil {
-		fmt.Printf("Warning: failed to parse AI response JSON: %v\nResponse: %s\n", err, jsonStr)
-		return nil // 解析失敗してもスキップ（エラーにしない）
+	if evaluation.Score <= 0 {
+		fmt.Printf("No job-fit score applied (score=%d)\n", evaluation.Score)
+		return nil
 	}
 
-	// スコアを更新（スコアが0でないもののみ）
-	for category, detail := range scores {
-		if detail.Score != 0 {
-			if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, detail.Score); err != nil {
-				fmt.Printf("Warning: failed to update score for %s: %v\n", category, err)
-			} else {
-				fmt.Printf("Updated score: %s = %d (%s)\n", category, detail.Score, detail.Reason)
-			}
-		}
-	}
-
-	return nil
+	return s.updateCategoryScore(userID, sessionID, targetCategory, evaluation.Score)
 }
 
 // generateStrategicQuestion AIが戦略的に次の質問を生成
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, currentPhase *models.UserAnalysisProgress) (string, uint, error) {
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *models.UserAnalysisProgress) (string, uint, error) {
 	// 会話履歴を構築
 	historyText := ""
 	for _, msg := range history {
@@ -657,6 +656,14 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			evaluatedCategories = append(evaluatedCategories, cat)
 		} else {
 			unevaluatedCategories = append(unevaluatedCategories, cat)
+		}
+	}
+
+	// 職種名と業界名を取得
+	jobCategoryName := "指定なし"
+	if jobCategoryID != 0 {
+		if jc, err := s.jobCategoryRepo.FindByID(jobCategoryID); err == nil && jc != nil {
+			jobCategoryName = jc.Name
 		}
 	}
 
@@ -693,13 +700,25 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	}
 
 	categoryDescriptions := map[string]string{
-		"技術志向":       "プログラミングや技術への興味、学習経験（授業、趣味、独学）→ 技術主導企業か事業主導企業か",
+		"技術志向":       "技術やデジタル活用への興味、学習経験（授業、趣味、独学）→ 技術主導企業か事業主導企業か",
 		"コミュニケーション力": "対話力、説明力、プレゼン経験（授業発表、サークル）→ チーム重視企業か個人裁量企業か",
 		"リーダーシップ志向":  "主導性、提案力、まとめ役経験（グループワーク、サークル）→ マネジメント志向かスペシャリスト志向か",
 		"チームワーク志向":   "協力、役割認識、グループ活動経験（授業、サークル、バイト）→ 大規模チーム企業か少数精鋭企業か",
 		"創造性志向":      "独創性、アイデア発想、工夫した経験（課題、趣味）→ スタートアップか大企業か",
 		"安定志向":       "長期的キャリア観、安定性重視 → 大手企業かベンチャーか",
 		"成長志向":       "学習意欲、自己成長、新しい挑戦（資格、自主学習）→ 教育重視企業か実践重視企業か",
+		"チャレンジ志向":    "困難への挑戦、失敗を恐れない姿勢 → 挑戦推奨文化か安定志向文化か",
+		"細部志向":       "丁寧さ、正確性、品質へのこだわり → 品質重視企業かスピード重視企業か",
+		"ワークライフバランス": "仕事と私生活のバランス観 → ワークライフバランス重視企業か成果主義企業か",
+	}
+	categoryDescriptionsMid := map[string]string{
+		"技術志向":       "技術への興味、業務での技術活用や改善経験 → 技術主導企業か事業主導企業か",
+		"コミュニケーション力": "関係者との調整、説明力、合意形成の経験 → チーム重視企業か個人裁量企業か",
+		"リーダーシップ志向":  "意思決定、主導性、チームや案件の推進経験 → マネジメント志向かスペシャリスト志向か",
+		"チームワーク志向":   "協力、役割認識、チームでの成果創出経験 → 大規模チーム企業か少数精鋭企業か",
+		"創造性志向":      "改善提案、業務の工夫、新しいアプローチ → スタートアップか大企業か",
+		"安定志向":       "長期的キャリア観、安定性重視 → 大手企業かベンチャーか",
+		"成長志向":       "学習意欲、自己成長、新しい挑戦 → 教育重視企業か実践重視企業か",
 		"チャレンジ志向":    "困難への挑戦、失敗を恐れない姿勢 → 挑戦推奨文化か安定志向文化か",
 		"細部志向":       "丁寧さ、正確性、品質へのこだわり → 品質重視企業かスピード重視企業か",
 		"ワークライフバランス": "仕事と私生活のバランス観 → ワークライフバランス重視企業か成果主義企業か",
@@ -718,7 +737,55 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			currentPhase.QuestionsAsked+1)
 	}
 
-	prompt := fmt.Sprintf(`あなたは新卒学生向けの就職適性診断の専門家です。
+	if strings.TrimSpace(targetLevel) == "" {
+		targetLevel = "新卒"
+	}
+
+	description := categoryDescriptions[targetCategory]
+	if targetLevel == "中途" {
+		description = categoryDescriptionsMid[targetCategory]
+	}
+
+	var prompt string
+	if targetLevel == "中途" {
+		prompt = fmt.Sprintf(`あなたは中途向けの就職適性診断の専門家です。
+これまでの会話と評価状況を分析し、**実務経験を引き出しやすく、企業選定に役立つ質問**を1つ生成してください。
+%s
+## これまでの会話
+%s
+
+%s
+
+%s
+
+## 質問の目的
+%s
+
+## 対象カテゴリ: %s
+%s
+
+## 【重要】中途向け質問ガイドライン
+- 実務経験・業務・プロジェクト・成果・数値に触れる
+- 役割・判断・工夫・関係者との調整を具体的に聞く
+- 抽象的ではなく、具体的なシーンを想定して聞く
+- 質問は1つのみ、説明や前置きは不要
+- 既出質問と重複しない
+
+**志望職種: %s, 業界ID: %d, 職種ID: %d を考慮して、この職種に相応しい文脈で質問を生成してください。**
+
+質問のみを返してください。説明や補足は一切不要です。`,
+			phaseContext,
+			historyText,
+			scoreAnalysis,
+			askedQuestionsText,
+			questionPurpose,
+			targetCategory,
+			description,
+			jobCategoryName,
+			industryID,
+			jobCategoryID)
+	} else {
+		prompt = fmt.Sprintf(`あなたは新卒学生向けの就職適性診断の専門家です。
 これまでの会話と評価状況を分析し、**学生が答えやすく、企業選定に役立つ質問**を1つ生成してください。
 %s
 ## これまでの会話
@@ -741,7 +808,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 ✅ 良い例: 「グループ活動で、自分から提案したことはありますか？」
 
 ❌ 悪い例: 「業務での課題解決経験は？」
-✅ 良い例: 「授業やサークルで困ったとき、どう対処しましたか？」
+✅ 良い例: 「授業やサークルで困ったとき、どのように対処しましたか？」
 
 ### 2. **学生生活で答えられる質問**
 以下のような場面を想定：
@@ -754,13 +821,13 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 ### 3. **具体的で答えやすい**
 抽象的な質問より、具体的なシーンを想定：
 ✅ 「グループワークで意見が分かれたとき、どうしましたか？」
-✅ 「プログラミングを学び始めたきっかけは何ですか？」
+✅ 「新しい技術やツールに触れ始めたきっかけは何ですか？」
 ✅ 「サークルやバイトで、どんな役割が多かったですか？」
 
 ### 4. **小さな経験も評価**
 「どんな小さなことでも構いません」と添える：
 ✅ 「リーダー経験がなくても、自分から提案したことはありますか？」
-✅ 「プログラミング経験が少なくても、興味はありますか？」
+✅ 「技術に触れた経験が少なくても、興味はありますか？」
 
 ### 5. **選択肢や例を示す**
 完全にオープンではなく、具体例を示す：
@@ -769,7 +836,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 ## 質問の例（新卒向け・良い例）
 
 **技術志向:**
-「プログラミングや技術的なことに興味はありますか？もし学んだことがあれば、授業、趣味、独学など、どんな形でも良いので教えてください。」
+「身近なITツールや新しい技術に触れることに興味はありますか？もし触れたことがあれば、授業、趣味、独学など、どんな形でも良いので教えてください。」
 
 **チームワーク:**
 「グループワークやサークル活動で、メンバーと協力したことはありますか？その時、あなたはどんな役割でしたか？」
@@ -805,14 +872,14 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 7. **親しみやすい言葉**: 堅苦しくなく、話しかけるような口調
 
 **技術志向・専門性を評価する場合:**
-「これまでに経験したプロジェクトや開発、制作活動について具体的に教えてください。使用した技術やツール、あなたが担当した役割も含めて。」
+「授業や個人制作などで取り組んだものづくりの経験があれば教えてください。使った技術やツール、担当したことがあれば教えてください。」
 
 ## 質問生成時の重要な指針
 - **資格・認定について**: 適切なタイミングで、保有資格や勉強中の資格について尋ねることで、学習意欲や専門性を評価する
 - **経験・実績について**: プロジェクト経験、インターン、アルバイト、課外活動などの具体的な経験を聞き出し、スキルレベルと適性を判断する
 - **自然な文脈で**: 会話の流れに沿って、資格や経験について質問する（例: 技術の話題が出たら「その技術を使った経験はありますか？」）
 
-**業界ID: %d, 職種ID: %d を考慮して質問を生成してください。**
+**志望職種: %s, 業界ID: %d, 職種ID: %d を考慮して、この職種に相応しい文脈で質問を生成してください。特に「技術志向」を評価する場合は、職種がエンジニアであればプログラミングについて、非エンジニア職種ではITツール活用や効率化の関心について聞き、プログラミング経験を前提としないでください。**
 
 質問のみを返してください。説明や補足は一切不要です。`,
 		phaseContext,
@@ -821,11 +888,13 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		askedQuestionsText,
 		questionPurpose,
 		targetCategory,
-		categoryDescriptions[targetCategory],
+		description,
+		jobCategoryName,
 		industryID,
 		jobCategoryID)
+	}
 
-	questionText, err := s.aiClient.Responses(ctx, prompt)
+	questionText, err := s.aiCallWithRetries(ctx, prompt)
 	if err != nil {
 		return "", 0, err
 	}
@@ -833,6 +902,16 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	// 質問文をクリーンアップ
 	questionText = strings.TrimSpace(questionText)
 	questionText = strings.Trim(questionText, `"「」`)
+
+	// フォールバック: AIが空を返した場合は簡易質問を使用する
+	if questionText == "" {
+		fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
+		if fallbackQuestion != "" {
+			questionText = fallbackQuestion
+		} else {
+			questionText = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
+		}
+	}
 
 	// 重複チェック（完全一致および類似度チェック）を最大3回まで試行
 	maxRetries := 3
@@ -884,7 +963,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			}(),
 			targetCategory)
 
-		questionText, err = s.aiClient.Responses(ctx, retryPrompt)
+		questionText, err = s.aiCallWithRetries(ctx, retryPrompt)
 		if err != nil {
 			return "", 0, err
 		}
@@ -897,7 +976,13 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		}
 	}
 
-	// AI生成質問をデータベースに保存
+	// AI生成質問をデータベースに保存（空文字は保存しない）
+	questionText = strings.TrimSpace(questionText)
+	if questionText == "" {
+		fmt.Printf("Warning: AI generated empty question even after fallback, not saving. user=%d session=%s\n", userID, sessionID)
+		return "", 0, fmt.Errorf("ai returned empty question")
+	}
+
 	aiGenQuestion := &models.AIGeneratedQuestion{
 		UserID:       userID,
 		SessionID:    sessionID,
@@ -1057,7 +1142,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 		// 最後のユーザー回答が「わからない」系かチェック
 		if i == len(history)-1 && msg.Role == "user" {
 			lowConfidencePatterns := []string{
-				"わからない", "分からない", "わかりません", "分かりません",
+				"わからない", "わからない", "わかりません", "分かりません",
 				"よくわからない", "特にない", "思いつかない", "ありません",
 			}
 			for _, pattern := range lowConfidencePatterns {
@@ -1081,12 +1166,8 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 		scoreMap[score.WeightCategory] = score.Score
 	}
 
-	// まだ評価されていないカテゴリを特定
-	allCategories := []string{
-		"技術志向", "コミュニケーション能力", "リーダーシップ", "チームワーク",
-		"問題解決力", "創造性・発想力", "計画性・実行力", "学習意欲・成長志向",
-		"ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
-	}
+	// まだ評価されていないカテゴリを特定（職種に応じて並び順を調整）
+	allCategories := s.getCategoryOrder(jobCategoryID)
 
 	unevaluatedCategories := []string{}
 	for _, cat := range allCategories {
@@ -1113,6 +1194,9 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 ❌ 「プロジェクトでの経験は？」
 ✅ 「授業やサークルでの経験は？」
 
+❌ 悪い例: 「業務での課題解決経験は？」
+✅ 良い例: 「授業やサークルで困ったとき、どのように対処しましたか？」
+
 ### 2. より具体的なシーンを提示
 ❌ 「リーダーシップについて教えて」
 ✅ 「グループワークで、自分から提案したことはありますか？」
@@ -1129,7 +1213,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 ## 質問の例（答えやすい良い例）
 
 **技術志向:**
-「プログラミングに興味はありますか？授業で習った程度でも、触ったことがあれば教えてください。」
+「身近なITツールや新しい技術に興味はありますか？授業で触れた程度でも、使ったことがあれば教えてください。」
 
 **チームワーク:**
 「グループで作業するとき、どんな役割が多いですか？例えば、まとめ役、アイデアを出す人、サポート役など。」
@@ -1148,18 +1232,18 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 
 業界ID: %d, 職種ID: %d
 
-**質問のみ**を1つ返してください。説明や前置きは不要です。`, historyText, lastQuestion, industryID, jobCategoryID)
+**質問のみ**を1つ返してください。説明や補足は不要です。`, historyText, lastQuestion, industryID, jobCategoryID)
 	} else if len(unevaluatedCategories) > 0 {
 		// 未評価のカテゴリがある場合は、それを重点的に評価
 		targetCategory := unevaluatedCategories[0]
 
 		categoryDescriptions := map[string]string{
-			"技術志向":       "プログラミング、技術学習への興味（授業、趣味、独学）",
+			"技術志向":       "技術やデジタル活用への興味（授業、趣味、独学）",
 			"コミュニケーション力": "人と話すこと、説明すること、協力すること",
 			"リーダーシップ志向":  "自分から提案、まとめ役、メンバーのサポート",
 			"チームワーク志向":   "グループでの協力、役割分担、助け合い",
 			"創造性志向":      "アイデア発想、工夫、新しいアプローチ",
-			"安定志向":       "長期的なキャリア観、安定性への考え方",
+			"安定志向":       "長期的キャリア観、安定性への考え方",
 			"成長志向":       "学習意欲、自己成長、新しい挑戦",
 			"チャレンジ志向":    "困難への挑戦、失敗を恐れない姿勢",
 			"細部志向":       "丁寧さ、正確性、品質へのこだわり",
@@ -1198,20 +1282,20 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 ## 良い質問の例（新卒向け）
 
 **技術志向:**
-「プログラミングの授業や独学で、楽しかったことや苦労したことはありますか？」
+「技術やツールに触れた経験で、楽しかったことや苦労したことはありますか？」
 
 **チームワーク:**
-「グループワークで、メンバーと意見が分かれたとき、どうしましたか？」
+「グループ活動で、メンバーと協力してうまくいったとき、どんな気持ちでしたか？」
 
 **リーダーシップ:**
-「サークルや友人グループで、自分から企画や提案をしたことはありますか？」
+「自分から提案したとき、周りの反応はどうでしたか？やりがいを感じましたか？」
 
 **成長志向:**
-「最近、新しく学んだことや挑戦したことはありますか？きっかけも教えてください。」
+「新しいことを学ぶとき、どんなことに気をつけていますか？直近で学んだことはありますか？」
 
 業界ID: %d, 職種ID: %d
 
-**質問のみ**を1つ返してください。説明や前置きは不要です。`, historyText, targetCategory, description, industryID, jobCategoryID)
+**質問のみ**を1つ返してください。説明や補足は不要です。`, historyText, targetCategory, description, industryID, jobCategoryID)
 	} else {
 		// 全カテゴリ評価済みの場合は、深掘り質問
 		// スコアが高いカテゴリをさらに深掘り
@@ -1231,12 +1315,16 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 
 ## 現在の評価状況
 学生の強みとして「%s」が見えてきました（スコア: %d）。
-この強みをさらに深掘りし、具体的なエピソードや考え方を引き出す質問を作成してください。
+この強みを深掘りし、具体的なエピソードや考え方を引き出す質問を作成してください。
 
 ## 【重要】新卒学生向け深掘り質問ガイドライン
 
 ### 1. 実務経験を前提としない
-✅ 授業、サークル、アルバイト、趣味での経験を聞く
+学生生活で答えられる質問：
+- 授業、ゼミ、グループワーク
+- サークル、部活動
+- アルバイト
+- 趣味、個人活動
 
 ### 2. 具体的なエピソードを引き出す
 「その中で、特に印象に残っている経験はありますか？」
@@ -1250,12 +1338,12 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 表面的でなく、本質的な能力や価値観を探る
 
 ### 5. 小さな経験も大切に
-「どんな小さなことでも構いません」
+「どんな小さなことでも構いません」と添える
 
 ## 良い深掘り質問の例
 
 **技術志向が強い場合:**
-「プログラミングを学ぶ中で、一番楽しかった瞬間や達成感を感じたことはありますか？」
+「新しい技術やツールに触れる中で、一番楽しかった瞬間や達成感を感じたことはありますか？」
 
 **チームワークが強い場合:**
 「グループ活動で、メンバーと協力してうまくいったとき、どんな気持ちでしたか？」
@@ -1268,10 +1356,10 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 
 業界ID: %d, 職種ID: %d
 
-**質問のみ**を1つ返してください。説明や前置きは不要です。`, historyText, highestCategory, highestScore, industryID, jobCategoryID)
+**質問のみ**を1つ返してください。説明や補足は不要です。`, historyText, highestCategory, highestScore, industryID, jobCategoryID)
 	}
 
-	questionText, err := s.aiClient.Responses(ctx, prompt)
+	questionText, err := s.aiCallWithRetries(ctx, prompt)
 	if err != nil {
 		return "", 0, err
 	}
@@ -1295,6 +1383,578 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	}
 
 	return questionText, aiGenQuestion.ID, nil
+}
+
+func (s *ChatService) getCategoryOrder(jobCategoryID uint) []string {
+	defaultOrder := []string{
+		"技術志向", "コミュニケーション能力", "リーダーシップ", "チームワーク",
+		"問題解決力", "創造性・発想力", "計画性・実行力", "学習意欲・成長志向",
+		"ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
+	}
+	undecidedOrder := []string{
+		"コミュニケーション能力", "学習意欲・成長志向", "問題解決力", "チームワーク",
+		"ビジネス思考・目標志向", "計画性・実行力", "創造性・発想力", "ストレス耐性・粘り強さ",
+		"リーダーシップ", "技術志向",
+	}
+
+	if jobCategoryID == 0 {
+		return undecidedOrder
+	}
+
+	code := s.getJobCategoryCode(jobCategoryID)
+	switch {
+	case strings.HasPrefix(code, "ENG"):
+		return []string{
+			"技術志向", "問題解決力", "学習意欲・成長志向", "創造性・発想力",
+			"計画性・実行力", "チームワーク", "コミュニケーション能力", "ストレス耐性・粘り強さ",
+			"ビジネス思考・目標志向", "リーダーシップ",
+		}
+	case strings.HasPrefix(code, "SALES"):
+		return []string{
+			"コミュニケーション能力", "ビジネス思考・目標志向", "チームワーク", "ストレス耐性・粘り強さ",
+			"計画性・実行力", "学習意欲・成長志向", "問題解決力", "リーダーシップ",
+			"創造性・発想力", "技術志向",
+		}
+	case strings.HasPrefix(code, "MKT"):
+		return []string{
+			"創造性・発想力", "問題解決力", "コミュニケーション能力", "ビジネス思考・目標志向",
+			"学習意欲・成長志向", "計画性・実行力", "チームワーク", "リーダーシップ",
+			"ストレス耐性・粘り強さ", "技術志向",
+		}
+	case strings.HasPrefix(code, "HR"):
+		return []string{
+			"コミュニケーション能力", "チームワーク", "リーダーシップ", "学習意欲・成長志向",
+			"計画性・実行力", "問題解決力", "ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
+			"創造性・発想力", "技術志向",
+		}
+	case strings.HasPrefix(code, "FIN"):
+		return []string{
+			"計画性・実行力", "問題解決力", "ビジネス思考・目標志向", "ストレス耐性・粘り強さ",
+			"学習意欲・成長志向", "コミュニケーション能力", "チームワーク", "リーダーシップ",
+			"創造性・発想力", "技術志向",
+		}
+	case strings.HasPrefix(code, "CONS"):
+		return []string{
+			"問題解決力", "コミュニケーション能力", "学習意欲・成長志向", "ビジネス思考・目標志向",
+			"チームワーク", "リーダーシップ", "計画性・実行力", "ストレス耐性・粘り強さ",
+			"創造性・発想力", "技術志向",
+		}
+	default:
+		return defaultOrder
+	}
+}
+
+func (s *ChatService) fallbackQuestionForCategory(category string, jobCategoryID uint, targetLevel string) string {
+	switch category {
+	case "技術志向":
+		return s.techInterestQuestion(jobCategoryID, targetLevel)
+	case "コミュニケーション能力":
+		if targetLevel == "中途" {
+			return "業務で関係者と調整した経験はありますか？どんな場面で、どのように進めましたか？"
+		}
+		return "グループワークであなたがよく担当する役割は何ですか？（例: アイデア出し、まとめ役、サポートなど）"
+	case "リーダーシップ":
+		if targetLevel == "中途" {
+			return "業務でチームや案件をリードした経験はありますか？どのように進めましたか？"
+		}
+		return "グループで何かをまとめた経験はありますか？どんな場面でしたか？"
+	case "チームワーク":
+		if targetLevel == "中途" {
+			return "チームで協力して成果を出した経験はありますか？あなたの役割も教えてください。"
+		}
+		return "サークルや授業で、チームで取り組んだ経験はありますか？どんな役割でしたか？"
+	case "問題解決力":
+		if targetLevel == "中途" {
+			return "業務で課題が起きたとき、どのように解決しましたか？最近の例を教えてください。"
+		}
+		return "課題やレポートで困ったとき、どのように解決しましたか？最近の例を教えてください。"
+	case "創造性・発想力":
+		if targetLevel == "中途" {
+			return "業務で改善や工夫を提案した経験はありますか？どんな内容でしたか？"
+		}
+		return "新しいアイデアを出した経験はありますか？どんな工夫をしましたか？"
+	case "計画性・実行力":
+		if targetLevel == "中途" {
+			return "業務で計画を立てて実行した経験を教えてください。どのように進めましたか？"
+		}
+		return "何かを計画して実行した経験を教えてください。どのように進めましたか？"
+	case "学習意欲・成長志向":
+		if targetLevel == "中途" {
+			return "業務に役立てるために学んだことはありますか？直近の例があれば教えてください。"
+		}
+		return "新しいことを学ぶとき、どうやって学習を進めますか？直近で学んだことはありますか？"
+	case "ストレス耐性・粘り強さ":
+		if targetLevel == "中途" {
+			return "業務で困難に直面したとき、どのように乗り越えましたか？具体例があれば教えてください。"
+		}
+		return "困難に直面したとき、どのように乗り越えましたか？具体例があれば教えてください。"
+	case "ビジネス思考・目標志向":
+		if targetLevel == "中途" {
+			return "業務で目標を立てて達成した経験はありますか？どんな目標でしたか？"
+		}
+		return "目標を立てて達成した経験はありますか？どんな目標でしたか？"
+	default:
+		return ""
+	}
+}
+
+func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryID uint, targetLevel string) []string {
+	switch category {
+	case "技術志向":
+		return []string{
+			s.techInterestQuestion(jobCategoryID, targetLevel),
+			"最近触れた技術やツールはありますか？どんなことでも大丈夫です。",
+		}
+	case "コミュニケーション能力":
+		if targetLevel == "中途" {
+			return []string{
+				"業務で相手に説明するとき、意識していることは何ですか？",
+				"関係者とのやり取りで工夫したことはありますか？",
+			}
+		}
+		return []string{
+			"人に説明するとき、意識していることは何ですか？",
+			"授業やサークルで発表した経験はありますか？",
+		}
+	case "リーダーシップ":
+		if targetLevel == "中途" {
+			return []string{
+				"業務で主導したことはありますか？どんな場面でしたか？",
+				"周りを巻き込んで進めた経験はありますか？",
+			}
+		}
+		return []string{
+			"自分から提案したりまとめ役をしたことはありますか？",
+			"人をまとめた経験があれば教えてください。",
+		}
+	case "チームワーク":
+		if targetLevel == "中途" {
+			return []string{
+				"チームで協力して進めた仕事はありますか？",
+				"メンバーと連携する際に意識していることは？",
+			}
+		}
+		return []string{
+			"グループで協力した経験はありますか？",
+			"チームで取り組んだときの役割を教えてください。",
+		}
+	case "問題解決力":
+		if targetLevel == "中途" {
+			return []string{
+				"業務で困ったとき、どう解決しましたか？",
+				"トラブル対応で工夫したことはありますか？",
+			}
+		}
+		return []string{
+			"困ったとき、どうやって解決しましたか？",
+			"課題で行き詰まったときの対処法を教えてください。",
+		}
+	case "創造性・発想力":
+		if targetLevel == "中途" {
+			return []string{
+				"業務で改善案を出したことはありますか？",
+				"新しいアイデアを提案した経験はありますか？",
+			}
+		}
+		return []string{
+			"新しいアイデアを出した経験はありますか？",
+			"いつもと違う工夫をしたことはありますか？",
+		}
+	case "計画性・実行力":
+		if targetLevel == "中途" {
+			return []string{
+				"業務で計画を立てて進めた経験はありますか？",
+				"期限に向けて進めた仕事はありますか？",
+			}
+		}
+		return []string{
+			"計画を立てて進めた経験はありますか？",
+			"期限を意識して進めたことはありますか？",
+		}
+	case "学習意欲・成長志向":
+		if targetLevel == "中途" {
+			return []string{
+				"最近学んだことはありますか？",
+				"仕事のために学習したことはありますか？",
+			}
+		}
+		return []string{
+			"最近学んだことはありますか？",
+			"新しく始めたことはありますか？",
+		}
+	case "ストレス耐性・粘り強さ":
+		if targetLevel == "中途" {
+			return []string{
+				"大変だった仕事をどう乗り越えましたか？",
+				"プレッシャーのある場面での対処を教えてください。",
+			}
+		}
+		return []string{
+			"大変なとき、どうやって乗り越えましたか？",
+			"うまくいかない時の気持ちの切り替え方は？",
+		}
+	case "ビジネス思考・目標志向":
+		if targetLevel == "中途" {
+			return []string{
+				"目標を立てて取り組んだ経験はありますか？",
+				"成果を意識して進めた仕事はありますか？",
+			}
+		}
+		return []string{
+			"目標を立てて取り組んだ経験はありますか？",
+			"目標達成のために工夫したことはありますか？",
+		}
+	default:
+		return []string{s.fallbackQuestionForCategory(category, jobCategoryID, targetLevel)}
+	}
+}
+
+func (s *ChatService) selectFallbackQuestion(category string, jobCategoryID uint, targetLevel string, askedTexts map[string]bool) string {
+	options := s.fallbackQuestionsForCategory(category, jobCategoryID, targetLevel)
+	for _, q := range options {
+		if strings.TrimSpace(q) == "" {
+			continue
+		}
+		if !askedTexts[q] {
+			return q
+		}
+	}
+	generic := []string{}
+	if targetLevel == "中途" {
+		generic = []string{
+			"最近取り組んだ仕事やタスクはありますか？簡単に教えてください。",
+			"仕事で工夫したことがあれば教えてください。",
+		}
+	} else {
+		generic = []string{
+			"最近頑張ったことはありますか？",
+			"新しく挑戦したことはありますか？",
+		}
+	}
+	for _, q := range generic {
+		if strings.TrimSpace(q) == "" {
+			continue
+		}
+		if !askedTexts[q] {
+			return q
+		}
+	}
+	return ""
+}
+
+func (s *ChatService) techInterestQuestion(jobCategoryID uint, targetLevel string) string {
+	code := s.getJobCategoryCode(jobCategoryID)
+	if targetLevel == "中途" {
+		switch {
+		case strings.HasPrefix(code, "ENG"):
+			return "業務で使った技術や、最近取り組んだ開発について教えてください。"
+		case strings.HasPrefix(code, "SALES"):
+			return "営業活動でITツールや仕組みを活用した経験はありますか？どのように使いましたか？"
+		case strings.HasPrefix(code, "MKT"):
+			return "データやデジタルを使った施策の経験はありますか？内容を教えてください。"
+		case strings.HasPrefix(code, "HR"):
+			return "人事領域でITツールや仕組みを使った経験はありますか？具体例があれば教えてください。"
+		case strings.HasPrefix(code, "FIN"):
+			return "数値管理や分析で使ったツール・仕組みがあれば教えてください。"
+		case strings.HasPrefix(code, "CONS"):
+			return "業務でデータやツールを使って課題整理をした経験はありますか？"
+		default:
+			return "業務でITツールや仕組みを活用した経験はありますか？"
+		}
+	}
+	switch {
+	case strings.HasPrefix(code, "ENG"):
+		return "プログラミングや技術に触れるのは好きですか？授業や趣味、独学で触れたことがあれば教えてください。"
+	case strings.HasPrefix(code, "SALES"):
+		return "営業で役立ちそうなITツールやアプリを使うことに興味はありますか？授業やアルバイトで使ったことがあれば教えてください。"
+	case strings.HasPrefix(code, "MKT"):
+		return "データやSNS分析など、デジタルを使って考えることに興味はありますか？授業や趣味で触れたことがあれば教えてください。"
+	case strings.HasPrefix(code, "HR"):
+		return "人事の仕事で役立ちそうなITツールや仕組みに興味はありますか？授業やアルバイトで使ったことがあれば教えてください。"
+	case strings.HasPrefix(code, "FIN"):
+		return "数字を扱う作業や表計算などのツールを使うのは好きですか？授業やアルバイトで使ったことがあれば教えてください。"
+	case strings.HasPrefix(code, "CONS"):
+		return "調べた情報をまとめるためにITツールやデータを使うことに興味はありますか？授業や課題での経験があれば教えてください。"
+	default:
+		return "身近なITツールやアプリを使って作業を効率化することに興味はありますか？授業やアルバイトで使った例があれば教えてください。"
+	}
+}
+
+func (s *ChatService) getJobCategoryCode(jobCategoryID uint) string {
+	if jobCategoryID == 0 {
+		return ""
+	}
+	category, err := s.jobCategoryRepo.FindByID(jobCategoryID)
+	if err != nil || category == nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(category.Code))
+}
+
+func (s *ChatService) getUserTargetLevel(userID uint) string {
+	user, err := s.userRepo.GetUserByID(userID)
+	if err == nil && user != nil && strings.TrimSpace(user.TargetLevel) == "中途" {
+		return "中途"
+	}
+	return "新卒"
+}
+
+type jobFitEvaluation struct {
+	Score           int      `json:"score"`
+	Reason          string   `json:"reason"`
+	MatchedKeywords []string `json:"matched_keywords"`
+}
+
+func (s *ChatService) getJobCategoryName(jobCategoryID uint) string {
+	if jobCategoryID == 0 {
+		return "未指定"
+	}
+	category, err := s.jobCategoryRepo.FindByID(jobCategoryID)
+	if err != nil || category == nil {
+		return "未指定"
+	}
+	return strings.TrimSpace(category.Name)
+}
+
+func (s *ChatService) getLastAssistantMessage(history []models.ChatMessage) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			return history[i].Content
+		}
+	}
+	return ""
+}
+
+func (s *ChatService) isJobSelectionQuestion(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	keywords := []string{
+		"職種", "どの職種", "IT職種", "興味がありますか", "選んでください",
+		"まだ決めていない", "番号で答えても",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *ChatService) shouldValidateJobCategory(history []models.ChatMessage) bool {
+	lastAssistant := s.getLastAssistantMessage(history)
+	if strings.TrimSpace(lastAssistant) == "" {
+		return true
+	}
+	return s.isJobSelectionQuestion(lastAssistant)
+}
+
+func (s *ChatService) getJobFitKeywords(jobCategoryID uint) ([]string, []string) {
+	code := s.getJobCategoryCode(jobCategoryID)
+	switch {
+	case strings.HasPrefix(code, "ENG"):
+		return []string{"プログラミング", "開発", "コード", "設計", "デバッグ"},
+			[]string{"アルゴリズム", "API", "テスト", "Git", "サーバー", "データベース"}
+	case strings.HasPrefix(code, "SALES"):
+		return []string{"提案", "顧客", "ヒアリング", "関係構築", "課題"},
+			[]string{"ニーズ", "交渉", "フォロー", "目標", "商談"}
+	case strings.HasPrefix(code, "MKT"):
+		return []string{"分析", "企画", "データ", "広告", "改善"},
+			[]string{"SNS", "市場", "ターゲット", "施策", "検証"}
+	case strings.HasPrefix(code, "HR"):
+		return []string{"採用", "面接", "人材", "育成", "評価"},
+			[]string{"研修", "面談", "制度", "組織", "コミュニケーション"}
+	case strings.HasPrefix(code, "FIN"):
+		return []string{"会計", "財務", "数値", "予算", "分析"},
+			[]string{"収支", "コスト", "利益", "報告", "精算"}
+	case strings.HasPrefix(code, "CONS"):
+		return []string{"課題", "分析", "提案", "改善", "戦略"},
+			[]string{"ヒアリング", "資料", "仮説", "整理", "意思決定"}
+	default:
+		return []string{}, []string{}
+	}
+}
+
+func (s *ChatService) evaluateJobFitScoreWithAI(ctx context.Context, jobCategoryID uint, question, answer string, isChoice bool) (*jobFitEvaluation, error) {
+	jobName := s.getJobCategoryName(jobCategoryID)
+	jobCode := s.getJobCategoryCode(jobCategoryID)
+	coreKeywords, relatedKeywords := s.getJobFitKeywords(jobCategoryID)
+
+	questionType := "文章"
+	if isChoice {
+		questionType = "選択肢"
+	}
+
+	prompt := fmt.Sprintf(`あなたは就職適性診断の採点者です。以下のルールに従って採点してください。
+
+## 職種
+%s (%s)
+
+## 質問（%s）
+%s
+
+## 回答
+%s
+
+## 職種理解キーワード
+- 必須キーワード: %s
+- 関連キーワード: %s
+
+## 採点ルール
+### 選択肢問題
+- 回答が職種に最も適している場合: 90〜100点
+- 適しても不適切でもない場合: 40〜70点
+- 全く適していない場合: 0〜20点
+
+### 文章問題
+- 必須キーワードがすべて含まれる場合: 90〜100点
+- 1語以上含まれる場合: 含まれた語数に応じて加点（1語=10点、最大80点）
+- 1語も含まれない場合: 0点
+
+## 出力形式（JSONのみ）
+{"score": 0, "reason": "理由", "matched_keywords": ["キーワード"]}`,
+		jobName,
+		jobCode,
+		questionType,
+		question,
+		answer,
+		strings.Join(coreKeywords, ", "),
+		strings.Join(relatedKeywords, ", "),
+	)
+
+	response, err := s.aiCallWithRetries(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	response = strings.TrimSpace(response)
+	response = strings.TrimPrefix(response, "```json")
+	response = strings.TrimPrefix(response, "```")
+	response = strings.TrimSuffix(response, "```")
+	response = strings.TrimSpace(response)
+
+	jsonStart := strings.Index(response, "{")
+	jsonEnd := strings.LastIndex(response, "}")
+	if jsonStart == -1 || jsonEnd == -1 {
+		return nil, fmt.Errorf("invalid JSON response for job fit evaluation")
+	}
+
+	var evaluation jobFitEvaluation
+	if err := json.Unmarshal([]byte(response[jsonStart:jsonEnd+1]), &evaluation); err != nil {
+		return nil, fmt.Errorf("failed to parse job fit evaluation: %w", err)
+	}
+
+	return &evaluation, nil
+}
+
+// sanitizeForNewGrad 新卒向けに質問文を個人志向に書き換える
+func sanitizeForNewGrad(q string) string {
+	if strings.TrimSpace(q) == "" {
+		return q
+	}
+	// 一般的な置換ルール（軽量）
+	q = strings.ReplaceAll(q, "この会社", "あなた")
+	q = strings.ReplaceAll(q, "会社で", "学ぶ場で")
+	q = strings.ReplaceAll(q, "採用する", "学ぶ")
+	q = strings.ReplaceAll(q, "採用しますか", "学びたいですか")
+	q = strings.ReplaceAll(q, "導入", "学ぶこと")
+	q = strings.ReplaceAll(q, "導入しますか", "学びますか")
+	q = strings.ReplaceAll(q, "業務", "活動")
+	q = strings.ReplaceAll(q, "プロジェクト", "グループワーク")
+	q = strings.ReplaceAll(q, "クライアント", "相手")
+	q = strings.ReplaceAll(q, "マネジメント", "まとめ役")
+	q = strings.ReplaceAll(q, "KPI", "目標")
+	q = strings.ReplaceAll(q, "売上", "成果")
+	q = strings.ReplaceAll(q, "実績", "経験")
+	q = strings.ReplaceAll(q, "現場", "活動の場")
+
+	// パターン置換: 「新しい技術 .* 採用」-> 「新しい技術を学ぶことに興味がありますか」
+	re := regexp.MustCompile(`(?i)新しい技術[\s\S]{0,30}採用`)
+	if re.MatchString(q) {
+		q = re.ReplaceAllString(q, "新しい技術を学ぶことに興味はありますか")
+	}
+
+	// 不自然な表現の微修正
+	q = strings.ReplaceAll(q, "あなたは学ぶ", "あなたは学ぶことに興味がありますか")
+
+	// 最後にトリム
+	q = strings.TrimSpace(q)
+	return q
+}
+
+func isVerboseQuestion(q string) bool {
+	if strings.TrimSpace(q) == "" {
+		return false
+	}
+	if len([]rune(q)) > 120 {
+		return true
+	}
+	if strings.Contains(q, "（") || strings.Contains(q, "例：") || strings.Contains(q, "例:") || strings.Contains(q, "例えば") {
+		return true
+	}
+	if strings.Count(q, "？")+strings.Count(q, "?") > 1 {
+		return true
+	}
+	if strings.Count(q, "\n") > 1 {
+		return true
+	}
+	return false
+}
+
+func simplifyNewGradQuestion(q string) string {
+	s := strings.TrimSpace(q)
+	if s == "" {
+		return s
+	}
+	if idx := strings.Index(s, "（"); idx > 0 {
+		s = strings.TrimSpace(s[:idx])
+	}
+	if idx := strings.Index(s, "例"); idx > 0 {
+		s = strings.TrimSpace(s[:idx])
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len([]rune(s)) > 120 {
+		s = string([]rune(s)[:120])
+	}
+	if !strings.HasSuffix(s, "？") && !strings.HasSuffix(s, "?") {
+		s += "？"
+	}
+	return s
+}
+
+func countUserAnswers(history []models.ChatMessage) int {
+	count := 0
+	for _, msg := range history {
+		if msg.Role == "user" {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *ChatService) getLastPhaseProgress(userID uint, sessionID string) (*models.UserAnalysisProgress, error) {
+	progresses, err := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(progresses) == 0 {
+		return nil, fmt.Errorf("no phase progress found")
+	}
+	return &progresses[len(progresses)-1], nil
+}
+
+func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string) (string, error) {
+	prompt := fmt.Sprintf(`次の質問を、新卒でも答えやすい短い質問に言い換えてください。
+
+制約:
+- 1文で、40〜80文字程度
+- 例示やカッコ補足は入れない
+- 同じ意味を保つ
+- 質問文のみを返す
+
+質問:
+%s`, question)
+	return s.aiCallWithRetries(ctx, prompt)
 }
 
 // GetChatHistory チャット履歴を取得
@@ -1500,6 +2160,8 @@ func isTextBasedQuestion(question string) bool {
 		"1)", "2)", "3)", "4)", "5)",
 		"①", "②", "③", "④", "⑤",
 		"1〜5", "1～5", "1-5",
+		// numbered dot formats (1. , 1．) を選択肢として扱う
+		"1.", "2.", "3.", "4.", "5.", "1．", "2．", "3．", "4．", "5．",
 	}
 
 	for _, pattern := range choicePatterns {
@@ -1531,7 +2193,13 @@ func isTextBasedQuestion(question string) bool {
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
 
-	// 3文字未満は無効（緩和）
+	// 記号のみの回答（A, B, 1, 2など）は有効
+	if len([]rune(a)) <= 3 && strings.ContainsAny(a, "ABCDEabcde12345①②③④⑤") {
+		fmt.Printf("[Validation] Fallback: Valid choice symbol: %s\n", a)
+		return true
+	}
+
+	// 3文字未満は無効（ただし上で選択肢判定済み）
 	if len([]rune(a)) < 3 {
 		fmt.Printf("[Validation] Fallback: Too short (< 3 chars): %s\n", a)
 		return false
@@ -1554,12 +2222,6 @@ func isLikelyAnswer(answer, question string) bool {
 			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
 			return false
 		}
-	}
-
-	// 記号のみの回答（A, B, 1, 2など）は有効
-	if len([]rune(a)) <= 3 && strings.ContainsAny(a, "ABCDEabcde12345①②③④⑤") {
-		fmt.Printf("[Validation] Fallback: Valid choice symbol: %s\n", a)
-		return true
 	}
 
 	// 「はい」「いいえ」「好き」「嫌い」などの短い回答も有効
@@ -1755,7 +2417,7 @@ func (s *ChatService) isChoiceAnswer(answer string) bool {
 }
 
 // processChoiceAnswer 選択肢回答を処理してスコアを更新
-func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer string, history []models.ChatMessage) error {
+func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer string, history []models.ChatMessage, jobCategoryID uint) error {
 	// 最後のAIの質問を取得
 	var lastQuestion string
 	var targetCategory string
@@ -1769,6 +2431,10 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 
 	if lastQuestion == "" {
 		return fmt.Errorf("no previous question found")
+	}
+	if s.isJobSelectionQuestion(lastQuestion) {
+		fmt.Printf("[Choice Answer] Skipping score update for job selection question\n")
+		return nil
 	}
 
 	// AIが生成した質問から対象カテゴリを特定
@@ -1794,8 +2460,19 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 
 	fmt.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
 
-	// 選択肢をスコアに変換（A=100, B=67, C=33, D=0 のスケール）
-	score := s.convertChoiceToScore(answer)
+	score := 0
+	if jobCategoryID != 0 {
+		evaluation, err := s.evaluateJobFitScoreWithAI(ctx, jobCategoryID, lastQuestion, answer, true)
+		if err != nil {
+			fmt.Printf("Warning: failed to evaluate job fit for choice answer: %v\n", err)
+		} else {
+			score = evaluation.Score
+		}
+	}
+	if score == 0 {
+		// フォールバック: 選択肢をスコアに変換（A=100, B=67, C=33, D=0 のスケール）
+		score = s.convertChoiceToScore(answer)
+	}
 
 	// スコアを保存または更新
 	return s.updateCategoryScore(userID, sessionID, targetCategory, score)
@@ -1870,37 +2547,87 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 }
 
 // tryGetPredefinedQuestion ルールベースの事前定義質問を取得
-func (s *ChatService) tryGetPredefinedQuestion(userID uint, sessionID string, prioritizeCategory string, industryID, jobCategoryID uint, askedTexts map[string]bool) (*models.PredefinedQuestion, error) {
-	// 既に使用した事前定義質問のIDリストを取得
-	askedIDs := []uint{}
+func (s *ChatService) tryGetPredefinedQuestion(userID uint, sessionID string, prioritizeCategory string, industryID, jobCategoryID uint, targetLevel string, askedTexts map[string]bool, currentPhase string) (*models.PredefinedQuestion, error) {
+	if jobCategoryID == 0 {
+		// 職種未決定の場合はAI質問に任せる
+		return nil, nil
+	}
+	if strings.TrimSpace(targetLevel) == "" {
+		targetLevel = "新卒"
+	}
 
 	// すべての事前定義質問を取得して、質問文でフィルタ
-	allQuestions, err := s.predefinedQuestionRepo.FindActiveQuestions("新卒", &industryID, &jobCategoryID)
+	allQuestions, err := s.predefinedQuestionRepo.FindActiveQuestions(targetLevel, &industryID, &jobCategoryID, currentPhase)
 	if err != nil {
 		return nil, err
 	}
 
-	// 既に聞いた質問を除外
+	// 職種に合う質問のみ残す（汎用質問はAIに任せる）
+	jobSpecificQuestions := make([]*models.PredefinedQuestion, 0, len(allQuestions))
 	for _, q := range allQuestions {
-		if _, asked := askedTexts[q.QuestionText]; asked {
-			askedIDs = append(askedIDs, q.ID)
+		if q.JobCategoryID == nil || *q.JobCategoryID != jobCategoryID {
+			continue
 		}
+		jobSpecificQuestions = append(jobSpecificQuestions, q)
 	}
 
-	// 優先カテゴリで質問を検索
-	question, err := s.predefinedQuestionRepo.GetNextQuestion(
-		askedIDs,
-		"新卒",
-		&industryID,
-		&jobCategoryID,
-		prioritizeCategory,
-	)
-
-	if err != nil {
-		// 質問が見つからない場合はnilを返す（エラーではない）
-		fmt.Printf("[RuleBased] No more predefined questions available: %v\n", err)
+	if len(jobSpecificQuestions) == 0 {
 		return nil, nil
 	}
 
-	return question, nil
+	// 優先カテゴリで質問を検索（該当がなければAIに任せる）
+	var selected *models.PredefinedQuestion
+	for _, q := range jobSpecificQuestions {
+		if _, asked := askedTexts[q.QuestionText]; asked {
+			continue
+		}
+		if prioritizeCategory != "" && q.Category != prioritizeCategory {
+			continue
+		}
+		if selected == nil || q.Priority > selected.Priority || (q.Priority == selected.Priority && q.ID < selected.ID) {
+			selected = q
+		}
+	}
+
+	if selected == nil {
+		return nil, nil
+	}
+
+	return selected, nil
+}
+
+// aiCallWithRetries AI呼び出しをリトライして安定化させる（最大3回）
+func (s *ChatService) aiCallWithRetries(ctx context.Context, prompt string) (string, error) {
+	var resp string
+	var err error
+	backoffs := []time.Duration{500 * time.Millisecond, 1 * time.Second, 2 * time.Second}
+	for i := 0; i < len(backoffs); i++ {
+		resp, err = s.aiClient.Responses(ctx, prompt)
+		if err == nil && strings.TrimSpace(resp) != "" {
+			return resp, nil
+		}
+		if err == nil {
+			err = errors.New("empty response")
+		}
+		// log and wait before retry
+		fmt.Printf("Warning: AI call failed or empty response (attempt %d): %v\n", i+1, err)
+		if i == len(backoffs)-1 {
+			break
+		}
+		select {
+		case <-time.After(backoffs[i]):
+			// continue
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	// last attempt with final call (no extra wait)
+	resp, err = s.aiClient.Responses(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(resp) == "" {
+		return "", errors.New("empty response")
+	}
+	return resp, nil
 }

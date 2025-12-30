@@ -126,6 +126,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 				OAuthID:       userInfo.ID,
 				AvatarURL:     userInfo.Picture,
 				IsGuest:       false,
+				TargetLevel:   "未設定",
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
@@ -134,11 +135,12 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 	}
 
 	return &AuthResponse{
-		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		IsGuest:   user.IsGuest,
-		AvatarURL: user.AvatarURL,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
+		AvatarURL:   user.AvatarURL,
 	}, nil
 }
 
@@ -224,6 +226,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 				OAuthID:       oauthID,
 				AvatarURL:     userInfo.AvatarURL,
 				IsGuest:       false,
+				TargetLevel:   "未設定",
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
@@ -232,11 +235,12 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 	}
 
 	return &AuthResponse{
-		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		IsGuest:   user.IsGuest,
-		AvatarURL: user.AvatarURL,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
+		AvatarURL:   user.AvatarURL,
 	}, nil
 }
 

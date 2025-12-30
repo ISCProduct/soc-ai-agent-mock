@@ -127,7 +127,7 @@ export async function sendMessage(message: string): Promise<{ message: string }>
             session_id: sessionId,
             message,
             industry_id: 1,
-            job_category_id: 1,
+            job_category_id: 0,
         })
         
         return {

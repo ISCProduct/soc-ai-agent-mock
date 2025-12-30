@@ -18,6 +18,10 @@ export default function Home() {
       router.replace('/login')
       return
     }
+    if (storedUser.target_level !== '新卒' && storedUser.target_level !== '中途') {
+      router.replace('/onboarding')
+      return
+    }
     setUser(storedUser)
     setLoading(false)
   }, [router])
@@ -47,4 +51,3 @@ export default function Home() {
     </Box>
   )
 }
-

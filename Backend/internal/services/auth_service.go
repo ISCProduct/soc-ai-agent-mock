@@ -21,9 +21,10 @@ func NewAuthService(userRepo *repositories.UserRepository) *AuthService {
 
 // RegisterRequest ユーザー登録リクエスト
 type RegisterRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	Name        string `json:"name"`
+	TargetLevel string `json:"target_level"`
 }
 
 // LoginRequest ログインリクエスト
@@ -32,14 +33,22 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+// UpdateProfileRequest プロフィール更新リクエスト
+type UpdateProfileRequest struct {
+	UserID      uint   `json:"user_id"`
+	Name        string `json:"name"`
+	TargetLevel string `json:"target_level"`
+}
+
 // AuthResponse 認証レスポンス
 type AuthResponse struct {
-	UserID    uint   `json:"user_id"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	IsGuest   bool   `json:"is_guest"`
-	AvatarURL string `json:"avatar_url,omitempty"`
-	Token     string `json:"token,omitempty"` // 将来的なトークン認証用
+	UserID      uint   `json:"user_id"`
+	Email       string `json:"email"`
+	Name        string `json:"name"`
+	IsGuest     bool   `json:"is_guest"`
+	TargetLevel string `json:"target_level"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
+	Token       string `json:"token,omitempty"` // 将来的なトークン認証用
 }
 
 // Register 新規ユーザー登録
@@ -47,6 +56,12 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	// バリデーション
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
+	}
+	if req.TargetLevel == "" {
+		req.TargetLevel = "新卒"
+	}
+	if req.TargetLevel != "新卒" && req.TargetLevel != "中途" {
+		return nil, errors.New("target_level must be '新卒' or '中途'")
 	}
 
 	// 既存ユーザーチェック
@@ -66,10 +81,11 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 
 	// ユーザー作成
 	user := &models.User{
-		Email:    req.Email,
-		Password: string(hashedPassword),
-		Name:     req.Name,
-		IsGuest:  false,
+		Email:       req.Email,
+		Password:    string(hashedPassword),
+		Name:        req.Name,
+		IsGuest:     false,
+		TargetLevel: req.TargetLevel,
 	}
 
 	if err := s.userRepo.CreateUser(user); err != nil {
@@ -77,10 +93,11 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:  user.ID,
-		Email:   user.Email,
-		Name:    user.Name,
-		IsGuest: user.IsGuest,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
 	}, nil
 }
 
@@ -111,11 +128,12 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		IsGuest:   user.IsGuest,
-		AvatarURL: user.AvatarURL,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
+		AvatarURL:   user.AvatarURL,
 	}, nil
 }
 
@@ -129,10 +147,11 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	guestID := base64.URLEncoding.EncodeToString(randomBytes)
 
 	user := &models.User{
-		Email:    fmt.Sprintf("guest_%s@temp.local", guestID),
-		Password: "", // ゲストユーザーはパスワード不要
-		Name:     fmt.Sprintf("Guest_%s", guestID[:8]),
-		IsGuest:  true,
+		Email:       fmt.Sprintf("guest_%s@temp.local", guestID),
+		Password:    "", // ゲストユーザーはパスワード不要
+		Name:        fmt.Sprintf("Guest_%s", guestID[:8]),
+		IsGuest:     true,
+		TargetLevel: "未設定",
 	}
 
 	if err := s.userRepo.CreateUser(user); err != nil {
@@ -140,11 +159,12 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		IsGuest:   user.IsGuest,
-		AvatarURL: user.AvatarURL,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
+		AvatarURL:   user.AvatarURL,
 	}, nil
 }
 
@@ -159,9 +179,48 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:  user.ID,
-		Email:   user.Email,
-		Name:    user.Name,
-		IsGuest: user.IsGuest,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
+	}, nil
+}
+
+// UpdateProfile ユーザープロフィール更新
+func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, error) {
+	if req.UserID == 0 {
+		return nil, errors.New("user_id is required")
+	}
+	if req.TargetLevel != "" && req.TargetLevel != "新卒" && req.TargetLevel != "中途" {
+		return nil, errors.New("target_level must be '新卒' or '中途'")
+	}
+
+	user, err := s.userRepo.GetUserByID(req.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+
+	if req.Name != "" {
+		user.Name = req.Name
+	}
+	if req.TargetLevel != "" {
+		user.TargetLevel = req.TargetLevel
+	}
+
+	if err := s.userRepo.UpdateUser(user); err != nil {
+		return nil, fmt.Errorf("failed to update user: %w", err)
+	}
+
+	return &AuthResponse{
+		UserID:      user.ID,
+		Email:       user.Email,
+		Name:        user.Name,
+		IsGuest:     user.IsGuest,
+		TargetLevel: user.TargetLevel,
+		AvatarURL:   user.AvatarURL,
 	}, nil
 }

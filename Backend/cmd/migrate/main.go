@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
+
 	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"log"
-	"os"
 
 	"Backend/internal/models"
 )
@@ -49,6 +50,11 @@ func main() {
 		log.Fatal("Failed to migrate database:", err)
 	}
 
+	// Ensure allowed_phases column exists for predefined_questions (backfill for older DBs)
+	if err := ensureAllowedPhasesColumn(db); err != nil {
+		log.Fatalf("Failed to ensure allowed_phases column: %v", err)
+	}
+
 	log.Println("✓ Database migration completed successfully")
 
 	// 初期データ投入(オプション)
@@ -56,6 +62,10 @@ func main() {
 		log.Println("Seeding initial data...")
 		if err := seedData(db); err != nil {
 			log.Fatal("Failed to seed data:", err)
+		}
+		// 追加: SeedData も呼び出す（その中で SeedPredefinedQuestions も呼ばれる）
+		if err := models.SeedData(db); err != nil {
+			log.Fatal("Failed to seed full data:", err)
 		}
 		log.Println("✓ Data seeding completed successfully")
 	}
@@ -160,5 +170,61 @@ func seedData(db *gorm.DB) error {
 		}
 	}
 
+	return nil
+}
+
+// ensureAllowedPhasesColumn checks if the predefined_questions.allowed_phases column exists; if not, it adds it.
+func ensureAllowedPhasesColumn(db *gorm.DB) error {
+	var count int64
+	// Query information_schema for the column
+	err := db.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'predefined_questions' AND COLUMN_NAME = 'allowed_phases'").Scan(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		log.Println("allowed_phases column not found, adding column...")
+		// Add JSON column (nullable)
+		if err := db.Exec("ALTER TABLE predefined_questions ADD COLUMN allowed_phases JSON NULL").Error; err != nil {
+			return err
+		}
+		log.Println("added allowed_phases column to predefined_questions")
+	} else {
+		log.Println("allowed_phases column already exists, skipping")
+	}
+	// Backfill default allowed_phases for existing rows where null or empty
+	if err := backfillAllowedPhases(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// backfillAllowedPhases sets a sensible default for existing rows where allowed_phases is NULL or empty
+func backfillAllowedPhases(db *gorm.DB) error {
+	// default phases: all four phases
+	defaultJSON := "[\"job_analysis\",\"interest_analysis\",\"aptitude_analysis\",\"future_analysis\"]"
+
+	var before int64
+	err := db.Raw("SELECT COUNT(*) FROM predefined_questions WHERE allowed_phases IS NULL OR allowed_phases = ''").Scan(&before).Error
+	if err != nil {
+		return err
+	}
+	log.Printf("predefined_questions rows needing backfill: %d", before)
+
+	if before > 0 {
+		res := db.Exec("UPDATE predefined_questions SET allowed_phases = ? WHERE allowed_phases IS NULL OR allowed_phases = ''", defaultJSON)
+		if res.Error != nil {
+			return res.Error
+		}
+		log.Printf("backfilled allowed_phases for %d rows", res.RowsAffected)
+	} else {
+		log.Println("no backfill needed for predefined_questions")
+	}
+
+	var after int64
+	err = db.Raw("SELECT COUNT(*) FROM predefined_questions WHERE allowed_phases IS NULL OR allowed_phases = ''").Scan(&after).Error
+	if err != nil {
+		return err
+	}
+	log.Printf("remaining rows with empty allowed_phases: %d", after)
 	return nil
 }
