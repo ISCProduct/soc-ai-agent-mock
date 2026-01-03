@@ -154,13 +154,30 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	if err != nil || len(matches) == 0 {
 		fmt.Printf("[GetRecommendations] No matching results found, returning empty result\n")
-		// マッチング結果がない場合は空の配列を返す
+		diagnostics, diagErr := c.matchingService.GetDiagnostics(uint(userID), sessionID)
+		if diagErr != nil {
+			fmt.Printf("[GetRecommendations] Diagnostics error: %v\n", diagErr)
+		}
+
+		reason := "matching_results_empty"
+		if diagnostics != nil {
+			if diagnostics.UserScoreCount == 0 {
+				reason = "insufficient_user_scores"
+			} else if diagnostics.ActiveCompanyCount == 0 || diagnostics.WeightProfileCount == 0 {
+				reason = "insufficient_company_data"
+			}
+		}
+
 		type RecommendationResponse struct {
-			Recommendations []interface{} `json:"recommendations"`
+			Recommendations []interface{}                 `json:"recommendations"`
+			Reason          string                        `json:"reason,omitempty"`
+			Diagnostics     *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
 		}
 
 		response := RecommendationResponse{
 			Recommendations: []interface{}{},
+			Reason:          reason,
+			Diagnostics:     diagnostics,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

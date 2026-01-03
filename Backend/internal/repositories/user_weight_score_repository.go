@@ -65,3 +65,12 @@ func (r *UserWeightScoreRepository) FindByUserSessionAndCategory(userID uint, se
 	}
 	return &score, nil
 }
+
+// CountByUserAndSession ユーザーとセッションに紐づくスコア数を取得
+func (r *UserWeightScoreRepository) CountByUserAndSession(userID uint, sessionID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.UserWeightScore{}).
+		Where("user_id = ? AND session_id = ?", userID, sessionID).
+		Count(&count).Error
+	return count, err
+}

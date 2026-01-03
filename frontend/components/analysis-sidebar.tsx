@@ -83,26 +83,6 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
         }
     }, [])
 
-    // 質問数に応じて進捗を計算（AIが動的に質問を生成）
-    const calculateProgress = () => {
-        const progress = totalQuestions > 0 ? Math.min(100, Math.floor((questionCount / totalQuestions) * 100)) : 0
-
-        // 各段階の進捗を均等に配分
-        const stage1Progress = Math.min(100, Math.floor((progress / 25) * 100)) // 0-25%
-        const stage2Progress = progress > 25 ? Math.min(100, Math.floor(((progress - 25) / 25) * 100)) : 0 // 25-50%
-        const stage3Progress = progress > 50 ? Math.min(100, Math.floor(((progress - 50) / 25) * 100)) : 0 // 50-75%
-        const stage4Progress = progress > 75 ? Math.min(100, Math.floor(((progress - 75) / 25) * 100)) : 0 // 75-100%
-
-        return {
-            overall: progress,
-            job: stage1Progress,
-            interest: stage2Progress,
-            aptitude: stage3Progress,
-            future: stage4Progress,
-        }
-    }
-
-    const progress = calculateProgress()
     const phaseProgressFor = (phaseName: string) => {
         if (!phases) return null
         return phases.find(p => p.phase_name === phaseName) || null
@@ -119,6 +99,18 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
         if (phase.is_completed) return defaultLabel.replace('進行中', '完了').replace('待機中', '完了')
         if (phase.questions_asked > 0) return defaultLabel.replace('待機中', '進行中')
         return defaultLabel
+    }
+
+    const fallbackOverall = totalQuestions > 0 ? Math.min(100, Math.floor((questionCount / totalQuestions) * 100)) : 0
+    const phasePercents = {
+        job: getPhasePercent('job_analysis', fallbackOverall),
+        interest: getPhasePercent('interest_analysis', fallbackOverall),
+        aptitude: getPhasePercent('aptitude_analysis', fallbackOverall),
+        future: getPhasePercent('future_analysis', fallbackOverall),
+    }
+    const progress = {
+        overall: phases ? Math.floor((phasePercents.job + phasePercents.interest + phasePercents.aptitude + phasePercents.future) / 4) : fallbackOverall,
+        ...phasePercents,
     }
 
     const analysisSteps: AnalysisStep[] = [

@@ -21,6 +21,15 @@ func (r *CompanyRepository) FindAllActive() ([]models.Company, error) {
 	return companies, err
 }
 
+// CountActive アクティブ企業数を取得
+func (r *CompanyRepository) CountActive() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Company{}).
+		Where("is_active = ?", true).
+		Count(&count).Error
+	return count, err
+}
+
 // FindByID IDで企業を取得
 func (r *CompanyRepository) FindByID(id uint) (*models.Company, error) {
 	var company models.Company
@@ -95,4 +104,11 @@ func (r *CompanyRepository) CreateOrUpdateWeightProfile(profile *models.CompanyW
 	// 更新
 	profile.ID = existing.ID
 	return r.db.Save(profile).Error
+}
+
+// CountWeightProfiles 企業の重視度プロファイル件数を取得
+func (r *CompanyRepository) CountWeightProfiles() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.CompanyWeightProfile{}).Count(&count).Error
+	return count, err
 }

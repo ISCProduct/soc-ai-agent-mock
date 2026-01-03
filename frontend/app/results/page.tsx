@@ -126,6 +126,7 @@ function ResultsContent() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [empty, setEmpty] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [detailTab, setDetailTab] = useState(0)
@@ -164,17 +165,18 @@ function ResultsContent() {
         
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
           console.error('[Results] No recommendations available')
-          console.error('[Results] Debug info - User ID:', userId, 'Session ID:', sessionId)
-          console.error('[Results] Response data:', data)
-          setError(
-            'まだ企業マッチングデータがありません。\n\n' +
-            '診断を完了してから数秒待ち、このページを更新してください。\n' +
-            '診断が未完了の場合は、チャット画面で最低15問に回答してください。\n\n' +
-            `デバッグ情報:\n` +
-            `- ユーザーID: ${userId}\n` +
-            `- セッションID: ${sessionId}\n` +
-            `- レスポンス: ${JSON.stringify(data)}`
-          )
+          const reason = data?.reason || 'matching_results_empty'
+          const diagnostics = data?.diagnostics
+          let message = 'データがありません。診断を完了してから数秒待ち、ページを更新してください。'
+          if (reason === 'insufficient_user_scores') {
+            message = '判定結果を出すための根拠が不足しています。チャットで質問に回答してください。'
+          } else if (reason === 'insufficient_company_data') {
+            message = '企業マッチング用のデータが不足しています。しばらく待ってから再度お試しください。'
+          }
+          if (diagnostics) {
+            message += `\n\nスコア数: ${diagnostics.user_score_count}, 企業数: ${diagnostics.active_company_count}, プロファイル数: ${diagnostics.weight_profile_count}`
+          }
+          setError(message)
           setLoading(false)
           return
         }
@@ -405,6 +407,38 @@ function ResultsContent() {
         <Typography variant="h6" color="text.secondary">
           AIが企業を分析中...
         </Typography>
+      </Box>
+    )
+  }
+  if (empty) {
+    return (
+      <Box sx={{ 
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'column',
+        gap: 2,
+        p: 3,
+      }}>
+        <Typography variant="h6" color="text.secondary" sx={{ textAlign: 'center' }}>
+          データがありません。診断を完了してから数秒待ち、ページを更新してください。
+        </Typography>
+        <Stack direction="row" spacing={2}>
+          <Button 
+            variant="contained" 
+            startIcon={<Refresh />}
+            onClick={() => window.location.reload()}
+          >
+            ページを更新
+          </Button>
+          <Button 
+            variant="outlined" 
+            onClick={() => router.push('/')}
+          >
+            チャットに戻る
+          </Button>
+        </Stack>
       </Box>
     )
   }

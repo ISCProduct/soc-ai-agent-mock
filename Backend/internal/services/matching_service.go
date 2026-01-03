@@ -126,6 +126,32 @@ func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessio
 	return s.matchRepo.FindTopMatchesByUserAndSession(userID, sessionID, limit)
 }
 
+type MatchingDiagnostics struct {
+	UserScoreCount     int64 `json:"user_score_count"`
+	ActiveCompanyCount int64 `json:"active_company_count"`
+	WeightProfileCount int64 `json:"weight_profile_count"`
+}
+
+func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*MatchingDiagnostics, error) {
+	userScoreCount, err := s.userWeightScoreRepo.CountByUserAndSession(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	activeCompanyCount, err := s.companyRepo.CountActive()
+	if err != nil {
+		return nil, err
+	}
+	weightProfileCount, err := s.companyRepo.CountWeightProfiles()
+	if err != nil {
+		return nil, err
+	}
+	return &MatchingDiagnostics{
+		UserScoreCount:     userScoreCount,
+		ActiveCompanyCount: activeCompanyCount,
+		WeightProfileCount: weightProfileCount,
+	}, nil
+}
+
 // GenerateMatchReason AIを使ってマッチング理由を生成（オプション）
 func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *models.UserCompanyMatch) (string, error) {
 	// TODO: OpenAI APIを使って、ユーザーの適性と企業の特徴を基にマッチング理由を生成

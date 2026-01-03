@@ -192,11 +192,12 @@ export function MuiChat() {
             setAnalysisComplete(true)
             setAllPhasesCompleted(true)
           } else {
-            // スコアを取得して分析完了状態を判定
-            const scores = await getUserScores(currentUserId, storedSessionId)
-            console.log('[MUI Chat] Scores loaded:', scores?.length)
-            if (scores && scores.length >= 10) {
-              // 全カテゴリ評価済みなら完了とみなす
+            const savedPhases = sessionStorage.getItem('phaseProgress')
+            const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
+            const allCompleted = Array.isArray(restoredPhases)
+              ? restoredPhases.every((phase: any) => phase.max_questions > 0 && phase.questions_asked >= phase.max_questions)
+              : false
+            if (allCompleted && userQuestionCount >= 15) {
               setAnalysisComplete(true)
               setAllPhasesCompleted(true)
             }
@@ -319,22 +320,15 @@ export function MuiChat() {
           }, 0)
           
           // **重要: バックエンドのis_completeのみを信頼**
-          // バックエンドがtrueを返した時は分析完了状態にする
           console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
           console.log('[MUI Chat] evaluated_categories:', response.evaluated_categories, 'total:', response.total_categories)
           
-          // 分析の信頼性をチェック（全カテゴリ評価済み かつ 15問以上回答）
-            const hasReliableData =
-                typeof response.evaluated_categories === 'number' &&
-                response.evaluated_categories >= 10 &&
-                newCount >= 15;
+          const allCompleted = response.all_phases?.every((phase: any) => phase.max_questions > 0 && phase.questions_asked >= phase.max_questions) ?? false
+          const hasReliableData = allCompleted && newCount >= 15
 
-
-            if (response.is_complete === true && hasReliableData) {
+          if (response.is_complete === true && hasReliableData) {
             console.log('[MUI Chat] AI分析完了（信頼性あり） - モーダルを表示します')
             
-            // 全フェーズ完了かどうかをチェック
-            const allCompleted = response.all_phases?.every((phase: any) => phase.is_completed) ?? false
             console.log('[MUI Chat] All phases completed:', allCompleted)
             
             setTimeout(() => {

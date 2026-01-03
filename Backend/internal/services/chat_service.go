@@ -250,7 +250,10 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		// 全フェーズ完了の場合は特別な応答を返す
 		if err.Error() == "all phases completed" {
 			userAnswerCount := countUserAnswers(history)
-			if userAnswerCount < 15 {
+			progresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
+			allPhases, _ := s.phaseRepo.FindAll()
+			allPhasesMaxed := allPhasesReachedMax(progresses, allPhases)
+			if userAnswerCount < 15 || !allPhasesMaxed {
 				fmt.Printf("All phases completed but only %d answers; continuing questions\n", userAnswerCount)
 				currentPhase, err = s.getLastPhaseProgress(req.UserID, req.SessionID)
 				if err != nil || currentPhase == nil {
@@ -448,17 +451,14 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		}
 	}
 
-	// 質問数と評価カテゴリ数を計算（進捗表示用）
-	answeredQuestions, _ := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	answeredCount := len(answeredQuestions)
+	// 質問数を計算（進捗表示用）
+	answeredCount := countUserAnswers(history)
+	allPhasesMaxed := allPhasesReachedMax(completedProgresses, allPhases)
 
-	// 完了判定を厳格化:
-	// 1. 全フェーズ完了
-	// 2. 最低15問回答済み（10カテゴリ × 最低1.5回ずつ）
-	// 3. 全カテゴリが評価済み
-	isComplete := completedPhaseCount >= len(allPhases) &&
-		answeredCount >= 15 &&
-		len(evaluatedCategories) >= 10
+	// 完了判定:
+	// 1. 全フェーズの質問数が最大に到達
+	// 2. 最低15問回答済み
+	isComplete := allPhasesMaxed && answeredCount >= 15
 
 	fmt.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
 		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
@@ -1941,6 +1941,26 @@ func (s *ChatService) getLastPhaseProgress(userID uint, sessionID string) (*mode
 		return nil, fmt.Errorf("no phase progress found")
 	}
 	return &progresses[len(progresses)-1], nil
+}
+
+func allPhasesReachedMax(progresses []models.UserAnalysisProgress, phases []models.AnalysisPhase) bool {
+	if len(phases) == 0 {
+		return false
+	}
+	progressMap := make(map[uint]models.UserAnalysisProgress, len(progresses))
+	for _, p := range progresses {
+		progressMap[p.PhaseID] = p
+	}
+	for _, phase := range phases {
+		p, ok := progressMap[phase.ID]
+		if !ok {
+			return false
+		}
+		if phase.MaxQuestions > 0 && p.QuestionsAsked < phase.MaxQuestions {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string) (string, error) {
