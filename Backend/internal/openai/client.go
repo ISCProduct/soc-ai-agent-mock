@@ -163,6 +163,22 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 	return strings.Join(parts, "\n"), nil
 }
 
+func isUnsupportedTemperatureErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Unsupported parameter") && strings.Contains(msg, "temperature")
+}
+
+func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
+	content, err := cli.callResponsesAPI(ctx, input, model, temperature, maxOutputTokens, includeTextFormat)
+	if err != nil && isUnsupportedTemperatureErr(err) {
+		return cli.callResponsesAPI(ctx, input, model, nil, maxOutputTokens, includeTextFormat)
+	}
+	return content, err
+}
+
 func (cli *Client) Responses(ctx context.Context, input string, modelOverride ...string) (string, error) {
 	if cli == nil || cli.c == nil {
 		return "", errors.New("openai client is nil")
@@ -263,9 +279,9 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 				},
 			},
 		}
-		content, err := cli.callResponsesAPI(ctxReq, messageInput, model, &temperature, 100, true)
+		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, true)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, &temperature, 100, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, false)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			combinedPrompt := strings.TrimSpace(systemPrompt)
@@ -273,10 +289,10 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 				combinedPrompt += "\n\n"
 			}
 			combinedPrompt += userPrompt
-			content, err = cli.callResponsesAPI(ctxReq, combinedPrompt, model, &temperature, 100, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, combinedPrompt, model, &temperature, 100, false)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, &temperature, 200, true)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, true)
 		}
 		cancel()
 

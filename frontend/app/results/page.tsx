@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useMemo, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Box,
@@ -26,6 +26,8 @@ import ReactFlow, {
   MarkerType,
   EdgeTypes,
   ReactFlowProvider,
+  useNodesState,
+  useEdgesState,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import {
@@ -389,6 +391,42 @@ function ResultsContent() {
     return { nodes, edges }
   }
 
+  const selectedCompanyId = selectedCompany?.id
+  const capitalDiagram = useMemo(() => {
+    if (!selectedCompanyId || detailTab !== 1) {
+      return { nodes: [], edges: [] }
+    }
+    return createDiagramData(selectedCompanyId, 'capital')
+  }, [selectedCompanyId, detailTab, relations, marketInfo])
+
+  const businessDiagram = useMemo(() => {
+    if (!selectedCompanyId || detailTab !== 2) {
+      return { nodes: [], edges: [] }
+    }
+    return createDiagramData(selectedCompanyId, 'business')
+  }, [selectedCompanyId, detailTab, relations, marketInfo])
+
+  const [capitalNodes, setCapitalNodes, onCapitalNodesChange] = useNodesState<Node>([])
+  const [capitalEdges, setCapitalEdges, onCapitalEdgesChange] = useEdgesState<Edge>([])
+  const [businessNodes, setBusinessNodes, onBusinessNodesChange] = useNodesState<Node>([])
+  const [businessEdges, setBusinessEdges, onBusinessEdgesChange] = useEdgesState<Edge>([])
+
+  useEffect(() => {
+    if (!selectedCompanyId || detailTab !== 1) {
+      return
+    }
+    setCapitalNodes(capitalDiagram.nodes)
+    setCapitalEdges(capitalDiagram.edges)
+  }, [selectedCompanyId, detailTab, capitalDiagram, setCapitalNodes, setCapitalEdges])
+
+  useEffect(() => {
+    if (!selectedCompanyId || detailTab !== 2) {
+      return
+    }
+    setBusinessNodes(businessDiagram.nodes)
+    setBusinessEdges(businessDiagram.edges)
+  }, [selectedCompanyId, detailTab, businessDiagram, setBusinessNodes, setBusinessEdges])
+
   if (!mounted) {
     return null
   }
@@ -505,9 +543,6 @@ function ResultsContent() {
 
   // 企業詳細ダイアログを表示している場合
   if (selectedCompany) {
-    const capitalDiagram = detailTab === 1 ? createDiagramData(selectedCompany.id, 'capital') : { nodes: [], edges: [] }
-    const businessDiagram = detailTab === 2 ? createDiagramData(selectedCompany.id, 'business') : { nodes: [], edges: [] }
-
     return (
       <Box sx={{ 
         height: '100vh',
@@ -679,8 +714,10 @@ function ResultsContent() {
                         </Box>
                         <Box sx={{ height: 'calc(100% - 40px)', border: '1px solid #e0e0e0', borderRadius: 1 }}>
                           <ReactFlow
-                            nodes={capitalDiagram.nodes}
-                            edges={capitalDiagram.edges}
+                            nodes={capitalNodes}
+                            edges={capitalEdges}
+                            onNodesChange={onCapitalNodesChange}
+                            onEdgesChange={onCapitalEdgesChange}
                             edgeTypes={edgeTypes}
                             fitView
                             minZoom={0.05}
@@ -737,8 +774,10 @@ function ResultsContent() {
                         </Box>
                         <Box sx={{ height: 'calc(100% - 40px)', border: '1px solid #e0e0e0', borderRadius: 1 }}>
                           <ReactFlow
-                            nodes={businessDiagram.nodes}
-                            edges={businessDiagram.edges}
+                            nodes={businessNodes}
+                            edges={businessEdges}
+                            onNodesChange={onBusinessNodesChange}
+                            onEdgesChange={onBusinessEdgesChange}
                             edgeTypes={edgeTypes}
                             fitView
                             minZoom={0.05}

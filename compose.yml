@@ -37,7 +37,9 @@ services:
       - ${DB_VOLUME_TYPE:-mysql_data}:/var/lib/mysql
       - ${MYSQL_CONF_DIR:-./mysql/conf.d}:/etc/mysql/conf.d:ro
     networks:
-      - soc-ai-network
+      soc-ai-network:
+        aliases:
+          - db
     command: >
       --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4
