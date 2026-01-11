@@ -2455,6 +2455,15 @@ func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress,
 		if !progress.IsCompleted {
 			now := time.Now()
 			progress.CompletedAt = &now
+			phaseLabel := "分析"
+			if progress.Phase != nil {
+				if progress.Phase.DisplayName != "" {
+					phaseLabel = progress.Phase.DisplayName
+				} else if progress.Phase.PhaseName != "" {
+					phaseLabel = progress.Phase.PhaseName
+				}
+			}
+			fmt.Printf("%sが完了しました。\n", phaseLabel)
 		}
 	} else {
 		progress.CompletedAt = nil
