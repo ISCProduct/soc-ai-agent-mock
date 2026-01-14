@@ -34,8 +34,11 @@ func (r *ConversationContextRepository) GetOrCreate(userID uint, sessionID strin
 		return nil, err
 	}
 	newCtx := &models.ConversationContext{
-		UserID:    userID,
-		SessionID: sessionID,
+		UserID:         userID,
+		SessionID:      sessionID,
+		IndustryIDs:    "[]",
+		JobCategoryIDs: "[]",
+		AnswerHistory:  "[]",
 	}
 	if err := r.db.Create(newCtx).Error; err != nil {
 		return nil, err

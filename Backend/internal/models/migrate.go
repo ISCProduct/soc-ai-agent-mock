@@ -19,6 +19,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&AnalysisPhase{},
 		&UserAnalysisProgress{},
 		&SessionValidation{},
+		&UserEmbedding{},
+		&JobCategoryEmbedding{},
 		// 企業関連モデル
 		&Company{},
 		&CompanyJobPosition{},

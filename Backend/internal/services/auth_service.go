@@ -21,10 +21,12 @@ func NewAuthService(userRepo *repositories.UserRepository) *AuthService {
 
 // RegisterRequest ユーザー登録リクエスト
 type RegisterRequest struct {
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-	Name        string `json:"name"`
-	TargetLevel string `json:"target_level"`
+	Email                    string `json:"email"`
+	Password                 string `json:"password"`
+	Name                     string `json:"name"`
+	TargetLevel              string `json:"target_level"`
+	CertificationsAcquired   string `json:"certifications_acquired"`
+	CertificationsInProgress string `json:"certifications_in_progress"`
 }
 
 // LoginRequest ログインリクエスト
@@ -35,20 +37,24 @@ type LoginRequest struct {
 
 // UpdateProfileRequest プロフィール更新リクエスト
 type UpdateProfileRequest struct {
-	UserID      uint   `json:"user_id"`
-	Name        string `json:"name"`
-	TargetLevel string `json:"target_level"`
+	UserID                   uint   `json:"user_id"`
+	Name                     string `json:"name"`
+	TargetLevel              string `json:"target_level"`
+	CertificationsAcquired   string `json:"certifications_acquired"`
+	CertificationsInProgress string `json:"certifications_in_progress"`
 }
 
 // AuthResponse 認証レスポンス
 type AuthResponse struct {
-	UserID      uint   `json:"user_id"`
-	Email       string `json:"email"`
-	Name        string `json:"name"`
-	IsGuest     bool   `json:"is_guest"`
-	TargetLevel string `json:"target_level"`
-	AvatarURL   string `json:"avatar_url,omitempty"`
-	Token       string `json:"token,omitempty"` // 将来的なトークン認証用
+	UserID                   uint   `json:"user_id"`
+	Email                    string `json:"email"`
+	Name                     string `json:"name"`
+	IsGuest                  bool   `json:"is_guest"`
+	TargetLevel              string `json:"target_level"`
+	CertificationsAcquired   string `json:"certifications_acquired,omitempty"`
+	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
+	AvatarURL                string `json:"avatar_url,omitempty"`
+	Token                    string `json:"token,omitempty"` // 将来的なトークン認証用
 }
 
 // Register 新規ユーザー登録
@@ -81,11 +87,13 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 
 	// ユーザー作成
 	user := &models.User{
-		Email:       req.Email,
-		Password:    string(hashedPassword),
-		Name:        req.Name,
-		IsGuest:     false,
-		TargetLevel: req.TargetLevel,
+		Email:                    req.Email,
+		Password:                 string(hashedPassword),
+		Name:                     req.Name,
+		IsGuest:                  false,
+		TargetLevel:              req.TargetLevel,
+		CertificationsAcquired:   req.CertificationsAcquired,
+		CertificationsInProgress: req.CertificationsInProgress,
 	}
 
 	if err := s.userRepo.CreateUser(user); err != nil {
@@ -93,11 +101,13 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
 	}, nil
 }
 
@@ -128,12 +138,14 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
-		AvatarURL:   user.AvatarURL,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
 	}, nil
 }
 
@@ -159,12 +171,14 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
-		AvatarURL:   user.AvatarURL,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
 	}, nil
 }
 
@@ -179,11 +193,13 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
 	}, nil
 }
 
@@ -210,17 +226,21 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 	if req.TargetLevel != "" {
 		user.TargetLevel = req.TargetLevel
 	}
+	user.CertificationsAcquired = req.CertificationsAcquired
+	user.CertificationsInProgress = req.CertificationsInProgress
 
 	if err := s.userRepo.UpdateUser(user); err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
-		AvatarURL:   user.AvatarURL,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
 	}, nil
 }

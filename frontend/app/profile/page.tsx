@@ -37,7 +37,6 @@ export default function ProfilePage() {
         throw new Error('Failed to fetch sessions')
       }
       const data = await response.json()
-      console.log('[Profile] Fetched sessions:', data)
       setSessions(data || [])
     } catch (error) {
       console.error('Error fetching sessions:', error)
@@ -59,7 +58,6 @@ export default function ProfilePage() {
   }
 
   const handleSessionClick = (sessionId: string) => {
-    // セッションIDをローカルストレージに保存してチャット画面へ
     localStorage.setItem('currentSessionId', sessionId)
     router.push('/')
   }

@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -29,6 +30,8 @@ func (r *UserCompanyMatchRepository) CreateOrUpdate(match *models.UserCompanyMat
 
 	// 更新（ID以外のフィールドを更新）
 	match.ID = existing.ID
+	match.CreatedAt = existing.CreatedAt
+	match.UpdatedAt = time.Now()
 	match.IsViewed = existing.IsViewed
 	match.IsFavorited = existing.IsFavorited
 	match.IsApplied = existing.IsApplied

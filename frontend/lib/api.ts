@@ -1,4 +1,4 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'
+const API_BASE = '/api'
 
 export interface ChatRequest {
     user_id: number
@@ -59,7 +59,7 @@ export interface ChatHistory {
 
 export async function sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+        const response = await fetch(`${API_BASE}/chat`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -82,7 +82,7 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/chat/history?session_id=${sessionId}`)
+        const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`)
 
         if (!response.ok) {
             console.warn(`History API error: ${response.statusText}`)
@@ -97,7 +97,7 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
 }
 
 export async function getUserScores(userId: number, sessionId: string) {
-    const response = await fetch(`${BACKEND_URL}/api/chat/scores?user_id=${userId}&session_id=${sessionId}`)
+    const response = await fetch(`${API_BASE}/chat/scores?user_id=${userId}&session_id=${sessionId}`)
 
     if (!response.ok) {
         throw new Error(`Scores API error: ${response.statusText}`)
@@ -108,7 +108,7 @@ export async function getUserScores(userId: number, sessionId: string) {
 
 export async function getRecommendations(userId: number, sessionId: string, limit = 5) {
     const response = await fetch(
-        `${BACKEND_URL}/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
+        `${API_BASE}/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
     )
 
     if (!response.ok) {
@@ -139,7 +139,7 @@ export async function sendMessage(message: string): Promise<{ message: string }>
 }
 
 export async function getCompanyDetail(companyId: number) {
-    const response = await fetch(`${BACKEND_URL}/api/companies/${companyId}`)
+    const response = await fetch(`${API_BASE}/companies/${companyId}`)
     
     if (!response.ok) {
         throw new Error(`Company API error: ${response.statusText}`)

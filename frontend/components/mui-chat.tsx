@@ -40,8 +40,11 @@ interface PhaseProgress {
   max_questions: number
 }
 
+const makeMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
 interface ChoiceOption {
-  number: number
+  value: string
+  label: string
   text: string
 }
 
@@ -49,9 +52,21 @@ function extractChoices(content: string): ChoiceOption[] {
   const lines = content.split('\n')
   const choices: ChoiceOption[] = []
   for (const line of lines) {
-    const match = line.match(/^(\d+)\.\s*(.+)$/)
+    const trimmedLine = line.trim()
+    if (!trimmedLine) {
+      continue
+    }
+    let match = trimmedLine.match(/^([A-E])\)\s*(.+)$/)
+    if (!match) {
+      match = trimmedLine.match(/^([A-E])[：、.．]\s*(.+)$/)
+    }
     if (match) {
-      choices.push({ number: parseInt(match[1], 10), text: match[2].trim() })
+      choices.push({ value: match[1], label: match[1], text: match[2].trim() })
+      continue
+    }
+    match = trimmedLine.match(/^(\d+)[\.\)．]\s*(.+)$/)
+    if (match) {
+      choices.push({ value: match[1], label: match[1], text: match[2].trim() })
     }
   }
   return choices
@@ -103,7 +118,26 @@ export function MuiChat() {
   const [showCompletionModal, setShowCompletionModal] = useState(false)
   const [showEndChatModal, setShowEndChatModal] = useState(false)
   const [showTerminationModal, setShowTerminationModal] = useState(false)
+  const [otherChoiceActive, setOtherChoiceActive] = useState(false)
+  const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const progressTotals = (() => {
+    if (!phaseProgresses || phaseProgresses.length === 0) return null
+    let valid = 0
+    let asked = 0
+    for (const phase of phaseProgresses) {
+      asked += phase.questions_asked || 0
+      valid += phase.valid_answers || 0
+    }
+    if (asked <= 0) return null
+    return {
+      valid,
+      required: asked,
+      percent: Math.round((valid / asked) * 100),
+    }
+  })()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -119,7 +153,11 @@ export function MuiChat() {
     const initializeChat = async () => {
       // ユーザー情報を初期化
       const user = authService.getStoredUser()
-      const currentUserId = user ? user.user_id : 1
+      if (!user || !user.name || !user.target_level) {
+        router.replace('/onboarding')
+        return
+      }
+      const currentUserId = user.user_id
       setUserId(currentUserId)
       
       // セッションIDの取得優先順位:
@@ -167,6 +205,9 @@ export function MuiChat() {
           setTotalQuestions(restoredTotalQuestions)
           const savedPhases = sessionStorage.getItem('phaseProgress')
           const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
+          if (Array.isArray(restoredPhases)) {
+            setPhaseProgresses(restoredPhases)
+          }
           
           // 進捗状況を通知（履歴復元時）
           setTimeout(() => {
@@ -191,16 +232,6 @@ export function MuiChat() {
             console.log('[MUI Chat] Session already completed, showing completion state')
             setAnalysisComplete(true)
             setAllPhasesCompleted(true)
-          } else {
-            const savedPhases = sessionStorage.getItem('phaseProgress')
-            const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
-            const allCompleted = Array.isArray(restoredPhases)
-              ? restoredPhases.every((phase: any) => phase.max_questions > 0 && phase.questions_asked >= phase.max_questions)
-              : false
-            if (allCompleted && userQuestionCount >= 15) {
-              setAnalysisComplete(true)
-              setAllPhasesCompleted(true)
-            }
           }
         } else {
           // 履歴がない場合: AIのあいさつメッセージを表示（バックエンドには送信しない）
@@ -244,7 +275,7 @@ export function MuiChat() {
     }
 
     const userMessage: Message = {
-      id: String(Date.now()),
+      id: makeMessageId(),
       role: 'user',
       content: messageText,
       timestamp: new Date(),
@@ -252,6 +283,7 @@ export function MuiChat() {
 
     setMessages((prev) => [...prev, userMessage])
     setInput('')
+    setOtherChoiceActive(false)
     setIsLoading(true)
 
     try {
@@ -267,7 +299,7 @@ export function MuiChat() {
       const response: ChatResponse = await sendChatMessage(chatRequest)
       
       const assistantMessage: Message = {
-        id: String(Date.now() + 1),
+        id: makeMessageId(),
         role: 'assistant',
         content: response.response || 'エラーが発生しました',
         timestamp: new Date(),
@@ -305,6 +337,7 @@ export function MuiChat() {
           sessionStorage.setItem('totalQuestions', String(newTotalQuestions))
           if (response.all_phases) {
             sessionStorage.setItem('phaseProgress', JSON.stringify(response.all_phases))
+            setPhaseProgresses(response.all_phases)
           }
           
           // 進捗状況を親コンポーネントに通知（非同期で実行）
@@ -323,24 +356,32 @@ export function MuiChat() {
           console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
           console.log('[MUI Chat] evaluated_categories:', response.evaluated_categories, 'total:', response.total_categories)
           
-          const allCompleted = response.all_phases?.every((phase: any) => phase.max_questions > 0 && phase.questions_asked >= phase.max_questions) ?? false
-          const hasReliableData = allCompleted && newCount >= 15
+          const allCompleted = response.all_phases?.every((phase: any) => {
+            const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
+            return required > 0 && phase.valid_answers >= required
+          }) ?? false
 
-          if (response.is_complete === true && hasReliableData) {
-            console.log('[MUI Chat] AI分析完了（信頼性あり） - モーダルを表示します')
-            
+          const completionText =
+            response.response?.includes('分析が完了しました') ||
+            response.response?.includes('最適な企業をマッチング')
+          if (response.is_complete === true && !completionText) {
+            const completionMessage: Message = {
+              id: makeMessageId(),
+              role: 'assistant',
+              content: '分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。',
+              timestamp: new Date(),
+            }
+            newMessages.push(completionMessage)
+          }
+
+          if (response.is_complete === true) {
+            console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
             console.log('[MUI Chat] All phases completed:', allCompleted)
-            
             setTimeout(() => {
               setAnalysisComplete(true)
               setAllPhasesCompleted(allCompleted)
               setShowCompletionModal(true)
-            }, 1000)
-          } else if (response.is_complete === true && !hasReliableData) {
-            // データが不十分な場合は、完了モーダルを表示せずに継続
-            console.log('[MUI Chat] 分析完了したがデータ不十分 - チャット継続')
-            setAnalysisComplete(false)
-            setAllPhasesCompleted(false)
+            }, 300)
           } else {
             console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
             // 明示的にfalseを設定
@@ -370,7 +411,7 @@ export function MuiChat() {
         
         // 完了メッセージを表示
         const completionMessage: Message = {
-          id: String(Date.now() + 1),
+          id: makeMessageId(),
           role: 'assistant',
           content: '分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。',
           timestamp: new Date(),
@@ -379,7 +420,7 @@ export function MuiChat() {
       } else {
         // その他のエラー
         const errorMsg: Message = {
-          id: String(Date.now() + 1),
+          id: makeMessageId(),
           role: 'assistant',
           content:
             'バックエンドとの接続に失敗しました。後ほど再試行してください。\n\nエラー: ' + errorMessage,
@@ -479,6 +520,13 @@ export function MuiChat() {
   const lastAssistantMessage = [...messages].reverse().find((msg) => msg.role === 'assistant')
   const choiceOptions = lastAssistantMessage ? extractChoices(lastAssistantMessage.content) : []
   const showChoiceButtons = choiceOptions.length >= 2 && !analysisComplete
+  const inputPlaceholder = otherChoiceActive ? 'その他の内容を入力...' : 'メッセージを入力...'
+
+  useEffect(() => {
+    if (!showChoiceButtons) {
+      setOtherChoiceActive(false)
+    }
+  }, [showChoiceButtons])
 
   if (!mounted) {
     return null
@@ -656,8 +704,8 @@ export function MuiChat() {
             IT業界キャリアエージェント
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            AI適性診断 - {questionCount}/{totalQuestions} 問完了 
-            {questionCount > 0 && ` (${Math.round((questionCount / totalQuestions) * 100)}%)`}
+            AI適性診断 - {(progressTotals?.valid ?? questionCount)}/{(progressTotals?.required ?? totalQuestions)} 問完了 
+            {((progressTotals?.valid ?? questionCount) > 0) && ` (${progressTotals?.percent ?? Math.round((questionCount / totalQuestions) * 100)}%)`}
           </Typography>
         </Box>
         <Button
@@ -853,24 +901,48 @@ export function MuiChat() {
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {showChoiceButtons && (
-              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
-                {choiceOptions.map((choice) => (
-                  <Button
-                    key={`${choice.number}-${choice.text}`}
-                    variant="outlined"
-                    onClick={() => handleSend(choice.text)}
-                    disabled={isLoading}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    {choice.number}. {choice.text}
-                  </Button>
-                ))}
-              </Stack>
-            )}
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  border: '1px solid #e0e0e0',
+                  backgroundColor: '#fafafa',
+                }}
+              >
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  選択肢を選んでください
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+                  {choiceOptions.map((choice) => {
+                    const isOtherChoice = choice.text.includes('その他')
+                    return (
+                      <Button
+                        key={`${choice.label}-${choice.text}`}
+                        variant="outlined"
+                        onClick={() => {
+                          if (isOtherChoice) {
+                            setOtherChoiceActive(true)
+                            setInput('')
+                            setTimeout(() => inputRef.current?.focus(), 0)
+                            return
+                          }
+                          handleSend(choice.value)
+                        }}
+                        disabled={isLoading}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {choice.label}. {choice.text}
+                      </Button>
+                    )
+                  })}
+                </Stack>
+            </Paper>
+          )}
             <Box sx={{ display: 'flex', gap: 1 }}>
               <TextField
                 fullWidth
-                placeholder="メッセージを入力..."
+                placeholder={inputPlaceholder}
                 value={input}
                 onChange={(e) => {
                   console.log('[MUI Chat] Rendering input field (analysisComplete=false)')
@@ -885,6 +957,7 @@ export function MuiChat() {
                 disabled={isLoading}
                 variant="outlined"
                 size="small"
+                inputRef={inputRef}
                 sx={{
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 2,

@@ -1,10 +1,9 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Go 1.25 以上を要求するモジュールに対応するための設定
-ENV GOTOOLCHAIN=auto
+ENV GOTOOLCHAIN=local
 
 # Install build dependencies
 RUN apk add --no-cache git build-base
@@ -26,33 +25,18 @@ RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/seed-large ./cmd/seed-large
 
 # Runtime stage
-FROM golang:1.21-alpine
+FROM golang:1.24-alpine
 
 WORKDIR /app
 
-# Go 1.25 以上を要求するモジュールに対応するための設定
-ENV GOTOOLCHAIN=auto
+ENV GOTOOLCHAIN=local
 
-# Install runtime dependencies (if needed by app)
-RUN apk --no-cache add ca-certificates git tzdata build-base
+# Install runtime dependencies (keep minimal to reduce image size and IO)
+RUN apk --no-cache add ca-certificates tzdata
 
-# Hot reload tool (dev)
-RUN go install github.com/air-verse/air@latest
-
-# Keep config outside /app to avoid volume masking
-RUN printf '%s\n' \
-  'root = "/app"' \
-  '' \
-  '[build]' \
-  '  cmd = "go build -o /tmp/server ./cmd/server"' \
-  '  bin = "/tmp/server"' \
-  '  include_ext = ["go", "tpl", "tmpl", "html"]' \
-  '  exclude_dir = ["vendor", "tmp", "bin", "node_modules"]' \
-  '  delay = 1000' \
-  '' \
-  '[log]' \
-  '  time = true' \
-  > /tmp/.air.toml
+#
+# NOTE: Hot-reload (air) is omitted to avoid Go toolchain version constraints.
+#
 
 # Optional: copy full source for debugging/hot reload
 COPY --from=builder /app /app
@@ -67,4 +51,4 @@ RUN chmod +x /bin/server /bin/migrate /bin/seed-large
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "if [ \"$NODE_ENV\" = \"development\" ]; then air -c /tmp/.air.toml; else /bin/server; fi"]
+CMD ["/bin/server"]

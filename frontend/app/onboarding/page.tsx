@@ -4,12 +4,15 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Box, Button, Card, CardContent, MenuItem, TextField, Typography, Alert } from '@mui/material'
 import { authService, User } from '@/lib/auth'
+import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 
 export default function OnboardingPage() {
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [name, setName] = useState('')
   const [targetLevel, setTargetLevel] = useState('新卒')
+  const [certificationsAcquired, setCertificationsAcquired] = useState<string[]>([])
+  const [certificationsInProgress, setCertificationsInProgress] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -21,6 +24,8 @@ export default function OnboardingPage() {
     }
     setUser(storedUser)
     setName(storedUser.name || '')
+    setCertificationsAcquired(splitCertifications(storedUser.certifications_acquired))
+    setCertificationsInProgress(storedUser.certifications_in_progress || '')
     if (storedUser.target_level === '新卒' || storedUser.target_level === '中途') {
       setTargetLevel(storedUser.target_level)
     }
@@ -33,7 +38,13 @@ export default function OnboardingPage() {
     setError('')
     setLoading(true)
     try {
-      const response = await authService.updateProfile(user.user_id, name, targetLevel)
+      const response = await authService.updateProfile(
+        user.user_id,
+        name,
+        targetLevel,
+        joinCertifications(certificationsAcquired),
+        certificationsInProgress,
+      )
       authService.saveAuth(response)
       router.replace('/')
     } catch (err: any) {
@@ -93,6 +104,39 @@ export default function OnboardingPage() {
               <MenuItem value="新卒">新卒</MenuItem>
               <MenuItem value="中途">中途</MenuItem>
             </TextField>
+            <TextField
+              fullWidth
+              select
+              label="取得資格"
+              value={certificationsAcquired}
+              onChange={(e) =>
+                setCertificationsAcquired(
+                  typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
+                )
+              }
+              SelectProps={{
+                multiple: true,
+                renderValue: (selected) => (selected as string[]).join(', '),
+              }}
+              helperText="複数選択可"
+              sx={{ mb: 2 }}
+            >
+              {CERTIFICATION_OPTIONS.map((option) => (
+                <MenuItem key={option} value={option}>
+                  {option}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              fullWidth
+              label="勉強中の資格"
+              value={certificationsInProgress}
+              onChange={(e) => setCertificationsInProgress(e.target.value)}
+              placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
+              multiline
+              minRows={3}
+              sx={{ mb: 3 }}
+            />
             <Button type="submit" fullWidth variant="contained" size="large" disabled={loading}>
               登録して診断を始める
             </Button>

@@ -431,6 +431,9 @@ export default function CorrelationDiagram() {
                         maxZoom={3}
                         defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
                         attributionPosition="bottom-right"
+                        nodesDraggable={true}
+                        nodesConnectable={false}
+                        elementsSelectable={true}
                     >
                         <Background color="#aaa" gap={16} />
                         <Controls

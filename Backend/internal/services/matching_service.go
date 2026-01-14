@@ -91,27 +91,39 @@ func (s *MatchingService) calculateMatchScore(
 	companyProfile *models.CompanyWeightProfile,
 ) *models.UserCompanyMatch {
 	match := &models.UserCompanyMatch{}
+	evaluatedCount := 0
+	totalScore := 0.0
 
 	// 各カテゴリのマッチ度を計算（0-100のスケールで）
 	// マッチ度 = 100 - |ユーザースコア - 企業重視度|
-	match.TechnicalMatch = calculateCategoryMatch(userScores["技術志向"], float64(companyProfile.TechnicalOrientation))
-	match.TeamworkMatch = calculateCategoryMatch(userScores["チームワーク志向"], float64(companyProfile.TeamworkOrientation))
-	match.LeadershipMatch = calculateCategoryMatch(userScores["リーダーシップ志向"], float64(companyProfile.LeadershipOrientation))
-	match.CreativityMatch = calculateCategoryMatch(userScores["創造性志向"], float64(companyProfile.CreativityOrientation))
-	match.StabilityMatch = calculateCategoryMatch(userScores["安定志向"], float64(companyProfile.StabilityOrientation))
-	match.GrowthMatch = calculateCategoryMatch(userScores["成長志向"], float64(companyProfile.GrowthOrientation))
-	match.WorkLifeMatch = calculateCategoryMatch(userScores["ワークライフバランス"], float64(companyProfile.WorkLifeBalance))
-	match.ChallengeMatch = calculateCategoryMatch(userScores["チャレンジ志向"], float64(companyProfile.ChallengeSeeking))
-	match.DetailMatch = calculateCategoryMatch(userScores["細部志向"], float64(companyProfile.DetailOrientation))
-	match.CommunicationMatch = calculateCategoryMatch(userScores["コミュニケーション力"], float64(companyProfile.CommunicationSkill))
+	match.TechnicalMatch, evaluatedCount, totalScore = scoredMatch(userScores, "技術志向", float64(companyProfile.TechnicalOrientation), evaluatedCount, totalScore)
+	match.TeamworkMatch, evaluatedCount, totalScore = scoredMatch(userScores, "チームワーク志向", float64(companyProfile.TeamworkOrientation), evaluatedCount, totalScore)
+	match.LeadershipMatch, evaluatedCount, totalScore = scoredMatch(userScores, "リーダーシップ志向", float64(companyProfile.LeadershipOrientation), evaluatedCount, totalScore)
+	match.CreativityMatch, evaluatedCount, totalScore = scoredMatch(userScores, "創造性志向", float64(companyProfile.CreativityOrientation), evaluatedCount, totalScore)
+	match.StabilityMatch, evaluatedCount, totalScore = scoredMatch(userScores, "安定志向", float64(companyProfile.StabilityOrientation), evaluatedCount, totalScore)
+	match.GrowthMatch, evaluatedCount, totalScore = scoredMatch(userScores, "成長志向", float64(companyProfile.GrowthOrientation), evaluatedCount, totalScore)
+	match.WorkLifeMatch, evaluatedCount, totalScore = scoredMatch(userScores, "ワークライフバランス", float64(companyProfile.WorkLifeBalance), evaluatedCount, totalScore)
+	match.ChallengeMatch, evaluatedCount, totalScore = scoredMatch(userScores, "チャレンジ志向", float64(companyProfile.ChallengeSeeking), evaluatedCount, totalScore)
+	match.DetailMatch, evaluatedCount, totalScore = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), evaluatedCount, totalScore)
+	match.CommunicationMatch, evaluatedCount, totalScore = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), evaluatedCount, totalScore)
 
 	// 総合マッチ度を計算（全カテゴリの平均）
-	match.MatchScore = (match.TechnicalMatch + match.TeamworkMatch + match.LeadershipMatch +
-		match.CreativityMatch + match.StabilityMatch + match.GrowthMatch +
-		match.WorkLifeMatch + match.ChallengeMatch + match.DetailMatch +
-		match.CommunicationMatch) / 10.0
+	if evaluatedCount > 0 {
+		match.MatchScore = totalScore / float64(evaluatedCount)
+	} else {
+		match.MatchScore = 0
+	}
 
 	return match
+}
+
+func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
+	userScore, ok := userScores[category]
+	if !ok {
+		return 0, evaluatedCount, totalScore
+	}
+	matchScore := calculateCategoryMatch(userScore, companyWeight)
+	return matchScore, evaluatedCount + 1, totalScore + matchScore
 }
 
 // calculateCategoryMatch カテゴリごとのマッチ度を計算

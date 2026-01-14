@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -206,6 +207,12 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		}
 	}
 
+	if jobCategoryID != 0 {
+		if err := s.completeJobAnalysisPhase(req.UserID, req.SessionID); err != nil {
+			fmt.Printf("Warning: failed to complete job analysis phase: %v\n", err)
+		}
+	}
+
 	// 2.5. 回答の妥当性チェック（保存後のhistoryを使用）
 	handled, response, err := s.checkAnswerValidity(ctx, history, req.Message, req.UserID, req.SessionID)
 	if err != nil {
@@ -214,6 +221,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	// 無効な回答の場合は、ここで処理を終了
 	if handled {
+		currentPhase, phaseErr := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
+		if phaseErr == nil {
+			if err := s.updatePhaseProgress(currentPhase, false); err != nil {
+				fmt.Printf("Warning: failed to update phase progress for invalid answer: %v\n", err)
+			}
+		}
+
 		validation, err := s.sessionValidationRepo.GetOrCreate(req.SessionID)
 		if err != nil {
 			fmt.Printf("Warning: failed to get validation: %v\n", err)
@@ -247,52 +261,102 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 2.6. 現在のフェーズを取得または開始
 	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
 	if err != nil {
-		// 全フェーズ完了の場合は特別な応答を返す
+		// 全フェーズ完了の場合は完了応答を返す
 		if err.Error() == "all phases completed" {
-			userAnswerCount := countUserAnswers(history)
-			progresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
-			allPhases, _ := s.phaseRepo.FindAll()
-			allPhasesMaxed := allPhasesReachedMax(progresses, allPhases)
-			if userAnswerCount < 15 || !allPhasesMaxed {
-				fmt.Printf("All phases completed but only %d answers; continuing questions\n", userAnswerCount)
-				currentPhase, err = s.getLastPhaseProgress(req.UserID, req.SessionID)
-				if err != nil || currentPhase == nil {
-					return nil, fmt.Errorf("failed to get fallback phase: %w", err)
-				}
-			} else {
-				completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
+			completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
 
-				// 完了メッセージを保存
-				assistantMsg := &models.ChatMessage{
-					SessionID: req.SessionID,
-					UserID:    req.UserID,
-					Role:      "assistant",
-					Content:   completionMsg,
-				}
-				if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-					fmt.Printf("Warning: failed to save completion message: %v\n", err)
-				}
-
-				allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-				return &ChatResponse{
-					Response:            completionMsg,
-					IsComplete:          true,
-					TotalQuestions:      15,
-					AnsweredQuestions:   15,
-					EvaluatedCategories: 10,
-					TotalCategories:     10,
-					AllPhases:           allPhases,
-					CurrentPhase:        currentPhaseInfo,
-				}, nil
+			assistantMsg := &models.ChatMessage{
+				SessionID: req.SessionID,
+				UserID:    req.UserID,
+				Role:      "assistant",
+				Content:   completionMsg,
 			}
-		} else {
-			return nil, fmt.Errorf("failed to get current phase: %w", err)
+			if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+				fmt.Printf("Warning: failed to save completion message: %v\n", err)
+			}
+
+			allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+			return &ChatResponse{
+				Response:            completionMsg,
+				IsComplete:          true,
+				TotalQuestions:      15,
+				AnsweredQuestions:   countUserAnswers(history),
+				EvaluatedCategories: 10,
+				TotalCategories:     10,
+				AllPhases:           allPhases,
+				CurrentPhase:        currentPhaseInfo,
+			}, nil
 		}
+		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
 
 	// 2.7. フェーズ進捗を更新（有効な回答のみ）
 	if err := s.updatePhaseProgress(currentPhase, true); err != nil {
 		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
+	}
+
+	allPhases, err := s.phaseRepo.FindAll()
+	if err != nil {
+		fmt.Printf("Warning: failed to get phases: %v\n", err)
+	}
+	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
+	completedPhaseCount := 0
+	phaseByID := make(map[uint]*models.AnalysisPhase, len(allPhases))
+	for i := range allPhases {
+		phaseByID[allPhases[i].ID] = &allPhases[i]
+	}
+	for _, p := range completedProgresses {
+		phase := p.Phase
+		if phase == nil {
+			phase = phaseByID[p.PhaseID]
+		}
+		if isPhaseComplete(p.ValidAnswers, phase) {
+			completedPhaseCount++
+		}
+	}
+	if completedPhaseCount == len(allPhases) && len(allPhases) > 0 {
+		completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
+		assistantMsg := &models.ChatMessage{
+			SessionID: req.SessionID,
+			UserID:    req.UserID,
+			Role:      "assistant",
+			Content:   completionMsg,
+		}
+		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+			fmt.Printf("Warning: failed to save completion message: %v\n", err)
+		}
+		allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+		evaluatedCategoriesCount := 0
+		scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
+		if err != nil {
+			fmt.Printf("Warning: failed to get scores for completion response: %v\n", err)
+		} else {
+			seenCategories := make(map[string]bool)
+			for _, score := range scores {
+				if score.Score != 0 {
+					seenCategories[score.WeightCategory] = true
+				}
+			}
+			evaluatedCategoriesCount = len(seenCategories)
+		}
+		totalMinQuestions := 0
+		for _, phase := range allPhases {
+			if phase.MaxQuestions > 0 {
+				totalMinQuestions += phase.MaxQuestions
+			} else {
+				totalMinQuestions += phase.MinQuestions
+			}
+		}
+		return &ChatResponse{
+			Response:            completionMsg,
+			IsComplete:          true,
+			TotalQuestions:      totalMinQuestions,
+			AnsweredQuestions:   countUserAnswers(history),
+			EvaluatedCategories: evaluatedCategoriesCount,
+			TotalCategories:     10,
+			AllPhases:           allPhasesInfo,
+			CurrentPhase:        currentPhaseInfo,
+		}, nil
 	}
 
 	// 3. ユーザーの回答から重み係数を判定・更新
@@ -324,19 +388,22 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		askedQuestions = []models.AIGeneratedQuestion{}
 	}
 	for _, q := range askedQuestions {
-		askedTexts[q.QuestionText] = true
+		questionText := normalizeQuestionText(q.QuestionText)
+		if questionText == "" {
+			questionText = strings.TrimSpace(q.QuestionText)
+		}
+		if questionText != "" {
+			askedTexts[questionText] = true
+		}
 	}
 
 	// 4-2. チャット履歴からもアシスタントの質問を収集
 	for _, msg := range history {
 		if msg.Role == "assistant" {
-			// 質問文を正規化して記録
-			questionText := strings.TrimSpace(msg.Content)
-			// 💡マークなどのヒント部分を除去
-			if idx := strings.Index(questionText, "\n\n💡"); idx > 0 {
-				questionText = questionText[:idx]
+			questionText := normalizeQuestionText(msg.Content)
+			if questionText != "" {
+				askedTexts[questionText] = true
 			}
-			askedTexts[questionText] = true
 		}
 	}
 
@@ -436,29 +503,31 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 			}
 		}
 	}
+	if currentPhaseName != "" && isTextBasedQuestion(aiResponse) && !shouldForceTextQuestion(recentHistory, currentPhase) {
+		if currentPhaseName == "job_analysis" || currentPhaseName == "interest_analysis" || currentPhaseName == "aptitude_analysis" || currentPhaseName == "future_analysis" {
+			aiResponse = buildChoiceFallback(aiResponse, currentPhaseName)
+		}
+	}
 
 	// 5. フェーズベースの完了判定
 	// 全フェーズが完了しているかチェック
-	allPhases, err := s.phaseRepo.FindAll()
-	if err != nil {
-		fmt.Printf("Warning: failed to get phases: %v\n", err)
-	}
-	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	completedPhaseCount := 0
+	completedPhaseCount = 0
 	for _, p := range completedProgresses {
-		if p.IsCompleted {
+		phase := p.Phase
+		if phase == nil {
+			phase = phaseByID[p.PhaseID]
+		}
+		if isPhaseComplete(p.ValidAnswers, phase) {
 			completedPhaseCount++
 		}
 	}
 
 	// 質問数を計算（進捗表示用）
 	answeredCount := countUserAnswers(history)
-	allPhasesMaxed := allPhasesReachedMax(completedProgresses, allPhases)
+	_ = allPhasesReachedMax(completedProgresses, allPhases)
 
-	// 完了判定:
-	// 1. 全フェーズの質問数が最大に到達
-	// 2. 最低15問回答済み
-	isComplete := allPhasesMaxed && answeredCount >= 15
+	// 完了判定: 全フェーズが完了していれば終了
+	isComplete := completedPhaseCount == len(allPhases)
 
 	fmt.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
 		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
@@ -471,7 +540,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		if jobJustResolved {
 			aiResponse = "ありがとうございます！それでは、適性診断を始めますね。\n\n" + aiResponse
 		}
-		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) {
+		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
 			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
 			if err != nil || strings.TrimSpace(simple) == "" {
 				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
@@ -512,10 +581,14 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// フェーズ情報を構築
 	allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 
-	// フェーズの最大質問数の合計を計算
+	// フェーズの質問数合計を計算（最大が無い場合は最小を採用）
 	totalMaxQuestions := 0
 	for _, phase := range allPhases {
-		totalMaxQuestions += phase.MaxQuestions
+		if phase.MaxQuestions > 0 {
+			totalMaxQuestions += phase.MaxQuestions
+		} else {
+			totalMaxQuestions += phase.MinQuestions
+		}
 	}
 
 	return &ChatResponse{
@@ -525,58 +598,50 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		CurrentPhase:        currentPhaseInfo,
 		AllPhases:           allPhasesInfo,
 		IsComplete:          isComplete,
-		TotalQuestions:      totalMaxQuestions, // 全フェーズの最大質問数の合計
+		TotalQuestions:      totalMaxQuestions, // 全フェーズの最低質問数合計（最大が無い場合）
 		AnsweredQuestions:   answeredCount,
 		EvaluatedCategories: len(evaluatedCategories),
 		TotalCategories:     10,
 	}, nil
 }
 
+func (s *ChatService) completeJobAnalysisPhase(userID uint, sessionID string) error {
+	if s.phaseRepo == nil || s.progressRepo == nil {
+		return nil
+	}
+	phase, err := s.phaseRepo.FindByName("job_analysis")
+	if err != nil || phase == nil {
+		return nil
+	}
+	progress, err := s.progressRepo.FindOrCreate(userID, sessionID, phase.ID)
+	if err != nil {
+		return err
+	}
+	required := phase.MaxQuestions
+	if required <= 0 {
+		required = phase.MinQuestions
+	}
+	if required <= 0 || progress.IsCompleted {
+		return nil
+	}
+	if progress.ValidAnswers < required {
+		progress.ValidAnswers = required
+	}
+	if progress.QuestionsAsked < required {
+		progress.QuestionsAsked = required
+	}
+	progress.CompletionScore = 100
+	progress.IsCompleted = true
+	now := time.Now()
+	progress.CompletedAt = &now
+	if progress.Phase == nil {
+		progress.Phase = phase
+	}
+	return s.progressRepo.Update(progress)
+}
+
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新
 func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) error {
-	// 回答の妥当性を事前チェック
-	messageTrimmed := strings.TrimSpace(message)
-
-	// 1. 空または極端に短い回答（5文字未満は無視）
-	if len([]rune(messageTrimmed)) < 5 {
-		fmt.Printf("Answer too short (%d chars), skipping analysis\n", len([]rune(messageTrimmed)))
-		return nil
-	}
-
-	// 2. 「わからない」などの回答パターンを検出（より厳格に）
-	lowConfidencePatterns := []string{
-		"わからない", "分からない", "わかりません", "分かりません",
-		"よくわからない", "よく分からない", "不明", "知らない", "しらない",
-		"特にない", "思いつかない", "特に無い", "ありません", "特になし", "なし",
-		"無い", "ない", "いいえ", "とくにない", "とくになし",
-	}
-
-	isLowConfidence := false
-	messageNormalized := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(messageTrimmed), " ", ""), "　", "")
-
-	// 短い回答で否定的な内容の場合
-	if len([]rune(messageTrimmed)) < 15 {
-		for _, pattern := range lowConfidencePatterns {
-			if strings.Contains(messageNormalized, pattern) {
-				isLowConfidence = true
-				fmt.Printf("Low confidence answer detected: '%s' contains '%s'\n", messageTrimmed, pattern)
-				break
-			}
-		}
-	}
-
-	// わからない回答の場合は、スキップ
-	if isLowConfidence {
-		fmt.Printf("Skipping analysis for low confidence answer\n")
-		return nil
-	}
-
-	// 3. 10文字以上の回答のみAI分析を実行
-	if len([]rune(messageTrimmed)) < 10 {
-		fmt.Printf("Answer too short for meaningful analysis (%d chars): %s\n", len([]rune(messageTrimmed)), messageTrimmed)
-		return nil
-	}
-
 	// 会話履歴から直近の質問を取得
 	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
 	if err != nil {
@@ -601,26 +666,20 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		return nil
 	}
 
-	if jobCategoryID == 0 {
-		fmt.Printf("Skipping job-fit scoring because job category is not set\n")
-		return nil
-	}
-
 	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
 	isChoice := !isTextBasedQuestion(lastQuestion)
 
-	evaluation, err := s.evaluateJobFitScoreWithAI(ctx, jobCategoryID, lastQuestion, message, isChoice)
-	if err != nil {
-		fmt.Printf("Warning: failed to evaluate job fit: %v\n", err)
+	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, message, isChoice, jobCategoryID != 0, nil)
+	if result.Action != PrecheckScore {
+		fmt.Printf("Skipping scoring due to precheck: %s\n", result.Reason)
+		return nil
+	}
+	if result.Score <= 0 {
+		fmt.Printf("No human score applied (score=%d)\n", result.Score)
 		return nil
 	}
 
-	if evaluation.Score <= 0 {
-		fmt.Printf("No job-fit score applied (score=%d)\n", evaluation.Score)
-		return nil
-	}
-
-	return s.updateCategoryScore(userID, sessionID, targetCategory, evaluation.Score)
+	return s.updateCategoryScore(userID, sessionID, targetCategory, result.Score)
 }
 
 // generateStrategicQuestion AIが戦略的に次の質問を生成
@@ -644,12 +703,28 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		askedQuestionsText += fmt.Sprintf("\n**上記%d個の質問と類似・重複する質問は絶対に生成しないでください**\n", questionCount)
 	}
 
-	// スコア状況の分析
+	phaseCategories := map[string][]string{
+		"job_analysis":      {"技術志向", "創造性志向", "成長志向", "安定志向"},
+		"interest_analysis": {"技術志向", "創造性志向", "成長志向", "チャレンジ志向"},
+		"aptitude_analysis": {"コミュニケーション力", "チームワーク志向", "リーダーシップ志向", "細部志向"},
+		"future_analysis":   {"安定志向", "成長志向", "ワークライフバランス", "チャレンジ志向"},
+	}
+
+	allowedCategories := allCategories
+	phaseName := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		phaseName = currentPhase.Phase.PhaseName
+		if phaseAllowed, ok := phaseCategories[phaseName]; ok && len(phaseAllowed) > 0 {
+			allowedCategories = phaseAllowed
+		}
+	}
+
+	// スコア状況の分析（フェーズ対象カテゴリのみ）
 	scoreAnalysis := "## 現在の評価状況\n"
 	evaluatedCategories := []string{}
 	unevaluatedCategories := []string{}
 
-	for _, cat := range allCategories {
+	for _, cat := range allowedCategories {
 		score, exists := scoreMap[cat]
 		if exists && score != 0 {
 			scoreAnalysis += fmt.Sprintf("- %s: %d点\n", cat, score)
@@ -678,7 +753,8 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	} else {
 		// 全カテゴリ評価済みなら、スコアが中途半端なものを深掘り
 		targetCategory = ""
-		for cat, score := range scoreMap {
+		for _, cat := range allowedCategories {
+			score := scoreMap[cat]
 			if score > -3 && score < 3 {
 				targetCategory = cat
 				questionPurpose = fmt.Sprintf("評価が曖昧な「%s」をより明確に判定するため", cat)
@@ -689,7 +765,8 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		if targetCategory == "" {
 			// 最もスコアが高いカテゴリを深掘り
 			highestScore := -100
-			for cat, score := range scoreMap {
+			for _, cat := range allowedCategories {
+				score := scoreMap[cat]
 				if score > highestScore {
 					highestScore = score
 					targetCategory = cat
@@ -727,19 +804,53 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	// フェーズ情報を追加
 	phaseContext := ""
 	if currentPhase != nil && currentPhase.Phase != nil {
-		phaseContext = fmt.Sprintf(`
+		if currentPhase.Phase.MaxQuestions > 0 {
+			phaseContext = fmt.Sprintf(`
 ## 現在の分析フェーズ: %s
 %s
 このフェーズでは%dつ〜%dつの質問を行います。現在%d個目の質問です。
 フェーズの目的に沿った質問を生成してください。
 `, currentPhase.Phase.DisplayName, currentPhase.Phase.Description,
-			currentPhase.Phase.MinQuestions, currentPhase.Phase.MaxQuestions,
-			currentPhase.QuestionsAsked+1)
+				currentPhase.Phase.MinQuestions, currentPhase.Phase.MaxQuestions,
+				currentPhase.QuestionsAsked+1)
+		} else {
+			phaseContext = fmt.Sprintf(`
+## 現在の分析フェーズ: %s
+%s
+このフェーズでは最低%dつの質問を行います。現在%d個目の質問です。
+フェーズの目的に沿った質問を生成してください。
+`, currentPhase.Phase.DisplayName, currentPhase.Phase.Description,
+				currentPhase.Phase.MinQuestions,
+				currentPhase.QuestionsAsked+1)
+		}
+	}
+	choiceGuidance := ""
+	// phaseName はフェーズカテゴリ選定で取得済み
+	forceTextQuestion := shouldForceTextQuestion(history, currentPhase)
+	if phaseName != "" {
+		switch phaseName {
+		case "job_analysis":
+			choiceGuidance = "- 職種分析では選択肢中心で質問を構成する\n- 4〜5択で興味や方向性を選ばせ、最後に「その他（自由記述）」を用意する\n- 選択肢は必ず「A)」「B)」または「1)」「2)」形式で改行区切りで列挙する\n- 出力は『質問文 + 選択肢列挙』の形式とし、選択肢がない質問は不可\n- 文章でないと判定できない場合のみ自由記述にする（その場合も「その他（自由記述）」として選択肢に含める）"
+		case "interest_analysis":
+			choiceGuidance = "- 興味分析では選択肢中心で質問を構成する\n- 可能な限り4〜5択で提示し、最後に「その他（自由記述）」を用意する\n- 選択肢は必ず「A)」「B)」または「1)」「2)」形式で改行区切りで列挙する\n- 出力は『質問文 + 選択肢列挙』の形式とし、選択肢がない質問は不可\n- 文章必須の深掘りが必要な場合のみ自由記述にする（その場合も「その他（自由記述）」として選択肢に含める）"
+		case "aptitude_analysis":
+			choiceGuidance = "- 適性分析では選択肢中心で質問を構成する\n- 4〜5択で具体的な行動や傾向を選ばせる\n- 選択肢は必ず「A)」「B)」または「1)」「2)」形式で改行区切りで列挙する\n- 出力は『質問文 + 選択肢列挙』の形式とし、選択肢がない質問は不可\n- 文章でないと判定できない場合のみ自由記述にする（その場合も「その他（自由記述）」として選択肢に含める）"
+		case "future_analysis":
+			choiceGuidance = "- 将来分析（待遇・働き方の希望を含む）では選択肢中心で質問を構成する\n- 4〜5択で希望や優先順位を選ばせ、最後に「その他（自由記述）」を用意する\n- 選択肢は必ず「A)」「B)」または「1)」「2)」形式で改行区切りで列挙する\n- 出力は『質問文 + 選択肢列挙』の形式とし、選択肢がない質問は不可\n- 理由や背景が必要な場合のみ自由記述にする（その場合も「その他（自由記述）」として選択肢に含める）"
+		}
+	}
+	if forceTextQuestion {
+		choiceGuidance = "- このフェーズでは最低限の自由記述質問が必要です\n- 今回は必ず自由記述で質問を作成する\n- 選択肢は出さない"
+	}
+	if choiceGuidance != "" {
+		choiceGuidance = fmt.Sprintf("## 質問形式の方針\n%s\n", choiceGuidance)
 	}
 
 	if strings.TrimSpace(targetLevel) == "" {
 		targetLevel = "新卒"
 	}
+
+	requiresChoice := currentPhase != nil && !forceTextQuestion && (phaseName == "" || phaseName == "job_analysis" || phaseName == "interest_analysis" || phaseName == "aptitude_analysis" || phaseName == "future_analysis")
 
 	description := categoryDescriptions[targetCategory]
 	if targetLevel == "中途" {
@@ -750,6 +861,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	if targetLevel == "中途" {
 		prompt = fmt.Sprintf(`あなたは中途向けの就職適性診断の専門家です。
 これまでの会話と評価状況を分析し、**実務経験を引き出しやすく、企業選定に役立つ質問**を1つ生成してください。
+%s
 %s
 ## これまでの会話
 %s
@@ -775,6 +887,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 質問のみを返してください。説明や補足は一切不要です。`,
 			phaseContext,
+			choiceGuidance,
 			historyText,
 			scoreAnalysis,
 			askedQuestionsText,
@@ -787,6 +900,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	} else {
 		prompt = fmt.Sprintf(`あなたは新卒学生向けの就職適性診断の専門家です。
 これまでの会話と評価状況を分析し、**学生が答えやすく、企業選定に役立つ質問**を1つ生成してください。
+%s
 %s
 ## これまでの会話
 %s
@@ -882,16 +996,17 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 **志望職種: %s, 業界ID: %d, 職種ID: %d を考慮して、この職種に相応しい文脈で質問を生成してください。特に「技術志向」を評価する場合は、職種がエンジニアであればプログラミングについて、非エンジニア職種ではITツール活用や効率化の関心について聞き、プログラミング経験を前提としないでください。**
 
 質問のみを返してください。説明や補足は一切不要です。`,
-		phaseContext,
-		historyText,
-		scoreAnalysis,
-		askedQuestionsText,
-		questionPurpose,
-		targetCategory,
-		description,
-		jobCategoryName,
-		industryID,
-		jobCategoryID)
+			phaseContext,
+			choiceGuidance,
+			historyText,
+			scoreAnalysis,
+			askedQuestionsText,
+			questionPurpose,
+			targetCategory,
+			description,
+			jobCategoryName,
+			industryID,
+			jobCategoryID)
 	}
 
 	questionText, err := s.aiCallWithRetries(ctx, prompt)
@@ -910,6 +1025,34 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			questionText = fallbackQuestion
 		} else {
 			questionText = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
+		}
+	}
+
+	// 選択肢必須フェーズで選択肢がない場合は再生成
+	if requiresChoice && isTextBasedQuestion(questionText) {
+		for attempt := 0; attempt < 2; attempt++ {
+			choicePrompt := fmt.Sprintf(`以下の質問は選択肢が不足しています。
+"%s"
+
+必ず4〜5個の選択肢を「A)」「B)」「C)」「D)」「E)」または「1)」「2)」「3)」「4)」「5)」形式で改行区切りで列挙し、最後に「その他（自由記述）」を含めてください。
+
+質問文は1つのみ。説明は不要です。質問文の後に選択肢を列挙してください。`, questionText)
+
+			regenerated, err := s.aiCallWithRetries(ctx, choicePrompt)
+			if err != nil {
+				break
+			}
+			regenerated = strings.TrimSpace(regenerated)
+			regenerated = strings.Trim(regenerated, `"「」`)
+			if regenerated != "" {
+				questionText = regenerated
+			}
+			if !isTextBasedQuestion(questionText) {
+				break
+			}
+		}
+		if isTextBasedQuestion(questionText) {
+			questionText = buildChoiceFallback(questionText, phaseName)
 		}
 	}
 
@@ -2097,6 +2240,32 @@ func isQuestion(text string) bool {
 	return false
 }
 
+func normalizeQuestionText(text string) string {
+	questionText := strings.TrimSpace(text)
+	if questionText == "" {
+		return ""
+	}
+	// 💡マークなどのヒント部分を除去
+	if idx := strings.Index(questionText, "\n\n💡"); idx > 0 {
+		questionText = questionText[:idx]
+	}
+	// 段落末尾の質問文を優先して抽出（前置きが付くケースを考慮）
+	parts := strings.Split(questionText, "\n\n")
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
+			continue
+		}
+		if isQuestion(part) {
+			return part
+		}
+	}
+	if isQuestion(questionText) {
+		return questionText
+	}
+	return ""
+}
+
 // validateAnswerRelevance: 回答が質問に沿っているかを判定（文章系はキーワードベースで柔軟に判定）
 func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, answer string) (bool, error) {
 	// 文章系の質問かどうかを判定
@@ -2326,33 +2495,30 @@ func containsGreeting(s string) bool {
 
 // getCurrentOrNextPhase 現在のフェーズを取得または次のフェーズを開始
 func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, sessionID string) (*models.UserAnalysisProgress, error) {
-	// 現在進行中のフェーズを取得
-	currentProgress, err := s.progressRepo.GetCurrentPhase(userID, sessionID)
-	if err == nil {
-		return currentProgress, nil
-	}
-
-	// 進行中のフェーズがない場合、次のフェーズを開始
 	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
 		return nil, err
 	}
 
-	// 既に完了したフェーズを確認
-	completedProgresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
-	completedMap := make(map[uint]bool)
-	for _, p := range completedProgresses {
-		if p.IsCompleted {
-			completedMap[p.PhaseID] = true
-		}
+	progresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	progressMap := make(map[uint]*models.UserAnalysisProgress, len(progresses))
+	for i := range progresses {
+		progressMap[progresses[i].PhaseID] = &progresses[i]
 	}
 
 	// 次の未完了フェーズを見つける
 	for _, phase := range allPhases {
-		if !completedMap[phase.ID] {
-			// 新しいフェーズを開始
-			return s.progressRepo.FindOrCreate(userID, sessionID, phase.ID)
+		if progress, exists := progressMap[phase.ID]; exists {
+			if progress.Phase == nil {
+				phaseCopy := phase
+				progress.Phase = &phaseCopy
+			}
+			if isPhaseComplete(progress.QuestionsAsked, progress.Phase) {
+				continue
+			}
+			return progress, nil
 		}
+		return s.progressRepo.FindOrCreate(userID, sessionID, phase.ID)
 	}
 
 	// 全フェーズ完了
@@ -2368,20 +2534,26 @@ func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress,
 		progress.InvalidAnswers++
 	}
 
-	// 完了スコアを計算（有効回答率 × 100）
-	if progress.QuestionsAsked > 0 {
-		progress.CompletionScore = (float64(progress.ValidAnswers) / float64(progress.QuestionsAsked)) * 100
+	progress.CompletionScore = phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
+	newIsCompleted := isPhaseComplete(progress.ValidAnswers, progress.Phase)
+	if newIsCompleted {
+		if !progress.IsCompleted {
+			now := time.Now()
+			progress.CompletedAt = &now
+			phaseLabel := "分析"
+			if progress.Phase != nil {
+				if progress.Phase.DisplayName != "" {
+					phaseLabel = progress.Phase.DisplayName
+				} else if progress.Phase.PhaseName != "" {
+					phaseLabel = progress.Phase.PhaseName
+				}
+			}
+			fmt.Printf("%sが完了しました。\n", phaseLabel)
+		}
+	} else {
+		progress.CompletedAt = nil
 	}
-
-	// フェーズ完了条件をチェック
-	// 最小質問数に達し、かつ完了スコアが70%以上、または最大質問数に達した場合
-	if (progress.QuestionsAsked >= progress.Phase.MinQuestions && progress.CompletionScore >= 70) ||
-		progress.QuestionsAsked >= progress.Phase.MaxQuestions {
-		progress.IsCompleted = true
-		now := new(time.Time)
-		*now = time.Now()
-		progress.CompletedAt = now
-	}
+	progress.IsCompleted = newIsCompleted
 
 	return s.progressRepo.Update(progress)
 }
@@ -2412,12 +2584,13 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 		}
 
 		if progress, exists := progressMap[phase.ID]; exists {
+			completionScore := phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
 			pp.QuestionsAsked = progress.QuestionsAsked
 			pp.ValidAnswers = progress.ValidAnswers
-			pp.CompletionScore = progress.CompletionScore
-			pp.IsCompleted = progress.IsCompleted
+			pp.CompletionScore = completionScore
+			pp.IsCompleted = isPhaseComplete(progress.ValidAnswers, &phase)
 
-			if !progress.IsCompleted && current == nil {
+			if !pp.IsCompleted && current == nil {
 				current = &pp
 			}
 		}
@@ -2428,12 +2601,40 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 	return result, current, nil
 }
 
+func phaseCompletionScore(validAnswers, questionsAsked int) float64 {
+	if questionsAsked <= 0 {
+		return 0
+	}
+	score := (float64(validAnswers) / float64(questionsAsked)) * 100
+	if score > 100 {
+		return 100
+	}
+	if score < 0 {
+		return 0
+	}
+	return score
+}
+
+func isPhaseComplete(validAnswers int, phase *models.AnalysisPhase) bool {
+	if phase == nil {
+		return false
+	}
+	required := phase.MaxQuestions
+	if required <= 0 {
+		required = phase.MinQuestions
+	}
+	if required <= 0 {
+		return false
+	}
+	return validAnswers >= required
+}
+
 // isChoiceAnswer 選択肢回答かどうかを判定
 func (s *ChatService) isChoiceAnswer(answer string) bool {
 	answer = strings.ToUpper(strings.TrimSpace(answer))
-	// A, B, C, D または 1, 2, 3, 4 の形式
-	return answer == "A" || answer == "B" || answer == "C" || answer == "D" ||
-		answer == "1" || answer == "2" || answer == "3" || answer == "4"
+	// A-E または 1-5 の形式
+	return answer == "A" || answer == "B" || answer == "C" || answer == "D" || answer == "E" ||
+		answer == "1" || answer == "2" || answer == "3" || answer == "4" || answer == "5"
 }
 
 // processChoiceAnswer 選択肢回答を処理してスコアを更新
@@ -2480,19 +2681,12 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 
 	fmt.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
 
-	score := 0
-	if jobCategoryID != 0 {
-		evaluation, err := s.evaluateJobFitScoreWithAI(ctx, jobCategoryID, lastQuestion, answer, true)
-		if err != nil {
-			fmt.Printf("Warning: failed to evaluate job fit for choice answer: %v\n", err)
-		} else {
-			score = evaluation.Score
-		}
+	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
+	if result.Action != PrecheckScore {
+		fmt.Printf("Skipping choice scoring due to precheck: %s\n", result.Reason)
+		return nil
 	}
-	if score == 0 {
-		// フォールバック: 選択肢をスコアに変換（A=100, B=67, C=33, D=0 のスケール）
-		score = s.convertChoiceToScore(answer)
-	}
+	score := result.Score
 
 	// スコアを保存または更新
 	return s.updateCategoryScore(userID, sessionID, targetCategory, score)
@@ -2505,14 +2699,113 @@ func (s *ChatService) convertChoiceToScore(choice string) int {
 	case "A", "1":
 		return 100 // 非常に高い/強く同意
 	case "B", "2":
-		return 67 // やや高い/やや同意
+		return 75 // やや高い/やや同意
 	case "C", "3":
-		return 33 // やや低い/やや不同意
+		return 50 // 中立/どちらでもない
 	case "D", "4":
+		return 25 // やや低い/やや不同意
+	case "E", "5":
 		return 0 // 低い/不同意
 	default:
 		return 50 // デフォルト
 	}
+}
+
+func shouldForceTextQuestion(history []models.ChatMessage, currentPhase *models.UserAnalysisProgress) bool {
+	if currentPhase == nil || currentPhase.Phase == nil {
+		return false
+	}
+	minText := minTextQuestionsForPhase(currentPhase.Phase.PhaseName)
+	if minText == 0 {
+		return false
+	}
+	if currentPhase.QuestionsAsked == 0 {
+		return true
+	}
+	textCount := countTextQuestionsInPhase(history, currentPhase.QuestionsAsked)
+	return textCount < minText
+}
+
+func minTextQuestionsForPhase(phaseName string) int {
+	switch phaseName {
+	case "job_analysis", "interest_analysis", "aptitude_analysis", "future_analysis":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func countTextQuestionsInPhase(history []models.ChatMessage, phaseQuestionsAsked int) int {
+	if phaseQuestionsAsked <= 0 {
+		return 0
+	}
+	textCount := 0
+	questionCount := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		msg := history[i]
+		if msg.Role != "assistant" {
+			continue
+		}
+		questionText := normalizeQuestionText(msg.Content)
+		if questionText == "" || !isQuestion(questionText) {
+			continue
+		}
+		questionCount++
+		if isTextBasedQuestion(questionText) {
+			textCount++
+		}
+		if questionCount >= phaseQuestionsAsked {
+			break
+		}
+	}
+	return textCount
+}
+
+func buildChoiceFallback(questionText, phaseName string) string {
+	choices := []string{}
+	switch phaseName {
+	case "job_analysis":
+		choices = []string{
+			"1) ものづくり・開発系（Web/アプリ/設計）",
+			"2) データ・分析系（分析/企画/改善）",
+			"3) インフラ・運用系（基盤/安定稼働）",
+			"4) 対人・調整系（営業/人事/サポート）",
+			"5) その他（自由記述）",
+		}
+	case "interest_analysis":
+		choices = []string{
+			"1) 新しい技術やツールに触れる",
+			"2) 仕組みを考えたり設計する",
+			"3) 人と関わりながら進める",
+			"4) コツコツ改善・整理する",
+			"5) その他（自由記述）",
+		}
+	case "aptitude_analysis":
+		choices = []string{
+			"1) 自分から主導して進める",
+			"2) みんなで協力して進める",
+			"3) 支える・サポート役に回る",
+			"4) 一人で集中して進める",
+			"5) その他（自由記述）",
+		}
+	case "future_analysis":
+		choices = []string{
+			"1) 安定や福利厚生を重視",
+			"2) 成長や挑戦を重視",
+			"3) ワークライフバランス重視",
+			"4) 裁量や自由度重視",
+			"5) その他（自由記述）",
+		}
+	default:
+		choices = []string{
+			"1) とても当てはまる",
+			"2) まあ当てはまる",
+			"3) あまり当てはまらない",
+			"4) まったく当てはまらない",
+			"5) その他（自由記述）",
+		}
+	}
+	return fmt.Sprintf("%s\n\n%s", strings.TrimSpace(questionText), strings.Join(choices, "\n"))
 }
 
 // inferCategoryFromQuestion 質問文からカテゴリを推測
@@ -2554,10 +2847,14 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 		}
 		fmt.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
 	} else {
-		// 平均値で更新（複数回の回答を考慮）
-		newScore := (existingScore.Score + score) / 2
-		existingScore.Score = newScore
-		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, newScore-existingScore.Score); err != nil {
+		// 移動平均で更新（直近回答の影響を反映）
+		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
+		delta := newScore - existingScore.Score
+		if delta == 0 {
+			fmt.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
+			return nil
+		}
+		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, delta); err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
 		fmt.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)
