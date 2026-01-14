@@ -12,6 +12,7 @@ func SetupChatRoutes(chatController *controllers.ChatController, questionControl
 	http.HandleFunc("/api/chat/history", chatController.GetHistory)
 	http.HandleFunc("/api/chat/scores", chatController.GetScores)
 	http.HandleFunc("/api/chat/recommendations", chatController.GetRecommendations)
+	http.HandleFunc("/api/chat/analysis", chatController.GetAnalysisSummary)
 	http.HandleFunc("/api/chat/sessions", chatController.GetSessions)
 
 	// 質問管理エンドポイント

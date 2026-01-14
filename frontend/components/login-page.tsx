@@ -17,6 +17,7 @@ import {
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import { authService, AuthResponse } from '@/lib/auth'
+import { CERTIFICATION_OPTIONS, joinCertifications } from '@/lib/profile'
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -28,6 +29,8 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [targetLevel, setTargetLevel] = useState('新卒')
+  const [certificationsAcquired, setCertificationsAcquired] = useState<string[]>([])
+  const [certificationsInProgress, setCertificationsInProgress] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -51,7 +54,14 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     setError('')
     setLoading(true)
     try {
-      const response = await authService.register(email, password, name, targetLevel)
+      const response = await authService.register(
+        email,
+        password,
+        name,
+        targetLevel,
+        joinCertifications(certificationsAcquired),
+        certificationsInProgress,
+      )
       authService.saveAuth(response)
       onAuthSuccess(response)
     } catch (err: any) {
@@ -187,6 +197,39 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                sx={{ mb: 3 }}
+              />
+              <TextField
+                fullWidth
+                select
+                label="取得資格"
+                value={certificationsAcquired}
+                onChange={(e) =>
+                  setCertificationsAcquired(
+                    typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
+                  )
+                }
+                SelectProps={{
+                  multiple: true,
+                  renderValue: (selected) => (selected as string[]).join(', '),
+                }}
+                helperText="複数選択可"
+                sx={{ mb: 2 }}
+              >
+                {CERTIFICATION_OPTIONS.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                fullWidth
+                label="勉強中の資格"
+                value={certificationsInProgress}
+                onChange={(e) => setCertificationsInProgress(e.target.value)}
+                placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
+                multiline
+                minRows={3}
                 sx={{ mb: 3 }}
               />
               <Button

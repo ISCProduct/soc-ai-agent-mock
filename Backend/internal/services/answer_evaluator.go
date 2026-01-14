@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -223,4 +224,312 @@ func (e *AnswerEvaluator) GetConfidenceLevel(score int, keywordCount int, answer
 	}
 
 	return "medium"
+}
+
+type PrecheckAction string
+
+const (
+	PrecheckIgnore  PrecheckAction = "ignore"
+	PrecheckSkip    PrecheckAction = "skip"
+	PrecheckNoScore PrecheckAction = "no_score"
+	PrecheckScore   PrecheckAction = "score"
+)
+
+type HumanScoreResult struct {
+	Action          PrecheckAction
+	Score           int
+	CategoryID      string
+	RubricID        string
+	DimensionScores map[string]int
+	Penalties       []string
+	Boosts          []string
+	Reason          string
+}
+
+type questionMeta struct {
+	QuestionType     string
+	ChoiceSemantics  string
+	ChoiceOptionText map[string]string
+}
+
+func (e *AnswerEvaluator) EvaluateHumanScoring(question, answer string, isChoice bool, jobRoleSet bool, meta *questionMeta) HumanScoreResult {
+	precheck := e.precheckHuman(answer, isChoice, jobRoleSet)
+	if precheck.Action != PrecheckScore {
+		return precheck
+	}
+
+	if isChoice {
+		score := e.scoreChoice(answer, meta)
+		return HumanScoreResult{
+			Action:     PrecheckScore,
+			Score:      score,
+			CategoryID: "generic",
+			RubricID:   "choice_default",
+		}
+	}
+
+	category := e.categorizeQuestion(question)
+	rubric := rubricForCategory(category)
+	signals := extractSignals(answer, category)
+	dimensionScores := scoreDimensions(rubric, signals, answer)
+	rawScore := scoreFromDimensions(rubric, dimensionScores)
+	score, penalties, boosts := applyPenaltiesAndBoosts(rawScore, signals)
+
+	return HumanScoreResult{
+		Action:          PrecheckScore,
+		Score:           score,
+		CategoryID:      category,
+		RubricID:        rubric,
+		DimensionScores: dimensionScores,
+		Penalties:       penalties,
+		Boosts:          boosts,
+	}
+}
+
+func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet bool) HumanScoreResult {
+	answerTrimmed := strings.TrimSpace(answer)
+	_ = jobRoleSet
+
+	if isChoice {
+		return HumanScoreResult{Action: PrecheckScore}
+	}
+
+	if len([]rune(answerTrimmed)) < 5 {
+		return HumanScoreResult{Action: PrecheckIgnore, Reason: "too_short_ignore"}
+	}
+
+	skipPhrases := []string{
+		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし", "ない",
+	}
+	normalized := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(answerTrimmed), " ", ""), "　", "")
+	for _, phrase := range skipPhrases {
+		if strings.Contains(normalized, phrase) {
+			return HumanScoreResult{Action: PrecheckSkip, Reason: "skip_phrase"}
+		}
+	}
+
+	if len([]rune(answerTrimmed)) < 10 {
+		return HumanScoreResult{Action: PrecheckNoScore, Reason: "too_short_no_score"}
+	}
+
+	return HumanScoreResult{Action: PrecheckScore}
+}
+
+func (e *AnswerEvaluator) categorizeQuestion(question string) string {
+	q := strings.ToLower(question)
+	if containsAny(q, []string{"興味", "きっかけ", "理由", "魅力", "なぜ"}) {
+		return "motivation"
+	}
+	if containsAny(q, []string{"作った", "開発", "実装", "制作", "プロジェクト", "成果物", "github"}) {
+		return "experience"
+	}
+	if containsAny(q, []string{"意見", "食い違い", "合意", "調整", "衝突", "まとめ", "折衷", "合意形成"}) {
+		return "collaboration"
+	}
+	if containsAny(q, []string{"itに詳しくない", "職員", "説明", "理解確認", "伝え方", "使い方", "現場"}) {
+		return "communication_non_it"
+	}
+	if containsAny(q, []string{"ui", "ux", "使いやすさ", "試して", "ユーザ", "改善", "反応", "導線"}) {
+		return "ui_ux"
+	}
+	return "generic"
+}
+
+func rubricForCategory(category string) string {
+	switch category {
+	case "collaboration":
+		return "collaboration_rubric"
+	case "communication_non_it":
+		return "communication_non_it_rubric"
+	case "ui_ux":
+		return "ui_ux_rubric"
+	default:
+		return "generic_text_rubric"
+	}
+}
+
+type signalSet struct {
+	hasConcreteExample   bool
+	hasAction            bool
+	hasResult            bool
+	hasReason            bool
+	hasNumbersOrTime     bool
+	hasCollaborationTerm bool
+	hasNonITTerm         bool
+	hasUxTerm            bool
+	contradiction        bool
+}
+
+func extractSignals(answer string, category string) signalSet {
+	lower := strings.ToLower(answer)
+	return signalSet{
+		hasConcreteExample: containsAny(lower, []string{"例えば", "たとえば", "具体的", "実際に", "経験", "した時", "したとき"}),
+		hasAction:          containsAny(lower, []string{"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証"}),
+		hasResult:          containsAny(lower, []string{"結果", "成果", "達成", "改善された", "向上", "成功", "失敗"}),
+		hasReason:          containsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
+		hasNumbersOrTime:   regexp.MustCompile(`[0-9]`).MatchString(lower) || containsAny(lower, []string{"ヶ月", "年", "週間", "日間", "%", "人", "回"}),
+		hasCollaborationTerm: containsAny(lower, []string{
+			"合意", "調整", "衝突", "折衷", "意見", "まとめ",
+		}),
+		hasNonITTerm: containsAny(lower, []string{
+			"itに詳しくない", "非エンジニア", "職員", "現場", "利用者",
+		}),
+		hasUxTerm: containsAny(lower, []string{
+			"ui", "ux", "ユーザ", "導線", "使いやす", "反応", "テスト",
+		}),
+		contradiction: false,
+	}
+}
+
+func scoreDimensions(rubric string, signals signalSet, answer string) map[string]int {
+	length := len([]rune(strings.TrimSpace(answer)))
+	scores := map[string]int{
+		"relevance":   1,
+		"specificity": 0,
+		"reasoning":   0,
+		"credibility": 1,
+	}
+
+	if rubric == "collaboration_rubric" && !signals.hasCollaborationTerm {
+		scores["relevance"] = 1
+	} else if rubric == "communication_non_it_rubric" && !signals.hasNonITTerm {
+		scores["relevance"] = 1
+	} else if rubric == "ui_ux_rubric" && !signals.hasUxTerm {
+		scores["relevance"] = 1
+	}
+
+	if signals.hasConcreteExample && signals.hasAction {
+		scores["relevance"] = 3
+	} else if length >= 20 {
+		scores["relevance"] = 2
+	}
+
+	if signals.hasConcreteExample && signals.hasNumbersOrTime {
+		scores["specificity"] = 3
+	} else if signals.hasConcreteExample {
+		scores["specificity"] = 2
+	} else if length >= 20 {
+		scores["specificity"] = 1
+	}
+
+	if signals.hasReason && (signals.hasAction || signals.hasResult) {
+		scores["reasoning"] = 3
+	} else if signals.hasReason {
+		scores["reasoning"] = 2
+	} else if length >= 30 {
+		scores["reasoning"] = 1
+	}
+
+	if signals.contradiction {
+		scores["credibility"] = 0
+	} else if signals.hasNumbersOrTime {
+		scores["credibility"] = 3
+	} else if signals.hasConcreteExample {
+		scores["credibility"] = 2
+	}
+
+	return scores
+}
+
+func scoreFromDimensions(rubric string, dimensionScores map[string]int) int {
+	weights := map[string]float64{
+		"relevance":   0.35,
+		"specificity": 0.30,
+		"reasoning":   0.20,
+		"credibility": 0.15,
+	}
+
+	switch rubric {
+	case "collaboration_rubric":
+		weights["specificity"] = 0.35
+		weights["reasoning"] = 0.30
+	case "communication_non_it_rubric":
+		weights["relevance"] = 0.35
+		weights["reasoning"] = 0.30
+	case "ui_ux_rubric":
+		weights["specificity"] = 0.35
+	}
+
+	sum := 0.0
+	maxSum := 0.0
+	for key, weight := range weights {
+		sum += weight * float64(dimensionScores[key])
+		maxSum += weight * 3.0
+	}
+	if maxSum == 0 {
+		return 0
+	}
+	score := (sum / maxSum) * 100.0
+	return int(math.Round(score))
+}
+
+func applyPenaltiesAndBoosts(score int, signals signalSet) (int, []string, []string) {
+	penalties := []string{}
+	boosts := []string{}
+	finalScore := score
+
+	if !signals.hasConcreteExample && !signals.hasAction {
+		finalScore -= 10
+		penalties = append(penalties, "too_generic")
+	}
+	if signals.contradiction {
+		finalScore -= 20
+		penalties = append(penalties, "contradiction")
+	}
+	if signals.hasNumbersOrTime {
+		finalScore += 5
+		boosts = append(boosts, "evidence")
+	}
+
+	if finalScore < 0 {
+		finalScore = 0
+	}
+	if finalScore > 100 {
+		finalScore = 100
+	}
+
+	return finalScore, penalties, boosts
+}
+
+func (e *AnswerEvaluator) scoreChoice(answer string, meta *questionMeta) int {
+	choice := strings.ToUpper(strings.TrimSpace(answer))
+	direction := "neutral"
+	if meta != nil && meta.ChoiceSemantics != "" {
+		direction = meta.ChoiceSemantics
+	}
+
+	switch direction {
+	case "higher_is_better":
+		return mapChoice(choice, []int{100, 80, 60, 40, 20})
+	case "lower_is_better":
+		return mapChoice(choice, []int{20, 40, 60, 80, 100})
+	default:
+		return mapChoice(choice, []int{100, 80, 60, 40, 20})
+	}
+}
+
+func mapChoice(choice string, values []int) int {
+	switch choice {
+	case "A", "1":
+		return values[0]
+	case "B", "2":
+		return values[1]
+	case "C", "3":
+		return values[2]
+	case "D", "4":
+		return values[3]
+	case "E", "5":
+		return values[4]
+	default:
+		return 60
+	}
+}
+
+func containsAny(s string, terms []string) bool {
+	for _, term := range terms {
+		if strings.Contains(s, strings.ToLower(term)) {
+			return true
+		}
+	}
+	return false
 }

@@ -119,8 +119,25 @@ export function MuiChat() {
   const [showEndChatModal, setShowEndChatModal] = useState(false)
   const [showTerminationModal, setShowTerminationModal] = useState(false)
   const [otherChoiceActive, setOtherChoiceActive] = useState(false)
+  const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const progressTotals = (() => {
+    if (!phaseProgresses || phaseProgresses.length === 0) return null
+    let valid = 0
+    let asked = 0
+    for (const phase of phaseProgresses) {
+      asked += phase.questions_asked || 0
+      valid += phase.valid_answers || 0
+    }
+    if (asked <= 0) return null
+    return {
+      valid,
+      required: asked,
+      percent: Math.round((valid / asked) * 100),
+    }
+  })()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -136,7 +153,11 @@ export function MuiChat() {
     const initializeChat = async () => {
       // ユーザー情報を初期化
       const user = authService.getStoredUser()
-      const currentUserId = user ? user.user_id : 1
+      if (!user || !user.name || !user.target_level) {
+        router.replace('/onboarding')
+        return
+      }
+      const currentUserId = user.user_id
       setUserId(currentUserId)
       
       // セッションIDの取得優先順位:
@@ -184,6 +205,9 @@ export function MuiChat() {
           setTotalQuestions(restoredTotalQuestions)
           const savedPhases = sessionStorage.getItem('phaseProgress')
           const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
+          if (Array.isArray(restoredPhases)) {
+            setPhaseProgresses(restoredPhases)
+          }
           
           // 進捗状況を通知（履歴復元時）
           setTimeout(() => {
@@ -313,6 +337,7 @@ export function MuiChat() {
           sessionStorage.setItem('totalQuestions', String(newTotalQuestions))
           if (response.all_phases) {
             sessionStorage.setItem('phaseProgress', JSON.stringify(response.all_phases))
+            setPhaseProgresses(response.all_phases)
           }
           
           // 進捗状況を親コンポーネントに通知（非同期で実行）
@@ -331,7 +356,10 @@ export function MuiChat() {
           console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
           console.log('[MUI Chat] evaluated_categories:', response.evaluated_categories, 'total:', response.total_categories)
           
-          const allCompleted = response.all_phases?.every((phase: any) => phase.max_questions > 0 && phase.questions_asked >= phase.max_questions) ?? false
+          const allCompleted = response.all_phases?.every((phase: any) => {
+            const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
+            return required > 0 && phase.valid_answers >= required
+          }) ?? false
 
           const completionText =
             response.response?.includes('分析が完了しました') ||
@@ -676,8 +704,8 @@ export function MuiChat() {
             IT業界キャリアエージェント
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            AI適性診断 - {questionCount}/{totalQuestions} 問完了 
-            {questionCount > 0 && ` (${Math.round((questionCount / totalQuestions) * 100)}%)`}
+            AI適性診断 - {(progressTotals?.valid ?? questionCount)}/{(progressTotals?.required ?? totalQuestions)} 問完了 
+            {((progressTotals?.valid ?? questionCount) > 0) && ` (${progressTotals?.percent ?? Math.round((questionCount / totalQuestions) * 100)}%)`}
           </Typography>
         </Box>
         <Button

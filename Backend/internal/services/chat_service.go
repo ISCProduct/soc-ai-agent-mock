@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -206,6 +207,12 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		}
 	}
 
+	if jobCategoryID != 0 {
+		if err := s.completeJobAnalysisPhase(req.UserID, req.SessionID); err != nil {
+			fmt.Printf("Warning: failed to complete job analysis phase: %v\n", err)
+		}
+	}
+
 	// 2.5. 回答の妥当性チェック（保存後のhistoryを使用）
 	handled, response, err := s.checkAnswerValidity(ctx, history, req.Message, req.UserID, req.SessionID)
 	if err != nil {
@@ -214,6 +221,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	// 無効な回答の場合は、ここで処理を終了
 	if handled {
+		currentPhase, phaseErr := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
+		if phaseErr == nil {
+			if err := s.updatePhaseProgress(currentPhase, false); err != nil {
+				fmt.Printf("Warning: failed to update phase progress for invalid answer: %v\n", err)
+			}
+		}
+
 		validation, err := s.sessionValidationRepo.GetOrCreate(req.SessionID)
 		if err != nil {
 			fmt.Printf("Warning: failed to get validation: %v\n", err)
@@ -279,6 +293,70 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 2.7. フェーズ進捗を更新（有効な回答のみ）
 	if err := s.updatePhaseProgress(currentPhase, true); err != nil {
 		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
+	}
+
+	allPhases, err := s.phaseRepo.FindAll()
+	if err != nil {
+		fmt.Printf("Warning: failed to get phases: %v\n", err)
+	}
+	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
+	completedPhaseCount := 0
+	phaseByID := make(map[uint]*models.AnalysisPhase, len(allPhases))
+	for i := range allPhases {
+		phaseByID[allPhases[i].ID] = &allPhases[i]
+	}
+	for _, p := range completedProgresses {
+		phase := p.Phase
+		if phase == nil {
+			phase = phaseByID[p.PhaseID]
+		}
+		if isPhaseComplete(p.ValidAnswers, phase) {
+			completedPhaseCount++
+		}
+	}
+	if completedPhaseCount == len(allPhases) && len(allPhases) > 0 {
+		completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
+		assistantMsg := &models.ChatMessage{
+			SessionID: req.SessionID,
+			UserID:    req.UserID,
+			Role:      "assistant",
+			Content:   completionMsg,
+		}
+		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+			fmt.Printf("Warning: failed to save completion message: %v\n", err)
+		}
+		allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
+		evaluatedCategoriesCount := 0
+		scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
+		if err != nil {
+			fmt.Printf("Warning: failed to get scores for completion response: %v\n", err)
+		} else {
+			seenCategories := make(map[string]bool)
+			for _, score := range scores {
+				if score.Score != 0 {
+					seenCategories[score.WeightCategory] = true
+				}
+			}
+			evaluatedCategoriesCount = len(seenCategories)
+		}
+		totalMinQuestions := 0
+		for _, phase := range allPhases {
+			if phase.MaxQuestions > 0 {
+				totalMinQuestions += phase.MaxQuestions
+			} else {
+				totalMinQuestions += phase.MinQuestions
+			}
+		}
+		return &ChatResponse{
+			Response:            completionMsg,
+			IsComplete:          true,
+			TotalQuestions:      totalMinQuestions,
+			AnsweredQuestions:   countUserAnswers(history),
+			EvaluatedCategories: evaluatedCategoriesCount,
+			TotalCategories:     10,
+			AllPhases:           allPhasesInfo,
+			CurrentPhase:        currentPhaseInfo,
+		}, nil
 	}
 
 	// 3. ユーザーの回答から重み係数を判定・更新
@@ -433,22 +511,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	// 5. フェーズベースの完了判定
 	// 全フェーズが完了しているかチェック
-	allPhases, err := s.phaseRepo.FindAll()
-	if err != nil {
-		fmt.Printf("Warning: failed to get phases: %v\n", err)
-	}
-	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	completedPhaseCount := 0
-	phaseByID := make(map[uint]*models.AnalysisPhase, len(allPhases))
-	for i := range allPhases {
-		phaseByID[allPhases[i].ID] = &allPhases[i]
-	}
+	completedPhaseCount = 0
 	for _, p := range completedProgresses {
 		phase := p.Phase
 		if phase == nil {
 			phase = phaseByID[p.PhaseID]
 		}
-		if isPhaseComplete(p.QuestionsAsked, phase) {
+		if isPhaseComplete(p.ValidAnswers, phase) {
 			completedPhaseCount++
 		}
 	}
@@ -512,10 +581,14 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// フェーズ情報を構築
 	allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 
-	// フェーズの最大質問数の合計を計算
+	// フェーズの質問数合計を計算（最大が無い場合は最小を採用）
 	totalMaxQuestions := 0
 	for _, phase := range allPhases {
-		totalMaxQuestions += phase.MaxQuestions
+		if phase.MaxQuestions > 0 {
+			totalMaxQuestions += phase.MaxQuestions
+		} else {
+			totalMaxQuestions += phase.MinQuestions
+		}
 	}
 
 	return &ChatResponse{
@@ -525,58 +598,50 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		CurrentPhase:        currentPhaseInfo,
 		AllPhases:           allPhasesInfo,
 		IsComplete:          isComplete,
-		TotalQuestions:      totalMaxQuestions, // 全フェーズの最大質問数の合計
+		TotalQuestions:      totalMaxQuestions, // 全フェーズの最低質問数合計（最大が無い場合）
 		AnsweredQuestions:   answeredCount,
 		EvaluatedCategories: len(evaluatedCategories),
 		TotalCategories:     10,
 	}, nil
 }
 
+func (s *ChatService) completeJobAnalysisPhase(userID uint, sessionID string) error {
+	if s.phaseRepo == nil || s.progressRepo == nil {
+		return nil
+	}
+	phase, err := s.phaseRepo.FindByName("job_analysis")
+	if err != nil || phase == nil {
+		return nil
+	}
+	progress, err := s.progressRepo.FindOrCreate(userID, sessionID, phase.ID)
+	if err != nil {
+		return err
+	}
+	required := phase.MaxQuestions
+	if required <= 0 {
+		required = phase.MinQuestions
+	}
+	if required <= 0 || progress.IsCompleted {
+		return nil
+	}
+	if progress.ValidAnswers < required {
+		progress.ValidAnswers = required
+	}
+	if progress.QuestionsAsked < required {
+		progress.QuestionsAsked = required
+	}
+	progress.CompletionScore = 100
+	progress.IsCompleted = true
+	now := time.Now()
+	progress.CompletedAt = &now
+	if progress.Phase == nil {
+		progress.Phase = phase
+	}
+	return s.progressRepo.Update(progress)
+}
+
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新
 func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) error {
-	// 回答の妥当性を事前チェック
-	messageTrimmed := strings.TrimSpace(message)
-
-	// 1. 空または極端に短い回答（5文字未満は無視）
-	if len([]rune(messageTrimmed)) < 5 {
-		fmt.Printf("Answer too short (%d chars), skipping analysis\n", len([]rune(messageTrimmed)))
-		return nil
-	}
-
-	// 2. 「わからない」などの回答パターンを検出（より厳格に）
-	lowConfidencePatterns := []string{
-		"わからない", "分からない", "わかりません", "分かりません",
-		"よくわからない", "よく分からない", "不明", "知らない", "しらない",
-		"特にない", "思いつかない", "特に無い", "ありません", "特になし", "なし",
-		"無い", "ない", "いいえ", "とくにない", "とくになし",
-	}
-
-	isLowConfidence := false
-	messageNormalized := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(messageTrimmed), " ", ""), "　", "")
-
-	// 短い回答で否定的な内容の場合
-	if len([]rune(messageTrimmed)) < 15 {
-		for _, pattern := range lowConfidencePatterns {
-			if strings.Contains(messageNormalized, pattern) {
-				isLowConfidence = true
-				fmt.Printf("Low confidence answer detected: '%s' contains '%s'\n", messageTrimmed, pattern)
-				break
-			}
-		}
-	}
-
-	// わからない回答の場合は、スキップ
-	if isLowConfidence {
-		fmt.Printf("Skipping analysis for low confidence answer\n")
-		return nil
-	}
-
-	// 3. 10文字以上の回答のみAI分析を実行
-	if len([]rune(messageTrimmed)) < 10 {
-		fmt.Printf("Answer too short for meaningful analysis (%d chars): %s\n", len([]rune(messageTrimmed)), messageTrimmed)
-		return nil
-	}
-
 	// 会話履歴から直近の質問を取得
 	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
 	if err != nil {
@@ -601,26 +666,20 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		return nil
 	}
 
-	if jobCategoryID == 0 {
-		fmt.Printf("Skipping job-fit scoring because job category is not set\n")
-		return nil
-	}
-
 	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
 	isChoice := !isTextBasedQuestion(lastQuestion)
 
-	evaluation, err := s.evaluateJobFitScoreWithAI(ctx, jobCategoryID, lastQuestion, message, isChoice)
-	if err != nil {
-		fmt.Printf("Warning: failed to evaluate job fit: %v\n", err)
+	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, message, isChoice, jobCategoryID != 0, nil)
+	if result.Action != PrecheckScore {
+		fmt.Printf("Skipping scoring due to precheck: %s\n", result.Reason)
+		return nil
+	}
+	if result.Score <= 0 {
+		fmt.Printf("No human score applied (score=%d)\n", result.Score)
 		return nil
 	}
 
-	if evaluation.Score <= 0 {
-		fmt.Printf("No job-fit score applied (score=%d)\n", evaluation.Score)
-		return nil
-	}
-
-	return s.updateCategoryScore(userID, sessionID, targetCategory, evaluation.Score)
+	return s.updateCategoryScore(userID, sessionID, targetCategory, result.Score)
 }
 
 // generateStrategicQuestion AIが戦略的に次の質問を生成
@@ -644,12 +703,28 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		askedQuestionsText += fmt.Sprintf("\n**上記%d個の質問と類似・重複する質問は絶対に生成しないでください**\n", questionCount)
 	}
 
-	// スコア状況の分析
+	phaseCategories := map[string][]string{
+		"job_analysis":      {"技術志向", "創造性志向", "成長志向", "安定志向"},
+		"interest_analysis": {"技術志向", "創造性志向", "成長志向", "チャレンジ志向"},
+		"aptitude_analysis": {"コミュニケーション力", "チームワーク志向", "リーダーシップ志向", "細部志向"},
+		"future_analysis":   {"安定志向", "成長志向", "ワークライフバランス", "チャレンジ志向"},
+	}
+
+	allowedCategories := allCategories
+	phaseName := ""
+	if currentPhase != nil && currentPhase.Phase != nil {
+		phaseName = currentPhase.Phase.PhaseName
+		if phaseAllowed, ok := phaseCategories[phaseName]; ok && len(phaseAllowed) > 0 {
+			allowedCategories = phaseAllowed
+		}
+	}
+
+	// スコア状況の分析（フェーズ対象カテゴリのみ）
 	scoreAnalysis := "## 現在の評価状況\n"
 	evaluatedCategories := []string{}
 	unevaluatedCategories := []string{}
 
-	for _, cat := range allCategories {
+	for _, cat := range allowedCategories {
 		score, exists := scoreMap[cat]
 		if exists && score != 0 {
 			scoreAnalysis += fmt.Sprintf("- %s: %d点\n", cat, score)
@@ -678,7 +753,8 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	} else {
 		// 全カテゴリ評価済みなら、スコアが中途半端なものを深掘り
 		targetCategory = ""
-		for cat, score := range scoreMap {
+		for _, cat := range allowedCategories {
+			score := scoreMap[cat]
 			if score > -3 && score < 3 {
 				targetCategory = cat
 				questionPurpose = fmt.Sprintf("評価が曖昧な「%s」をより明確に判定するため", cat)
@@ -689,7 +765,8 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 		if targetCategory == "" {
 			// 最もスコアが高いカテゴリを深掘り
 			highestScore := -100
-			for cat, score := range scoreMap {
+			for _, cat := range allowedCategories {
+				score := scoreMap[cat]
 				if score > highestScore {
 					highestScore = score
 					targetCategory = cat
@@ -727,20 +804,28 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	// フェーズ情報を追加
 	phaseContext := ""
 	if currentPhase != nil && currentPhase.Phase != nil {
-		phaseContext = fmt.Sprintf(`
+		if currentPhase.Phase.MaxQuestions > 0 {
+			phaseContext = fmt.Sprintf(`
 ## 現在の分析フェーズ: %s
 %s
 このフェーズでは%dつ〜%dつの質問を行います。現在%d個目の質問です。
 フェーズの目的に沿った質問を生成してください。
 `, currentPhase.Phase.DisplayName, currentPhase.Phase.Description,
-			currentPhase.Phase.MinQuestions, currentPhase.Phase.MaxQuestions,
-			currentPhase.QuestionsAsked+1)
+				currentPhase.Phase.MinQuestions, currentPhase.Phase.MaxQuestions,
+				currentPhase.QuestionsAsked+1)
+		} else {
+			phaseContext = fmt.Sprintf(`
+## 現在の分析フェーズ: %s
+%s
+このフェーズでは最低%dつの質問を行います。現在%d個目の質問です。
+フェーズの目的に沿った質問を生成してください。
+`, currentPhase.Phase.DisplayName, currentPhase.Phase.Description,
+				currentPhase.Phase.MinQuestions,
+				currentPhase.QuestionsAsked+1)
+		}
 	}
 	choiceGuidance := ""
-	phaseName := ""
-	if currentPhase != nil && currentPhase.Phase != nil {
-		phaseName = currentPhase.Phase.PhaseName
-	}
+	// phaseName はフェーズカテゴリ選定で取得済み
 	forceTextQuestion := shouldForceTextQuestion(history, currentPhase)
 	if phaseName != "" {
 		switch phaseName {
@@ -911,17 +996,17 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 **志望職種: %s, 業界ID: %d, 職種ID: %d を考慮して、この職種に相応しい文脈で質問を生成してください。特に「技術志向」を評価する場合は、職種がエンジニアであればプログラミングについて、非エンジニア職種ではITツール活用や効率化の関心について聞き、プログラミング経験を前提としないでください。**
 
 質問のみを返してください。説明や補足は一切不要です。`,
-		phaseContext,
-		choiceGuidance,
-		historyText,
-		scoreAnalysis,
-		askedQuestionsText,
-		questionPurpose,
-		targetCategory,
-		description,
-		jobCategoryName,
-		industryID,
-		jobCategoryID)
+			phaseContext,
+			choiceGuidance,
+			historyText,
+			scoreAnalysis,
+			askedQuestionsText,
+			questionPurpose,
+			targetCategory,
+			description,
+			jobCategoryName,
+			industryID,
+			jobCategoryID)
 	}
 
 	questionText, err := s.aiCallWithRetries(ctx, prompt)
@@ -2449,8 +2534,8 @@ func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress,
 		progress.InvalidAnswers++
 	}
 
-	progress.CompletionScore = phaseCompletionScore(progress.QuestionsAsked, progress.Phase)
-	newIsCompleted := isPhaseComplete(progress.QuestionsAsked, progress.Phase)
+	progress.CompletionScore = phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
+	newIsCompleted := isPhaseComplete(progress.ValidAnswers, progress.Phase)
 	if newIsCompleted {
 		if !progress.IsCompleted {
 			now := time.Now()
@@ -2499,11 +2584,11 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 		}
 
 		if progress, exists := progressMap[phase.ID]; exists {
-			completionScore := phaseCompletionScore(progress.QuestionsAsked, &phase)
+			completionScore := phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
 			pp.QuestionsAsked = progress.QuestionsAsked
 			pp.ValidAnswers = progress.ValidAnswers
 			pp.CompletionScore = completionScore
-			pp.IsCompleted = isPhaseComplete(progress.QuestionsAsked, &phase)
+			pp.IsCompleted = isPhaseComplete(progress.ValidAnswers, &phase)
 
 			if !pp.IsCompleted && current == nil {
 				current = &pp
@@ -2516,18 +2601,11 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 	return result, current, nil
 }
 
-func phaseCompletionScore(questionsAsked int, phase *models.AnalysisPhase) float64 {
-	if phase == nil {
+func phaseCompletionScore(validAnswers, questionsAsked int) float64 {
+	if questionsAsked <= 0 {
 		return 0
 	}
-	required := phase.MaxQuestions
-	if required <= 0 {
-		required = phase.MinQuestions
-	}
-	if required <= 0 {
-		return 0
-	}
-	score := (float64(questionsAsked) / float64(required)) * 100
+	score := (float64(validAnswers) / float64(questionsAsked)) * 100
 	if score > 100 {
 		return 100
 	}
@@ -2537,7 +2615,7 @@ func phaseCompletionScore(questionsAsked int, phase *models.AnalysisPhase) float
 	return score
 }
 
-func isPhaseComplete(questionsAsked int, phase *models.AnalysisPhase) bool {
+func isPhaseComplete(validAnswers int, phase *models.AnalysisPhase) bool {
 	if phase == nil {
 		return false
 	}
@@ -2548,7 +2626,7 @@ func isPhaseComplete(questionsAsked int, phase *models.AnalysisPhase) bool {
 	if required <= 0 {
 		return false
 	}
-	return questionsAsked >= required
+	return validAnswers >= required
 }
 
 // isChoiceAnswer 選択肢回答かどうかを判定
@@ -2603,19 +2681,12 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 
 	fmt.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
 
-	score := 0
-	if jobCategoryID != 0 {
-		evaluation, err := s.evaluateJobFitScoreWithAI(ctx, jobCategoryID, lastQuestion, answer, true)
-		if err != nil {
-			fmt.Printf("Warning: failed to evaluate job fit for choice answer: %v\n", err)
-		} else {
-			score = evaluation.Score
-		}
+	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
+	if result.Action != PrecheckScore {
+		fmt.Printf("Skipping choice scoring due to precheck: %s\n", result.Reason)
+		return nil
 	}
-	if score == 0 {
-		// フォールバック: 選択肢をスコアに変換（A=100, B=67, C=33, D=0 のスケール）
-		score = s.convertChoiceToScore(answer)
-	}
+	score := result.Score
 
 	// スコアを保存または更新
 	return s.updateCategoryScore(userID, sessionID, targetCategory, score)
@@ -2776,10 +2847,14 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 		}
 		fmt.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
 	} else {
-		// 平均値で更新（複数回の回答を考慮）
-		newScore := (existingScore.Score + score) / 2
-		existingScore.Score = newScore
-		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, newScore-existingScore.Score); err != nil {
+		// 移動平均で更新（直近回答の影響を反映）
+		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
+		delta := newScore - existingScore.Score
+		if delta == 0 {
+			fmt.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
+			return nil
+		}
+		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, delta); err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
 		fmt.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)

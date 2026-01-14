@@ -14,13 +14,27 @@ import (
 type ChatController struct {
 	chatService     *services.ChatService
 	matchingService *services.MatchingService
+	analysisService *services.AnalysisScoringService
 }
 
-func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService) *ChatController {
+const minEvaluatedCategoriesForFinal = 4
+
+func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService) *ChatController {
 	return &ChatController{
 		chatService:     chatService,
 		matchingService: matchingService,
+		analysisService: analysisService,
 	}
+}
+
+func countEvaluatedCategories(scores []models.UserWeightScore) int {
+	count := 0
+	for _, score := range scores {
+		if score.Score != 0 {
+			count++
+		}
+	}
+	return count
 }
 
 // Chat チャット処理
@@ -159,6 +173,12 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 			fmt.Printf("[GetRecommendations] Diagnostics error: %v\n", diagErr)
 		}
 
+		userScores, scoreErr := c.chatService.GetUserScores(uint(userID), sessionID)
+		if scoreErr != nil {
+			fmt.Printf("[GetRecommendations] Failed to load user scores for provisional status: %v\n", scoreErr)
+			userScores = []models.UserWeightScore{}
+		}
+
 		reason := "matching_results_empty"
 		if diagnostics != nil {
 			if diagnostics.UserScoreCount == 0 {
@@ -169,15 +189,21 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		}
 
 		type RecommendationResponse struct {
-			Recommendations []interface{}                 `json:"recommendations"`
-			Reason          string                        `json:"reason,omitempty"`
-			Diagnostics     *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
+			Recommendations     []interface{}                 `json:"recommendations"`
+			Reason              string                        `json:"reason,omitempty"`
+			Diagnostics         *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
+			EvaluatedCategories int                           `json:"evaluated_categories"`
+			IsProvisional       bool                          `json:"is_provisional"`
 		}
 
+		evaluatedCategories := countEvaluatedCategories(userScores)
+		isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
 		response := RecommendationResponse{
-			Recommendations: []interface{}{},
-			Reason:          reason,
-			Diagnostics:     diagnostics,
+			Recommendations:     []interface{}{},
+			Reason:              reason,
+			Diagnostics:         diagnostics,
+			EvaluatedCategories: evaluatedCategories,
+			IsProvisional:       isProvisional,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -198,8 +224,18 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 	}
 
 	type RecommendationResponse struct {
-		Recommendations []CompanyRecommendation `json:"recommendations"`
+		Recommendations     []CompanyRecommendation `json:"recommendations"`
+		EvaluatedCategories int                     `json:"evaluated_categories"`
+		IsProvisional       bool                    `json:"is_provisional"`
 	}
+
+	userScores, err := c.chatService.GetUserScores(uint(userID), sessionID)
+	if err != nil {
+		fmt.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
+		userScores = []models.UserWeightScore{}
+	}
+	evaluatedCategories := countEvaluatedCategories(userScores)
+	isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
 
 	var items []CompanyRecommendation
 	for _, match := range matches {
@@ -222,7 +258,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 			ID:           int(match.Company.ID),
 			CategoryName: match.Company.Name,
 			Score:        int(match.MatchScore),
-			Reason:       generateMatchReason(match),
+			Reason:       services.BuildMatchReason(match, userScores),
 			Industry:     match.Company.Industry,
 			Location:     match.Company.Location,
 			Employees:    employeeCount,
@@ -231,11 +267,48 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 	}
 
 	response := RecommendationResponse{
-		Recommendations: items,
+		Recommendations:     items,
+		EvaluatedCategories: evaluatedCategories,
+		IsProvisional:       isProvisional,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// GetAnalysisSummary 4分析スコアと進捗を取得
+func (c *ChatController) GetAnalysisSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userIDStr := r.URL.Query().Get("user_id")
+	sessionID := r.URL.Query().Get("session_id")
+	if userIDStr == "" || sessionID == "" {
+		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+		return
+	}
+
+	if c.analysisService == nil {
+		http.Error(w, "analysis service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), uint(userID), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
 }
 
 // generateReasonForCategory カテゴリごとのマッチング理由を生成（フォールバック用）

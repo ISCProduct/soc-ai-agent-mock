@@ -75,6 +75,8 @@ func main() {
 	conversationContextRepo := repositories.NewConversationContextRepository(db)
 	companyRepo := repositories.NewCompanyRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
+	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
+	jobEmbeddingRepo := repositories.NewJobCategoryEmbeddingRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
@@ -82,11 +84,21 @@ func main() {
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo)
+	analysisService := services.NewAnalysisScoringService(
+		userWeightScoreRepo,
+		chatMessageRepo,
+		progressRepo,
+		conversationContextRepo,
+		userEmbeddingRepo,
+		jobEmbeddingRepo,
+		matchRepo,
+		nil,
+	)
 
 	// コントローラー層の初期化
 	authController := controllers.NewAuthController(authService)
 	oauthController := controllers.NewOAuthController(oauthService)
-	chatController := controllers.NewChatController(chatService, matchingService)
+	chatController := controllers.NewChatController(chatService, matchingService, analysisService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := &controllers.CompanyRelationController{DB: db}
 

@@ -444,6 +444,7 @@ export function CompanyResults({ userData, onResetAction }: { userData: UserData
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
+  const [isProvisional, setIsProvisional] = useState(false)
 
   // バックエンドからAI分析済みのスコアを取得
   useEffect(() => {
@@ -464,10 +465,12 @@ export function CompanyResults({ userData, onResetAction }: { userData: UserData
         const response = await fetch(`/api/chat/recommendations?user_id=1&session_id=${sessionId}&limit=10`)
         
         if (response.ok) {
-          const recommendations = await response.json()
+          const data = await response.json()
+          const recommendations = Array.isArray(data) ? data : data?.recommendations
+          setIsProvisional(Boolean(data?.is_provisional))
           
           // バックエンドのレスポンスをフロントエンドの形式に変換
-          const formattedCompanies = recommendations.map((rec: any) => ({
+          const formattedCompanies = (recommendations || []).map((rec: any) => ({
             id: rec.company_id,
             name: rec.company_name || `企業 ${rec.company_id}`,
             industry: rec.industry || "IT・ソフトウェア",
@@ -524,6 +527,11 @@ export function CompanyResults({ userData, onResetAction }: { userData: UserData
             <h2 className="text-3xl font-bold text-foreground mb-3 text-balance">
               あなたに適した企業を10社に絞り込みました
             </h2>
+            {isProvisional && (
+              <div className="flex justify-center mb-2">
+                <Badge variant="outline">暫定評価</Badge>
+              </div>
+            )}
             <p className="text-muted-foreground text-pretty">
               AIによる4段階の分析に基づいて、最適なIT企業をマッチングしました
             </p>

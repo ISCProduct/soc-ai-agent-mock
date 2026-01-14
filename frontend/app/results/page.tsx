@@ -130,6 +130,7 @@ function ResultsContent() {
   const [error, setError] = useState<string | null>(null)
   const [empty, setEmpty] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [isProvisional, setIsProvisional] = useState(false)
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [detailTab, setDetailTab] = useState(0)
   const [relations, setRelations] = useState<CapitalRelation[]>([])
@@ -164,6 +165,8 @@ function ResultsContent() {
         
         const data = await response.json()
         console.log('[Results] API Response:', data)
+
+        setIsProvisional(Boolean(data?.is_provisional))
         
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
           console.error('[Results] No recommendations available')
@@ -842,6 +845,9 @@ function ResultsContent() {
           <Typography variant="h4" fontWeight="bold" gutterBottom>
             🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
           </Typography>
+          {isProvisional && (
+            <Chip label="暫定評価" color="warning" variant="outlined" sx={{ mb: 1 }} />
+          )}
           <Typography variant="body1" color="text.secondary">
             AIによる詳細分析に基づいて、最適なIT企業をマッチングしました
           </Typography>

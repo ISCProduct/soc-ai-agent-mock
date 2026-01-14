@@ -135,12 +135,14 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
-		AvatarURL:   user.AvatarURL,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
 	}, nil
 }
 
@@ -235,12 +237,14 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 	}
 
 	return &AuthResponse{
-		UserID:      user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		TargetLevel: user.TargetLevel,
-		AvatarURL:   user.AvatarURL,
+		UserID:                   user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		IsGuest:                  user.IsGuest,
+		TargetLevel:              user.TargetLevel,
+		CertificationsAcquired:   user.CertificationsAcquired,
+		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
 	}, nil
 }
 

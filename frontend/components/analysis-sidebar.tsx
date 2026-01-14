@@ -90,8 +90,12 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
     const getPhasePercent = (phaseName: string, fallback: number) => {
         const phase = phaseProgressFor(phaseName)
         if (!phase) return fallback
-        if (phase.max_questions <= 0) return 0
-        return Math.min(100, Math.floor((phase.questions_asked / phase.max_questions) * 100))
+        const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
+        if (required > 0) {
+            return Math.min(100, Math.max(0, Math.floor((phase.valid_answers / required) * 100)))
+        }
+        if (phase.questions_asked <= 0) return 0
+        return Math.min(100, Math.floor((phase.valid_answers / phase.questions_asked) * 100))
     }
     const getPhaseStatus = (phaseName: string, defaultLabel: string) => {
         const phase = phaseProgressFor(phaseName)
@@ -101,7 +105,29 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
         return defaultLabel
     }
 
-    const fallbackOverall = totalQuestions > 0 ? Math.min(100, Math.floor((questionCount / totalQuestions) * 100)) : 0
+    const expectedTotalQuestions = (() => {
+        if (!phases || phases.length === 0) return totalQuestions
+        return phases.reduce((sum, phase) => {
+            const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
+            return sum + (required > 0 ? required : 0)
+        }, 0)
+    })()
+
+    const fallbackOverall = (() => {
+        if (!phases || phases.length === 0) {
+            return expectedTotalQuestions > 0
+                ? Math.min(100, Math.floor((questionCount / expectedTotalQuestions) * 100))
+                : 0
+        }
+        let valid = 0
+        let asked = 0
+        for (const phase of phases) {
+            asked += phase.questions_asked
+            valid += phase.valid_answers
+        }
+        if (asked <= 0) return 0
+        return Math.min(100, Math.floor((valid / asked) * 100))
+    })()
     const phasePercents = {
         job: getPhasePercent('job_analysis', fallbackOverall),
         interest: getPhasePercent('interest_analysis', fallbackOverall),
@@ -189,7 +215,7 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
                     AI分析進捗
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
-                    質問: {questionCount}/{totalQuestions} 完了 ({progress.overall}%)
+                    質問: {questionCount}/{expectedTotalQuestions} 完了 (想定{expectedTotalQuestions}問・{progress.overall}%)
                 </Typography>
 
                 <List sx={{p: 0}}>

@@ -25,6 +25,8 @@ export interface User {
   name: string
   is_guest: boolean
   target_level?: string
+  certifications_acquired?: string
+  certifications_in_progress?: string
   oauth_provider?: string
   avatar_url?: string
 }
@@ -35,6 +37,8 @@ export interface AuthResponse {
   name: string
   is_guest: boolean
   target_level?: string
+  certifications_acquired?: string
+  certifications_in_progress?: string
   oauth_provider?: string
   avatar_url?: string
   token?: string
@@ -54,11 +58,25 @@ export const authService = {
     return res.json()
   },
 
-  async register(email: string, password: string, name: string, targetLevel: string): Promise<AuthResponse> {
+  async register(
+    email: string,
+    password: string,
+    name: string,
+    targetLevel: string,
+    certificationsAcquired: string,
+    certificationsInProgress: string,
+  ): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name, target_level: targetLevel }),
+      body: JSON.stringify({
+        email,
+        password,
+        name,
+        target_level: targetLevel,
+        certifications_acquired: certificationsAcquired,
+        certifications_in_progress: certificationsInProgress,
+      }),
     })
     if (!res.ok) {
       const error = await res.text()
@@ -81,11 +99,23 @@ export const authService = {
     return res.json()
   },
 
-  async updateProfile(userId: number, name: string, targetLevel: string): Promise<AuthResponse> {
+  async updateProfile(
+    userId: number,
+    name: string,
+    targetLevel: string,
+    certificationsAcquired: string,
+    certificationsInProgress: string,
+  ): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/profile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, name, target_level: targetLevel }),
+      body: JSON.stringify({
+        user_id: userId,
+        name,
+        target_level: targetLevel,
+        certifications_acquired: certificationsAcquired,
+        certifications_in_progress: certificationsInProgress,
+      }),
     })
     if (!res.ok) {
       const error = await res.text()
@@ -113,6 +143,8 @@ export const authService = {
       name: fixMojibake(authResponse.name),
       is_guest: authResponse.is_guest,
       target_level: authResponse.target_level,
+      certifications_acquired: authResponse.certifications_acquired,
+      certifications_in_progress: authResponse.certifications_in_progress,
       oauth_provider: authResponse.oauth_provider,
       avatar_url: authResponse.avatar_url,
     }
