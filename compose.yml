@@ -24,6 +24,8 @@ services:
         max-file: "${LOG_MAX_FILE:-3}"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
+      - ANNOTATION_FONT_PATH=${ANNOTATION_FONT_PATH:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
+      - RAG_REVIEW_URL=${RAG_REVIEW_URL:-http://rag-review:9000}
 
   # MySQL Database
   db:
@@ -79,8 +81,30 @@ services:
     networks:
       - soc-ai-network
 
+  # Resume review RAG (DuckDuckGo + CrewAI)
+  rag-review:
+    build:
+      context: ./rag
+      dockerfile: Dockerfile
+    container_name: soc-ai-rag-review
+    profiles:
+      - rag
+    ports:
+      - "${RAG_REVIEW_PORT:-9000}:9000"
+    env_file:
+      - ./Backend/.env
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+    volumes:
+      - rag_data:/data
+    networks:
+      - soc-ai-network
+
 volumes:
   mysql_data:
+    driver: local
+  rag_data:
     driver: local
 
 networks:

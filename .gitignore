@@ -54,3 +54,4 @@ mysql/logs/
 /frontend/next-env.d.ts
 /frontend/components/analysis-loading.tsx
 /frontend/components/company-detail-modal.tsx
+/Backend/README_RESUME_REVIEW.md

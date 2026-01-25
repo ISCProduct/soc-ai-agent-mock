@@ -44,6 +44,13 @@ func (r *UserRepository) GetUserByID(id uint) (*models.User, error) {
 	return &user, nil
 }
 
+// ListUsers ユーザー一覧を取得
+func (r *UserRepository) ListUsers() ([]models.User, error) {
+	var users []models.User
+	err := r.db.Order("created_at desc").Find(&users).Error
+	return users, err
+}
+
 // UpdateUser ユーザー情報更新
 func (r *UserRepository) UpdateUser(user *models.User) error {
 	return r.db.Save(user).Error

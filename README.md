@@ -52,6 +52,19 @@ SERVER_PORT=8080
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 #  使用モデル
 OPENAI_MODEL=omuni
+
+# gBizInfo
+GBIZINFO_BASE_URL=https://api.biz-info.go.jp
+GBIZINFO_API_TOKEN=xxxxxxxxxxxxxxxx
+
+# AWS S3 (任意)
+AWS_REGION=ap-northeast-1
+AWS_S3_BUCKET=your-bucket
+AWS_S3_PREFIX=resume-uploads
+# 認証 (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY でも可)
+# AWS_ACCESS_KEY_ID=xxxxxxxxxxxxxxxxxxxx
+# AWS_SECRET_ACCESS_KEY=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+# ANNOTATION_FONT_PATH=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 ```
 
 ※ `Backend/internal/config/config.go` で読み込まれる環境変数名を使用しています（デフォルト値あり）。
@@ -94,6 +107,12 @@ go run ./cmd/migrate
 SERVER_PORT=8080 go run ./cmd/server
 # または API 実行バイナリが `cmd/api` にある場合:
 go run ./cmd/api
+
+- Cron実行（クローリング単発実行）
+
+```sh
+go run ./cmd/crawl
+```
 ```
 
 **開発用シードデータ**
@@ -151,6 +170,42 @@ npx playwright test
 ```sh
 docker build -t soc-backend:local Backend
 docker build -t soc-frontend:local frontend
+```
+
+**Docker Compose: 重いビルドを後回しにする手順（正式）**
+
+`rag-review` は依存が重いため、初回ビルドでは後回しにできます。
+`compose.yml` で `rag-review` に profile を付与済みです。
+
+- まず軽量サービスのみ起動
+
+```sh
+docker compose up -d --build
+```
+
+- 後から `rag-review` をビルド・起動
+
+```sh
+docker compose --profile rag build rag-review
+docker compose --profile rag up -d rag-review
+```
+
+**補足（依存解決の安定化）**
+
+`rag-review` の `pip install` が遅い/失敗する場合は、`rag/constraints.txt` の固定バージョンを使用してください。
+現在の例は以下です（必要に応じて更新）。
+
+```
+embedchain==0.1.114
+langchain==0.2.17
+langchain-community==0.2.19
+langchain-core==0.2.43
+langchain-openai==0.1.25
+langchain-text-splitters==0.2.4
+chromadb==0.4.24
+litellm==1.44.22
+openai==1.40.6
+tiktoken==0.7.0
 ```
 
 **よくあるトラブルと対処**
