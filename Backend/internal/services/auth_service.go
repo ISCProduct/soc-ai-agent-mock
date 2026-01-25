@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -25,6 +26,7 @@ type RegisterRequest struct {
 	Password                 string `json:"password"`
 	Name                     string `json:"name"`
 	TargetLevel              string `json:"target_level"`
+	SchoolName               string `json:"school_name"`
 	CertificationsAcquired   string `json:"certifications_acquired"`
 	CertificationsInProgress string `json:"certifications_in_progress"`
 }
@@ -40,6 +42,7 @@ type UpdateProfileRequest struct {
 	UserID                   uint   `json:"user_id"`
 	Name                     string `json:"name"`
 	TargetLevel              string `json:"target_level"`
+	SchoolName               string `json:"school_name"`
 	CertificationsAcquired   string `json:"certifications_acquired"`
 	CertificationsInProgress string `json:"certifications_in_progress"`
 }
@@ -51,6 +54,8 @@ type AuthResponse struct {
 	Name                     string `json:"name"`
 	IsGuest                  bool   `json:"is_guest"`
 	TargetLevel              string `json:"target_level"`
+	SchoolName               string `json:"school_name,omitempty"`
+	IsAdmin                  bool   `json:"is_admin"`
 	CertificationsAcquired   string `json:"certifications_acquired,omitempty"`
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`
@@ -68,6 +73,9 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 	if req.TargetLevel != "新卒" && req.TargetLevel != "中途" {
 		return nil, errors.New("target_level must be '新卒' or '中途'")
+	}
+	if strings.TrimSpace(req.SchoolName) == "" {
+		req.SchoolName = "学校法人岩崎学園情報科学専門学校"
 	}
 
 	// 既存ユーザーチェック
@@ -92,6 +100,8 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		Name:                     req.Name,
 		IsGuest:                  false,
 		TargetLevel:              req.TargetLevel,
+		SchoolName:               req.SchoolName,
+		IsAdmin:                  isAdminIdentity(req.Email, req.Name),
 		CertificationsAcquired:   req.CertificationsAcquired,
 		CertificationsInProgress: req.CertificationsInProgress,
 	}
@@ -106,6 +116,8 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 	}, nil
@@ -136,6 +148,7 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return nil, errors.New("invalid email or password")
 	}
+	promoteAdminIfMatched(user, s.userRepo)
 
 	return &AuthResponse{
 		UserID:                   user.ID,
@@ -143,6 +156,8 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -164,6 +179,7 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 		Name:        fmt.Sprintf("Guest_%s", guestID[:8]),
 		IsGuest:     true,
 		TargetLevel: "未設定",
+		SchoolName:  "学校法人岩崎学園情報科学専門学校",
 	}
 
 	if err := s.userRepo.CreateUser(user); err != nil {
@@ -176,6 +192,8 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -198,6 +216,8 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 	}, nil
@@ -226,6 +246,8 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 	if req.TargetLevel != "" {
 		user.TargetLevel = req.TargetLevel
 	}
+	// Always persist the provided school name, even when it is an empty string.
+	user.SchoolName = req.SchoolName
 	user.CertificationsAcquired = req.CertificationsAcquired
 	user.CertificationsInProgress = req.CertificationsInProgress
 
@@ -239,6 +261,8 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,

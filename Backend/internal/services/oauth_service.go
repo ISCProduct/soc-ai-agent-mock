@@ -116,6 +116,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 			if err := s.userRepo.UpdateUser(existingUser); err != nil {
 				return nil, fmt.Errorf("failed to update user: %w", err)
 			}
+			promoteAdminIfMatched(existingUser, s.userRepo)
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
@@ -127,6 +128,8 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 				AvatarURL:     userInfo.Picture,
 				IsGuest:       false,
 				TargetLevel:   "未設定",
+				SchoolName:    "学校法人岩崎学園情報科学専門学校",
+				IsAdmin:       isAdminIdentity(userInfo.Email, userInfo.Name),
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
@@ -140,6 +143,8 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -214,6 +219,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 			if err := s.userRepo.UpdateUser(existingUser); err != nil {
 				return nil, fmt.Errorf("failed to update user: %w", err)
 			}
+			promoteAdminIfMatched(existingUser, s.userRepo)
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
@@ -229,6 +235,8 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 				AvatarURL:     userInfo.AvatarURL,
 				IsGuest:       false,
 				TargetLevel:   "未設定",
+				SchoolName:    "学校法人岩崎学園情報科学専門学校",
+				IsAdmin:       isAdminIdentity(email, name),
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
@@ -242,6 +250,8 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		Name:                     user.Name,
 		IsGuest:                  user.IsGuest,
 		TargetLevel:              user.TargetLevel,
+		SchoolName:               user.SchoolName,
+		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,

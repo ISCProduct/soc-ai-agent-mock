@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -21,4 +22,25 @@ func (r *UserEmbeddingRepository) FindByUserAndSession(userID uint, sessionID st
 		return nil, err
 	}
 	return &embedding, nil
+}
+
+func (r *UserEmbeddingRepository) Upsert(userID uint, sessionID, profileText, embedding string) error {
+	var existing models.UserEmbedding
+	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).First(&existing).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			record := models.UserEmbedding{
+				UserID:      userID,
+				SessionID:   sessionID,
+				ProfileText: profileText,
+				Embedding:   embedding,
+			}
+			return r.db.Create(&record).Error
+		}
+		return err
+	}
+
+	existing.ProfileText = profileText
+	existing.Embedding = embedding
+	return r.db.Save(&existing).Error
 }

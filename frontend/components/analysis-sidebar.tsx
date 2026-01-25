@@ -29,9 +29,11 @@ import {
     Logout,
     History,
     ManageAccounts,
+    Description,
+    AdminPanelSettings,
 
 } from '@mui/icons-material'
-import {User} from '@/lib/auth'
+import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
 
 const DRAWER_WIDTH = 280
@@ -65,9 +67,25 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
     const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
+    const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
     const router = useRouter()
 
     useEffect(() => {
+        setIsAdmin(!!user.is_admin)
+        const refreshAdminFlag = async () => {
+            if (!user?.user_id || user.is_admin) return
+            try {
+                const fresh = await authService.getUser(user.user_id)
+                if (fresh?.is_admin) {
+                    setIsAdmin(true)
+                    authService.saveAuth({ ...fresh, user_id: fresh.user_id, is_guest: fresh.is_guest } as any)
+                }
+            } catch {
+                // ignore
+            }
+        }
+        refreshAdminFlag()
+
         const handleChatProgress = (event: CustomEvent) => {
             setMessageCount(event.detail.messageCount || 0)
             setQuestionCount(event.detail.questionCount || 0)
@@ -81,7 +99,7 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
         return () => {
             window.removeEventListener('chatProgress', handleChatProgress as EventListener)
         }
-    }, [])
+    }, [user])
 
     const phaseProgressFor = (phaseName: string) => {
         if (!phases) return null
@@ -329,6 +347,26 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
 
                 <ListItem disablePadding>
                     <ListItemButton
+                        onClick={() => router.push('/resume')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Description color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="履歴書レビュー"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
                         onClick={() => router.push('/onboarding')}
                         sx={{
                             borderRadius: 1,
@@ -346,6 +384,28 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
                         />
                     </ListItemButton>
                 </ListItem>
+
+                {isAdmin && (
+                    <ListItem disablePadding>
+                        <ListItemButton
+                            onClick={() => router.push('/admin')}
+                            sx={{
+                                borderRadius: 1,
+                            }}
+                        >
+                            <ListItemIcon sx={{minWidth: 36}}>
+                                <AdminPanelSettings color="primary"/>
+                            </ListItemIcon>
+                            <ListItemText
+                                primary="管理者機能"
+                                primaryTypographyProps={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                }}
+                            />
+                        </ListItemButton>
+                    </ListItem>
+                )}
             </Box>
         </Drawer>
     )

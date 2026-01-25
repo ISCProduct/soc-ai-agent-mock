@@ -23,6 +23,8 @@ type ChatService struct {
 	predefinedQuestionRepo  *repositories.PredefinedQuestionRepository
 	jobCategoryRepo         *repositories.JobCategoryRepository
 	userRepo                *repositories.UserRepository
+	userEmbeddingRepo       *repositories.UserEmbeddingRepository
+	jobEmbeddingRepo        *repositories.JobCategoryEmbeddingRepository
 	phaseRepo               *repositories.AnalysisPhaseRepository
 	progressRepo            *repositories.UserAnalysisProgressRepository
 	sessionValidationRepo   *repositories.SessionValidationRepository
@@ -40,6 +42,8 @@ func NewChatService(
 	predefinedQuestionRepo *repositories.PredefinedQuestionRepository,
 	jobCategoryRepo *repositories.JobCategoryRepository,
 	userRepo *repositories.UserRepository,
+	userEmbeddingRepo *repositories.UserEmbeddingRepository,
+	jobEmbeddingRepo *repositories.JobCategoryEmbeddingRepository,
 	phaseRepo *repositories.AnalysisPhaseRepository,
 	progressRepo *repositories.UserAnalysisProgressRepository,
 	sessionValidationRepo *repositories.SessionValidationRepository,
@@ -54,6 +58,8 @@ func NewChatService(
 		predefinedQuestionRepo:  predefinedQuestionRepo,
 		jobCategoryRepo:         jobCategoryRepo,
 		userRepo:                userRepo,
+		userEmbeddingRepo:       userEmbeddingRepo,
+		jobEmbeddingRepo:        jobEmbeddingRepo,
 		phaseRepo:               phaseRepo,
 		progressRepo:            progressRepo,
 		sessionValidationRepo:   sessionValidationRepo,
@@ -570,6 +576,12 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		// フォールバック: 空のAI応答の場合は簡易質問を返す
 		fmt.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
 		aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
+	}
+
+	if isComplete {
+		if err := s.ensureEmbeddings(ctx, req.UserID, req.SessionID, jobCategoryID); err != nil {
+			fmt.Printf("Warning: failed to ensure embeddings: %v\n", err)
+		}
 	}
 
 	// 7. 現在のスコアを取得
@@ -2382,6 +2394,9 @@ func isTextBasedQuestion(question string) bool {
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
 
+	// 職種選択系の質問は短い回答（単語）を許容
+	isJobSelection := isJobSelectionQuestionText(question)
+
 	// 記号のみの回答（A, B, 1, 2など）は有効
 	if len([]rune(a)) <= 3 && strings.ContainsAny(a, "ABCDEabcde12345①②③④⑤") {
 		fmt.Printf("[Validation] Fallback: Valid choice symbol: %s\n", a)
@@ -2423,6 +2438,11 @@ func isLikelyAnswer(answer, question string) bool {
 			fmt.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
 			return true
 		}
+	}
+
+	if !isJobSelection && looksLikeKeywordList(a) {
+		fmt.Printf("[Validation] Fallback: Keyword-only list detected: %s\n", a)
+		return false
 	}
 
 	// IT職種関連のキーワードを含むかチェック
@@ -2477,6 +2497,58 @@ func isLikelyAnswer(answer, question string) bool {
 	return false
 }
 
+func looksLikeKeywordList(answer string) bool {
+	normalized := strings.TrimSpace(answer)
+	if normalized == "" {
+		return false
+	}
+	if containsSentenceHint(normalized) {
+		return false
+	}
+
+	tokens := strings.FieldsFunc(normalized, func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\n', '\r', '、', ',', '・', '/', '／', '|':
+			return true
+		default:
+			return false
+		}
+	})
+
+	return len(tokens) >= 2
+}
+
+func containsSentenceHint(s string) bool {
+	hints := []string{
+		"です", "ます", "ました", "した", "して", "してい", "してる",
+		"いる", "ある", "なる", "たい", "たく", "と思う", "と考え", "と感じ",
+		"なりたい", "したい", "つもり", "予定",
+		"ので", "ため", "から", "として", "について",
+	}
+	for _, hint := range hints {
+		if strings.Contains(s, hint) {
+			return true
+		}
+	}
+	return strings.ContainsAny(s, "。？！?!")
+}
+
+func isJobSelectionQuestionText(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	keywords := []string{
+		"職種", "どの職種", "IT職種", "興味がありますか", "選んでください",
+		"まだ決めていない", "番号で答えても",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
 // containsGreeting: 簡易的な雑談フラグ（挨拶・感謝・了承など）
 func containsGreeting(s string) bool {
 	l := strings.ToLower(s)
@@ -2513,7 +2585,7 @@ func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, se
 				phaseCopy := phase
 				progress.Phase = &phaseCopy
 			}
-			if isPhaseComplete(progress.QuestionsAsked, progress.Phase) {
+			if isPhaseComplete(progress.ValidAnswers, progress.Phase) {
 				continue
 			}
 			return progress, nil

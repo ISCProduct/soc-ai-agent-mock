@@ -74,16 +74,27 @@ func main() {
 	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
 	conversationContextRepo := repositories.NewConversationContextRepository(db)
 	companyRepo := repositories.NewCompanyRepository(db)
+	gbizRepo := repositories.NewGBizInfoRepository(db)
+	crawlRepo := repositories.NewCrawlRepository(db)
+	popularityRepo := repositories.NewCompanyPopularityRepository(db)
+	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
+	relationRepo := repositories.NewCompanyRelationRepository(db)
+	auditLogRepo := repositories.NewAuditLogRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
+	resumeRepo := repositories.NewResumeRepository(db)
 	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
 	jobEmbeddingRepo := repositories.NewJobCategoryEmbeddingRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
+	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo)
+	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
+	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
+	auditLogService := services.NewAuditLogService(auditLogRepo)
+	gbizService := services.NewGBizInfoService(cfg, gbizRepo, companyRepo, relationRepo)
 	analysisService := services.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
@@ -101,11 +112,21 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := &controllers.CompanyRelationController{DB: db}
+	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizService)
+	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
+	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
+	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
+	adminAuditController := controllers.NewAdminAuditController(auditLogService)
+	resumeController := controllers.NewResumeController(resumeService)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController)
+	routes.SetupResumeRoutes(resumeController)
+
+	go crawlService.StartScheduler()
 
 	// ヘルスチェックエンドポイント
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

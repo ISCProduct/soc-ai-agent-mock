@@ -111,8 +111,8 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 		Content []responsesContent `json:"content"`
 	}
 	type responsesResponse struct {
-		Output     []responsesOutput `json:"output"`
-		OutputText string            `json:"output_text"`
+		Output            []responsesOutput `json:"output"`
+		OutputText        string            `json:"output_text"`
 		IncompleteDetails struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
@@ -169,6 +169,22 @@ func isUnsupportedTemperatureErr(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "Unsupported parameter") && strings.Contains(msg, "temperature")
+}
+
+func isUnsupportedResponseFormatErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "response_format") && strings.Contains(msg, "Unsupported")
+}
+
+func isModelNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "model") && (strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "unsupported"))
 }
 
 func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
@@ -242,6 +258,35 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 	return "", lastErr
 }
 
+func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ...string) ([]float32, error) {
+	if cli == nil || cli.c == nil {
+		return nil, errors.New("openai client is nil")
+	}
+	if strings.TrimSpace(input) == "" {
+		return nil, errors.New("embedding input is empty")
+	}
+
+	model := os.Getenv("OPENAI_EMBEDDING_MODEL")
+	if len(modelOverride) > 0 && strings.TrimSpace(modelOverride[0]) != "" {
+		model = modelOverride[0]
+	}
+	if strings.TrimSpace(model) == "" {
+		model = "text-embedding-3-small"
+	}
+
+	resp, err := cli.c.CreateEmbeddings(ctx, openai.EmbeddingRequest{
+		Model: openai.EmbeddingModel(model),
+		Input: []string{input},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Data) == 0 {
+		return nil, errors.New("empty embedding response")
+	}
+	return resp.Data[0].Embedding, nil
+}
+
 // ResponsesWithTemperature は system と user プロンプトを分けて、温度パラメータ付きでリクエストします
 func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, userPrompt string, temperature float32, modelOverride ...string) (string, error) {
 	if cli == nil || cli.c == nil {
@@ -305,6 +350,75 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 		} else {
 			lastErr = err
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
+		}
+
+		backoff := time.Duration(1<<attempt) * time.Second
+		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+		time.Sleep(backoff + jitter)
+	}
+
+	if lastErr == nil {
+		lastErr = errors.New("no response from model")
+	}
+	return "", lastErr
+}
+
+// ChatCompletionJSON uses the go-openai SDK to request a JSON response.
+func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, modelOverride ...string) (string, error) {
+	if cli == nil || cli.c == nil {
+		return "", errors.New("openai client is nil")
+	}
+
+	model := cli.DefaultModel
+	if len(modelOverride) > 0 && modelOverride[0] != "" {
+		model = modelOverride[0]
+	}
+	if strings.TrimSpace(model) == "" {
+		model = "gpt-5.2"
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		req := openai.ChatCompletionRequest{
+			Model: model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: systemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: userPrompt,
+				},
+			},
+			Temperature:         temperature,
+			MaxTokens:           0,
+			MaxCompletionTokens: maxTokens,
+			ResponseFormat: &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			},
+		}
+
+		resp, err := cli.c.CreateChatCompletion(ctxReq, req)
+		if err != nil && isUnsupportedResponseFormatErr(err) {
+			req.ResponseFormat = nil
+			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
+		}
+		if err != nil && isModelNotFoundErr(err) && len(modelOverride) == 0 && model != "gpt-4o-mini" {
+			req.Model = "gpt-4o-mini"
+			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
+		}
+		cancel()
+
+		if err == nil && len(resp.Choices) > 0 {
+			content := strings.TrimSpace(resp.Choices[0].Message.Content)
+			if content != "" {
+				return content, nil
+			}
+			lastErr = errors.New("empty response from model")
+		} else if err != nil {
+			lastErr = err
 		}
 
 		backoff := time.Duration(1<<attempt) * time.Second

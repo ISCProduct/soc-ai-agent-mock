@@ -11,6 +11,8 @@ export default function OnboardingPage() {
   const [user, setUser] = useState<User | null>(null)
   const [name, setName] = useState('')
   const [targetLevel, setTargetLevel] = useState('新卒')
+  const [schoolName, setSchoolName] = useState('')
+  const [schoolOption, setSchoolOption] = useState('other')
   const [certificationsAcquired, setCertificationsAcquired] = useState<string[]>([])
   const [certificationsInProgress, setCertificationsInProgress] = useState('')
   const [error, setError] = useState('')
@@ -24,6 +26,15 @@ export default function OnboardingPage() {
     }
     setUser(storedUser)
     setName(storedUser.name || '')
+    const storedSchool = storedUser.school_name || ''
+    const predefinedSchools = ['学校法人岩崎学園情報科学専門学校']
+    if (predefinedSchools.includes(storedSchool)) {
+      setSchoolOption(storedSchool)
+      setSchoolName(storedSchool)
+    } else {
+      setSchoolOption('other')
+      setSchoolName(storedSchool)
+    }
     setCertificationsAcquired(splitCertifications(storedUser.certifications_acquired))
     setCertificationsInProgress(storedUser.certifications_in_progress || '')
     if (storedUser.target_level === '新卒' || storedUser.target_level === '中途') {
@@ -38,10 +49,12 @@ export default function OnboardingPage() {
     setError('')
     setLoading(true)
     try {
+      const finalSchoolName = schoolOption === 'other' ? schoolName : schoolOption
       const response = await authService.updateProfile(
         user.user_id,
         name,
         targetLevel,
+        finalSchoolName,
         joinCertifications(certificationsAcquired),
         certificationsInProgress,
       )
@@ -104,6 +117,30 @@ export default function OnboardingPage() {
               <MenuItem value="新卒">新卒</MenuItem>
               <MenuItem value="中途">中途</MenuItem>
             </TextField>
+            <TextField
+              fullWidth
+              select
+              label="学校名"
+              value={schoolOption}
+              onChange={(e) => setSchoolOption(e.target.value)}
+              required
+              sx={{ mb: 2 }}
+            >
+              <MenuItem value="学校法人岩崎学園情報科学専門学校">
+                学校法人岩崎学園情報科学専門学校
+              </MenuItem>
+              <MenuItem value="other">その他</MenuItem>
+            </TextField>
+            {schoolOption === 'other' && (
+              <TextField
+                fullWidth
+                label="学校名（その他）"
+                value={schoolName}
+                onChange={(e) => setSchoolName(e.target.value)}
+                required
+                sx={{ mb: 2 }}
+              />
+            )}
             <TextField
               fullWidth
               select

@@ -4,15 +4,24 @@ import "time"
 
 // Company 企業情報
 type Company struct {
-	ID            uint   `gorm:"primaryKey" json:"id"`
-	Name          string `gorm:"type:varchar(255);not null" json:"name"`
-	Description   string `gorm:"type:text" json:"description"`
-	Industry      string `gorm:"type:varchar(100)" json:"industry"`
-	EmployeeCount int    `gorm:"default:0" json:"employee_count"`
-	FoundedYear   int    `json:"founded_year"`
-	Location      string `gorm:"type:varchar(255)" json:"location"`
-	WebsiteURL    string `gorm:"type:varchar(500)" json:"website_url"`
-	LogoURL       string `gorm:"type:varchar(500)" json:"logo_url"`
+	ID               uint       `gorm:"primaryKey" json:"id"`
+	Name             string     `gorm:"type:varchar(255);not null" json:"name"`
+	Description      string     `gorm:"type:text" json:"description"`
+	Industry         string     `gorm:"type:varchar(100)" json:"industry"`
+	EmployeeCount    int        `gorm:"default:0" json:"employee_count"`
+	FoundedYear      int        `json:"founded_year"`
+	Location         string     `gorm:"type:varchar(255)" json:"location"`
+	WebsiteURL       string     `gorm:"type:varchar(500)" json:"website_url"`
+	LogoURL          string     `gorm:"type:varchar(500)" json:"logo_url"`
+	CorporateNumber  string     `gorm:"type:varchar(13);index" json:"corporate_number"`
+	SourceType       string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual
+	SourceURL        string     `gorm:"type:varchar(500)" json:"source_url"`
+	SourceFetchedAt  *time.Time `json:"source_fetched_at,omitempty"`
+	IsProvisional    bool       `gorm:"default:true" json:"is_provisional"`
+	DataStatus       string     `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published
+	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
+	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
+	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
 
 	// 企業の特徴・文化
 	Culture        string `gorm:"type:text" json:"culture"`            // 企業文化の説明

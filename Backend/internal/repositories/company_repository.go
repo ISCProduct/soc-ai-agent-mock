@@ -40,6 +40,16 @@ func (r *CompanyRepository) FindByID(id uint) (*models.Company, error) {
 	return &company, nil
 }
 
+// FindByName 企業名で取得
+func (r *CompanyRepository) FindByName(name string) (*models.Company, error) {
+	var company models.Company
+	err := r.db.Where("name = ?", name).First(&company).Error
+	if err != nil {
+		return nil, err
+	}
+	return &company, nil
+}
+
 // GetWeightProfile 企業の重視度プロファイルを取得
 func (r *CompanyRepository) GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error) {
 	var profile models.CompanyWeightProfile
@@ -79,6 +89,20 @@ func (r *CompanyRepository) FindJobPositionsByCompany(companyID uint) ([]models.
 	err := r.db.Where("company_id = ? AND is_active = ?", companyID, true).
 		Preload("JobCategory").
 		Find(&positions).Error
+	return positions, err
+}
+
+// ListJobPositions 募集職種を一覧取得
+func (r *CompanyRepository) ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var positions []models.CompanyJobPosition
+	query := r.db.Preload("JobCategory").Preload("Company")
+	if companyID != nil {
+		query = query.Where("company_id = ?", *companyID)
+	}
+	err := query.Order("created_at desc").Limit(limit).Find(&positions).Error
 	return positions, err
 }
 

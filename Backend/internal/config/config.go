@@ -9,12 +9,14 @@ import (
 )
 
 type Config struct {
-	DBUser     string
-	DBPass     string
-	DBHost     string
-	DBPort     string
-	DBName     string
-	ServerPort string
+	DBUser          string
+	DBPass          string
+	DBHost          string
+	DBPort          string
+	DBName          string
+	ServerPort      string
+	GBizInfoBaseURL string
+	GBizInfoToken   string
 }
 
 func LoadConfig() (*Config, error) {
@@ -29,12 +31,14 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DBUser:     os.Getenv("DB_USER"),
-		DBPass:     os.Getenv("DB_PASSWORD"),
-		DBHost:     os.Getenv("DB_HOST"),
-		DBPort:     os.Getenv("DB_PORT"),
-		DBName:     os.Getenv("DB_NAME"),
-		ServerPort: get("SERVER_PORT", "80"),
+		DBUser:          os.Getenv("DB_USER"),
+		DBPass:          os.Getenv("DB_PASSWORD"),
+		DBHost:          os.Getenv("DB_HOST"),
+		DBPort:          os.Getenv("DB_PORT"),
+		DBName:          os.Getenv("DB_NAME"),
+		ServerPort:      get("SERVER_PORT", "80"),
+		GBizInfoBaseURL: get("GBIZINFO_BASE_URL", ""),
+		GBizInfoToken:   get("GBIZINFO_API_TOKEN", ""),
 	}
 
 	// 必須値チェック

@@ -38,14 +38,25 @@ function OAuthCallbackContent() {
         const userDataRaw = JSON.parse(userDataString)
         // Fallback repair for mojibake in name
         const fixMojibake = (s: string) => /[Ãå][^\s]/.test(s) ? decodeURIComponent(escape(s)) : s
-        const userData = { ...userDataRaw, name: fixMojibake(userDataRaw.name) }
-        
+        let userData = { ...userDataRaw, name: fixMojibake(userDataRaw.name) }
+        try {
+          const fresh = await authService.getUser(
+            typeof userData.user_id === 'string' ? Number(userData.user_id) : userData.user_id,
+          )
+          userData = { ...userData, ...fresh }
+        } catch {
+          // ignore and fall back to callback payload
+        }
+
         // ローカルストレージに保存
         authService.saveAuth(userData)
         localStorage.removeItem('oauth_state')
 
-        // target_level が未設定ならオンボーディングへ
-        if (userData.target_level !== '新卒' && userData.target_level !== '中途') {
+        const needsOnboarding =
+          (userData.target_level !== '新卒' && userData.target_level !== '中途') ||
+          !userData.school_name
+        // 必須情報が未設定ならオンボーディングへ
+        if (needsOnboarding) {
           router.push('/onboarding')
           return
         }

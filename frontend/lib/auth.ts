@@ -25,6 +25,8 @@ export interface User {
   name: string
   is_guest: boolean
   target_level?: string
+  school_name?: string
+  is_admin?: boolean
   certifications_acquired?: string
   certifications_in_progress?: string
   oauth_provider?: string
@@ -37,6 +39,8 @@ export interface AuthResponse {
   name: string
   is_guest: boolean
   target_level?: string
+  school_name?: string
+  is_admin?: boolean
   certifications_acquired?: string
   certifications_in_progress?: string
   oauth_provider?: string
@@ -103,6 +107,7 @@ export const authService = {
     userId: number,
     name: string,
     targetLevel: string,
+    schoolName: string,
     certificationsAcquired: string,
     certificationsInProgress: string,
   ): Promise<AuthResponse> {
@@ -113,6 +118,7 @@ export const authService = {
         user_id: userId,
         name,
         target_level: targetLevel,
+        school_name: schoolName,
         certifications_acquired: certificationsAcquired,
         certifications_in_progress: certificationsInProgress,
       }),
@@ -143,6 +149,8 @@ export const authService = {
       name: fixMojibake(authResponse.name),
       is_guest: authResponse.is_guest,
       target_level: authResponse.target_level,
+      school_name: authResponse.school_name,
+      is_admin: authResponse.is_admin,
       certifications_acquired: authResponse.certifications_acquired,
       certifications_in_progress: authResponse.certifications_in_progress,
       oauth_provider: authResponse.oauth_provider,
