@@ -179,6 +179,14 @@ func isUnsupportedResponseFormatErr(err error) bool {
 	return strings.Contains(msg, "response_format") && strings.Contains(msg, "Unsupported")
 }
 
+func isBetaLimitationsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "beta-limitations") && strings.Contains(msg, "temperature")
+}
+
 func isModelNotFoundErr(err error) bool {
 	if err == nil {
 		return false
@@ -403,6 +411,10 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		resp, err := cli.c.CreateChatCompletion(ctxReq, req)
 		if err != nil && isUnsupportedResponseFormatErr(err) {
 			req.ResponseFormat = nil
+			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
+		}
+		if err != nil && isBetaLimitationsErr(err) {
+			req.Temperature = 1
 			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
 		}
 		if err != nil && isModelNotFoundErr(err) && len(modelOverride) == 0 && model != "gpt-4o-mini" {
