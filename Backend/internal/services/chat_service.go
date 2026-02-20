@@ -2403,7 +2403,20 @@ func isLikelyAnswer(answer, question string) bool {
 		return true
 	}
 
-	// 3文字未満は無効（ただし上で選択肢判定済み）
+	// 「はい」「いいえ」「好き」「嫌い」などの短い回答は文字数チェックより先に判定する
+	// （新卒ユーザーの短文回答を正しく有効扱いするため）
+	shortValidAnswers := []string{
+		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
+		"できる", "できない", "ある", "ない", "する", "しない",
+	}
+	for _, valid := range shortValidAnswers {
+		if strings.Contains(strings.ToLower(a), valid) {
+			fmt.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
+			return true
+		}
+	}
+
+	// 3文字未満は無効（選択肢記号・短答キーワードは上で判定済み）
 	if len([]rune(a)) < 3 {
 		fmt.Printf("[Validation] Fallback: Too short (< 3 chars): %s\n", a)
 		return false
@@ -2425,18 +2438,6 @@ func isLikelyAnswer(answer, question string) bool {
 		if answerLower == pattern || answerLower == pattern+"。" {
 			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
 			return false
-		}
-	}
-
-	// 「はい」「いいえ」「好き」「嫌い」などの短い回答も有効
-	shortValidAnswers := []string{
-		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
-		"できる", "できない", "ある", "ない", "する", "しない",
-	}
-	for _, valid := range shortValidAnswers {
-		if strings.Contains(strings.ToLower(a), valid) {
-			fmt.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
-			return true
 		}
 	}
 
