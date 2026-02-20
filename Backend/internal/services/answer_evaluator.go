@@ -294,24 +294,39 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 		return HumanScoreResult{Action: PrecheckScore}
 	}
 
-	if len([]rune(answerTrimmed)) < 5 {
+	// 新卒ユーザーの短文回答（「はい」「ある」等）を有効スコアとして扱うため、
+	// shortValidAnswers に該当する場合は文字数に関わらず最小スコアを付与する
+	shortValidAnswers := []string{
+		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
+		"できる", "できない", "ある", "ない", "する", "しない",
+	}
+	normalizedAnswer := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(answerTrimmed), " ", ""), "　", "")
+	for _, valid := range shortValidAnswers {
+		if strings.Contains(normalizedAnswer, valid) {
+			return HumanScoreResult{Action: PrecheckScore}
+		}
+	}
+
+	// 完全に空または1文字以下は無視
+	if len([]rune(answerTrimmed)) < 2 {
 		return HumanScoreResult{Action: PrecheckIgnore, Reason: "too_short_ignore"}
 	}
 
 	skipPhrases := []string{
-		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし", "ない",
+		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし",
 	}
-	normalized := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(answerTrimmed), " ", ""), "　", "")
 	for _, phrase := range skipPhrases {
-		if strings.Contains(normalized, phrase) {
+		if strings.Contains(normalizedAnswer, phrase) {
 			return HumanScoreResult{Action: PrecheckSkip, Reason: "skip_phrase"}
 		}
 	}
 
-	if len([]rune(answerTrimmed)) < 10 {
-		return HumanScoreResult{Action: PrecheckNoScore, Reason: "too_short_no_score"}
+	// 5文字未満の短文は最小スコアを付与（PrecheckNoScoreから変更）
+	if len([]rune(answerTrimmed)) < 5 {
+		return HumanScoreResult{Action: PrecheckScore, Reason: "short_but_valid"}
 	}
 
+	// 10文字未満も評価対象とする（新卒の短答に対応）
 	return HumanScoreResult{Action: PrecheckScore}
 }
 
