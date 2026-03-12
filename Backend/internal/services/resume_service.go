@@ -735,7 +735,7 @@ OCRテキスト:
 	if modelOverride == "" {
 		modelOverride = "gpt-4o-mini"
 	}
-	raw, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案を提示します。", prompt, 0.2, 1800, modelOverride)
+	raw, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, 0.2, 2000, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
 		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
@@ -776,7 +776,7 @@ OCRテキスト:
 出力は次のJSONのみ:
 {"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
 			companyName, jobTitle, companyInfo, candidateType, blockList)
-		rawRetry, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。", retryPrompt, 0.2, 1800, modelOverride)
+		rawRetry, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, 0.2, 2000, modelOverride)
 		if err == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
