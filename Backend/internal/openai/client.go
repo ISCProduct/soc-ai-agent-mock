@@ -64,9 +64,11 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 		Input:           input,
 		MaxOutputTokens: maxOutputTokens,
 		Temperature:     temperature,
-		Reasoning: map[string]string{
-			"effort": "low",
-		},
+	}
+	// reasoning.effort は o1/o3 系の推論モデルのみサポート。
+	// gpt-4o-mini 等の標準モデルで送ると unsupported_parameter エラーになる。
+	if isReasoningModel(model) {
+		payload.Reasoning = map[string]string{"effort": "low"}
 	}
 	if includeTextFormat {
 		payload.Text = map[string]interface{}{
@@ -161,6 +163,13 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 		return "", errors.New("empty response from responses api: " + snippet)
 	}
 	return strings.Join(parts, "\n"), nil
+}
+
+// isReasoningModel は o1/o3 系の推論モデルかどうかを判定します。
+// reasoning.effort パラメータはこれらのモデルのみサポートされています。
+func isReasoningModel(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(lower, "o1") || strings.HasPrefix(lower, "o3") || strings.HasPrefix(lower, "o-")
 }
 
 func isUnsupportedTemperatureErr(err error) bool {
