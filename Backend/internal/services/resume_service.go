@@ -159,7 +159,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 		}
 	}
 	if !hasText {
-		return nil, nil, errors.New("履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください")
+		return nil, nil, &ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
 	}
 	if err := s.repo.ReplaceTextBlocks(doc.ID, blocks); err != nil {
 		return nil, nil, err
