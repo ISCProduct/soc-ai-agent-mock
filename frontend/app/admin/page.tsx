@@ -9,10 +9,10 @@ import {
   CardContent,
   Chip,
   Divider,
-  Grid,
   Stack,
   Typography,
 } from '@mui/material'
+import Grid from '@mui/material/GridLegacy'
 import { authService } from '@/lib/auth'
 
 export default function AdminDashboardPage() {

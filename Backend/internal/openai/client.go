@@ -417,7 +417,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			req.Temperature = 1
 			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
 		}
-		if err != nil && isModelNotFoundErr(err) && len(modelOverride) == 0 && model != "gpt-4o-mini" {
+		if err != nil && isModelNotFoundErr(err) && (len(modelOverride) == 0 || modelOverride[0] == "") && model != "gpt-4o-mini" {
 			req.Model = "gpt-4o-mini"
 			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
 		}
