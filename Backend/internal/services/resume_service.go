@@ -165,7 +165,10 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 		return nil, nil, err
 	}
 
-	review, items := s.buildResumeReviewWithAI(blocks, companyName, jobTitle, candidateType)
+	review, items, err := s.buildResumeReviewWithAI(blocks, companyName, jobTitle, candidateType)
+	if err != nil {
+		return nil, nil, err
+	}
 	review.DocumentID = doc.ID
 	if err := s.repo.CreateReview(review); err != nil {
 		return nil, nil, err
@@ -672,11 +675,13 @@ func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string)
 	return response.Report, nil
 }
 
-func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem) {
+func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, 30000)
-	if strings.TrimSpace(text) == "" || s.aiClient == nil {
-		log.Println("resume_review: fallback (empty text or openai nil)")
-		return fallbackResumeReview(blocks)
+	if strings.TrimSpace(text) == "" {
+		return nil, nil, &ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+	}
+	if s.aiClient == nil {
+		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
 
 	var companyInfo string
@@ -733,13 +738,13 @@ OCRテキスト:
 	raw, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案を提示します。", prompt, 0.2, 1800, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
-		return fallbackResumeReviewDetailed(blocks)
+		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
 	}
 
 	response := aiReviewResponse{}
 	if err := decodeJSON(raw, &response); err != nil {
 		log.Printf("resume_review: decode failed: %v", err)
-		return fallbackResumeReviewDetailed(blocks)
+		return nil, nil, fmt.Errorf("AIレビュー結果の解析に失敗しました。再度お試しください")
 	}
 
 	if response.Score <= 0 {
@@ -781,14 +786,14 @@ OCRテキスト:
 		}
 	}
 	if len(items) == 0 {
-		log.Println("resume_review: fallback detailed (no items after retry)")
-		return fallbackResumeReviewDetailed(blocks)
+		log.Println("resume_review: no items could be mapped after retry")
+		return nil, nil, fmt.Errorf("AIが生成した指摘内容を履歴書ブロックに紐づけられませんでした。再度お試しください")
 	}
 
 	return &models.ResumeReview{
 		Score:   response.Score,
 		Summary: response.Summary,
-	}, items
+	}, items, nil
 }
 
 func fallbackResumeReview(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
