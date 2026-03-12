@@ -5,6 +5,7 @@ import io
 import json
 import os
 import sys
+import traceback
 
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
@@ -71,6 +72,7 @@ def main():
             ocr = PaddleOCR(use_angle_cls=True, lang="japan", show_log=False)
     except Exception as e:
         print(f"PaddleOCR initialization failed: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -81,6 +83,7 @@ def main():
             pages = process_image(args.input, ocr)
     except Exception as e:
         print(f"OCR processing failed: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
     payload = {"pages": pages}
@@ -92,6 +95,7 @@ def main():
             print(json.dumps(payload, ensure_ascii=False))
     except Exception as e:
         print(f"failed to write output: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
