@@ -2406,19 +2406,21 @@ func isLikelyAnswer(answer, question string) bool {
 	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
 
 	// 無回答パターンを先に判定し、shortValidAnswers の部分一致より優先させる。
-	// 「わからない」単体のみ無効（他の文章が続く場合は有効）
+	// 「わからない」「わからないです」等の単体のみ無効（他の文章が続く場合は有効）
+	answerLowerStripped := strings.TrimRight(answerLower, "。、！？…,.!?・")
 	noAnswerPatterns := []string{
 		"わからない", "分からない", "わかりません", "分かりません",
+		"わからないです", "分からないです",
 	}
 	for _, pattern := range noAnswerPatterns {
-		if answerLower == pattern || answerLower == pattern+"。" {
+		if answerLowerStripped == pattern {
 			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
 			return false
 		}
 	}
 
 	// 「はい」「いいえ」「うん」などの短い回答は文字数チェックより先に判定する。
-	// noAnswerPatterns の後に置くことで「わからない」→「ない」の誤マッチを防ぐ。
+	// noAnswerPatterns の後に置き、完全一致のみとすることで "ない" → "わからない" の誤マッチを防ぐ。
 	shortValidAnswers := []string{
 		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
 		"できる", "できない", "ある", "ない", "する", "しない",
@@ -2426,7 +2428,7 @@ func isLikelyAnswer(answer, question string) bool {
 		"あります", "ないです", "あった", "なかった",
 	}
 	for _, valid := range shortValidAnswers {
-		if strings.Contains(answerLower, valid) {
+		if answerLowerStripped == valid {
 			fmt.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
 			return true
 		}
