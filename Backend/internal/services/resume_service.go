@@ -120,6 +120,9 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	if s.s3 == nil || !s.s3.isEnabled() {
 		return nil, nil, errors.New("s3 is required")
 	}
+	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
+		return nil, nil, errors.New("応募企業名または応募職種を入力してください")
+	}
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
@@ -705,7 +708,10 @@ OCRテキスト:
 %s`, companyName, jobTitle, companyInfo, candidateType, text)
 
 	modelOverride := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL"))
-	raw, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案を提示します。", prompt, 0.2, 900, modelOverride)
+	if modelOverride == "" {
+		modelOverride = "gpt-4o-mini"
+	}
+	raw, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案を提示します。", prompt, 0.2, 1800, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
 		return fallbackResumeReviewDetailed(blocks)
@@ -746,7 +752,7 @@ OCRテキスト:
 出力は次のJSONのみ:
 {"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
 			companyName, jobTitle, companyInfo, candidateType, blockList)
-		rawRetry, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。", retryPrompt, 0.2, 900, modelOverride)
+		rawRetry, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。", retryPrompt, 0.2, 1800, modelOverride)
 		if err == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
@@ -841,8 +847,12 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 			continue
 		}
 		var block *models.ResumeTextBlock
+		foundByIndex := false
 		if item.PageHint > 0 && item.BlockIndex > 0 {
 			block = findBlockByIndex(blocks, item.PageHint, item.BlockIndex)
+			if block != nil {
+				foundByIndex = true
+			}
 		}
 		if block == nil && runeLen(item.Quote) >= 6 {
 			block = findBestBlock(blocks, item.Quote, item.PageHint)
@@ -850,7 +860,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		if block == nil {
 			continue
 		}
-		if !quoteInBlock(item.Quote, block.Text) {
+		if !foundByIndex && !quoteInBlock(item.Quote, block.Text) {
 			continue
 		}
 		severity := strings.ToLower(item.Severity)
