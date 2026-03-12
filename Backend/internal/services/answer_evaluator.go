@@ -299,6 +299,8 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 	shortValidAnswers := []string{
 		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
 		"できる", "できない", "ある", "ない", "する", "しない",
+		"うん", "そう", "ええ", "まあ", "そうです", "そうですね",
+		"あります", "ないです", "あった", "なかった",
 	}
 	normalizedAnswer := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(answerTrimmed), " ", ""), "　", "")
 	for _, valid := range shortValidAnswers {
@@ -312,11 +314,12 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 		return HumanScoreResult{Action: PrecheckIgnore, Reason: "too_short_ignore"}
 	}
 
+	// skipPhrases は完全一致のみスキップ（Contains だと「資格なし」等が誤ってスキップされるため）
 	skipPhrases := []string{
 		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし",
 	}
 	for _, phrase := range skipPhrases {
-		if strings.Contains(normalizedAnswer, phrase) {
+		if normalizedAnswer == phrase || normalizedAnswer == phrase+"。" || normalizedAnswer == phrase+"、" {
 			return HumanScoreResult{Action: PrecheckSkip, Reason: "skip_phrase"}
 		}
 	}
