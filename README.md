@@ -53,6 +53,19 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 #  使用モデル
 OPENAI_MODEL=omuni
 
+# Realtime (音声面接)
+OPENAI_REALTIME_MODEL=gpt-realtime
+OPENAI_REALTIME_VOICE=alloy
+OPENAI_REALTIME_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+OPENAI_REALTIME_MAX_OUTPUT_TOKENS=120
+
+# 面接レポート
+INTERVIEW_REPORT_MODEL=gpt-4o-mini
+INTERVIEW_TEMPLATE_VERSION=v1
+INTERVIEW_MAX_MINUTES=10
+INTERVIEW_MAX_COST_USD=1.8
+INTERVIEW_COST_PER_MIN_USD=0.18
+
 # gBizInfo
 GBIZINFO_BASE_URL=https://api.biz-info.go.jp
 GBIZINFO_API_TOKEN=xxxxxxxxxxxxxxxx
@@ -140,6 +153,15 @@ npm run dev
 # ブラウザで http://localhost:3000 を確認
 ```
 
+**フロントエンド環境変数（例 .env.local）**
+
+```env
+NEXT_PUBLIC_BACKEND_URL=http://localhost:80
+NEXT_PUBLIC_INTERVIEW_MAX_MINUTES=10
+NEXT_PUBLIC_INTERVIEW_MAX_COST_USD=1.8
+NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD=0.18
+```
+
 **フロントの E2E / テスト**
 
 - Playwright テストは `frontend/e2e` にあります。インストール後に実行:
@@ -207,6 +229,14 @@ litellm==1.44.22
 openai==1.40.6
 tiktoken==0.7.0
 ```
+
+**面接練習デモ手順（10分）**
+
+1. バックエンドとフロントを起動
+2. ログイン後、左メニューの「面接練習」を開く
+3. `Start` を押して面接を開始（音声が出るのでミュートに注意）
+4. 10分またはコスト上限で自動終了。`Stop` でも終了可能
+5. 終了後、レポートが生成されるまで数十秒待つ
 
 **よくあるトラブルと対処**
 

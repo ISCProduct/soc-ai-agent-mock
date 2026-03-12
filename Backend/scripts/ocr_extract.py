@@ -4,6 +4,8 @@ import contextlib
 import io
 import json
 import os
+import sys
+import traceback
 
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
@@ -62,23 +64,39 @@ def main():
     args = parser.parse_args()
 
     if not os.path.exists(args.input):
-        raise SystemExit(f"input file not found: {args.input}")
+        print(f"input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
 
-    with contextlib.redirect_stdout(io.StringIO()):
-        ocr = PaddleOCR(use_angle_cls=True, lang="japan", show_log=False)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ocr = PaddleOCR(use_angle_cls=True, lang="japan", show_log=False)
+    except Exception as e:
+        print(f"PaddleOCR initialization failed: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
-    ext = os.path.splitext(args.input)[1].lower()
-    if ext in [".pdf"]:
-        pages = process_pdf(args.input, ocr)
-    else:
-        pages = process_image(args.input, ocr)
+    try:
+        ext = os.path.splitext(args.input)[1].lower()
+        if ext in [".pdf"]:
+            pages = process_pdf(args.input, ocr)
+        else:
+            pages = process_image(args.input, ocr)
+    except Exception as e:
+        print(f"OCR processing failed: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
     payload = {"pages": pages}
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    else:
-        print(json.dumps(payload, ensure_ascii=False))
+    try:
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+        else:
+            print(json.dumps(payload, ensure_ascii=False))
+    except Exception as e:
+        print(f"failed to write output: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

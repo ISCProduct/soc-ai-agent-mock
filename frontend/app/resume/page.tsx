@@ -115,6 +115,10 @@ export default function ResumePage() {
       setError('document_id が未設定です')
       return
     }
+    if (!companyName.trim() && !jobTitle.trim()) {
+      setError('企業名が未入力の場合は応募職種を入力してください')
+      return
+    }
     setError('')
     setReviewLoading(true)
     try {
@@ -221,10 +225,13 @@ export default function ResumePage() {
             fullWidth
           />
           <TextField
-            label="応募職種 (任意)"
+            label={companyName.trim() ? '応募職種 (任意)' : '応募職種 (企業名未入力の場合は必須)'}
             value={jobTitle}
             onChange={(e) => setJobTitle(e.target.value)}
             fullWidth
+            required={!companyName.trim()}
+            error={!companyName.trim() && !jobTitle.trim()}
+            helperText={!companyName.trim() ? '企業名が未入力の場合は職種を入力するとAIレビューが実行されます' : ''}
           />
           <TextField
             select

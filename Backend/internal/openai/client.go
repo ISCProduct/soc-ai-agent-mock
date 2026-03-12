@@ -64,9 +64,11 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 		Input:           input,
 		MaxOutputTokens: maxOutputTokens,
 		Temperature:     temperature,
-		Reasoning: map[string]string{
-			"effort": "low",
-		},
+	}
+	// reasoning.effort は o1/o3 系の推論モデルのみサポート。
+	// gpt-4o-mini 等の標準モデルで送ると unsupported_parameter エラーになる。
+	if isReasoningModel(model) {
+		payload.Reasoning = map[string]string{"effort": "low"}
 	}
 	if includeTextFormat {
 		payload.Text = map[string]interface{}{
@@ -161,6 +163,13 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 		return "", errors.New("empty response from responses api: " + snippet)
 	}
 	return strings.Join(parts, "\n"), nil
+}
+
+// isReasoningModel は o1/o3 系の推論モデルかどうかを判定します。
+// reasoning.effort パラメータはこれらのモデルのみサポートされています。
+func isReasoningModel(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(lower, "o1") || strings.HasPrefix(lower, "o3") || strings.HasPrefix(lower, "o-")
 }
 
 func isUnsupportedTemperatureErr(err error) bool {
@@ -417,7 +426,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			req.Temperature = 1
 			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
 		}
-		if err != nil && isModelNotFoundErr(err) && len(modelOverride) == 0 && model != "gpt-4o-mini" {
+		if err != nil && isModelNotFoundErr(err) && (len(modelOverride) == 0 || modelOverride[0] == "") && model != "gpt-4o-mini" {
 			req.Model = "gpt-4o-mini"
 			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
 		}
@@ -430,6 +439,67 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			}
 			lastErr = errors.New("empty response from model")
 		} else if err != nil {
+			lastErr = err
+		}
+
+		backoff := time.Duration(1<<attempt) * time.Second
+		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+		time.Sleep(backoff + jitter)
+	}
+
+	if lastErr == nil {
+		lastErr = errors.New("no response from model")
+	}
+	return "", lastErr
+}
+
+// ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。
+// Chat Completions API の代替として、JSON レスポンスが必要な場合にも利用できます。
+func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
+	if cli == nil || cli.c == nil {
+		return "", errors.New("openai client is nil")
+	}
+
+	model := cli.DefaultModel
+	if len(modelOverride) > 0 && modelOverride[0] != "" {
+		model = modelOverride[0]
+	}
+	if strings.TrimSpace(model) == "" {
+		model = "gpt-4o-mini"
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
+		messageInput := []map[string]interface{}{
+			{
+				"role": "system",
+				"content": []map[string]string{
+					{"type": "input_text", "text": systemPrompt},
+				},
+			},
+			{
+				"role": "user",
+				"content": []map[string]string{
+					{"type": "input_text", "text": userPrompt},
+				},
+			},
+		}
+		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, false)
+		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, true)
+		}
+		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens*2, false)
+		}
+		cancel()
+
+		if err == nil && strings.TrimSpace(content) != "" {
+			return strings.TrimSpace(content), nil
+		}
+		if err == nil {
+			lastErr = errors.New("empty response from model")
+		} else {
 			lastErr = err
 		}
 

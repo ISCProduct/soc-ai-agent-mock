@@ -329,6 +329,16 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 		return HumanScoreResult{Action: PrecheckIgnore, Reason: "too_short_ignore"}
 	}
 
+	// skipPhrases は完全一致のみスキップ（Contains だと「資格なし」等が誤ってスキップされるため）
+	skipPhrases := []string{
+		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし",
+	}
+	for _, phrase := range skipPhrases {
+		if normalizedAnswer == phrase || normalizedAnswer == phrase+"。" || normalizedAnswer == phrase+"、" {
+			return HumanScoreResult{Action: PrecheckSkip, Reason: "skip_phrase"}
+		}
+	}
+
 	// 5文字未満の短文は最小スコアを付与（PrecheckNoScoreから変更）
 	if len([]rune(answerTrimmed)) < 5 {
 		return HumanScoreResult{Action: PrecheckScore, Reason: "short_but_valid"}

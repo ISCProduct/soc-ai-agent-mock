@@ -31,6 +31,7 @@ import {
     ManageAccounts,
     Description,
     AdminPanelSettings,
+    RecordVoiceOver,
 
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
@@ -357,6 +358,26 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
                         </ListItemIcon>
                         <ListItemText
                             primary="履歴書レビュー"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/interview')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <RecordVoiceOver color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="面接練習"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,

@@ -6,9 +6,10 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${params.id}`)
+  const { id } = await params
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`)
   const raw = await response.text()
   let data: any = {}
   if (raw) {
@@ -23,10 +24,11 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${params.id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body,

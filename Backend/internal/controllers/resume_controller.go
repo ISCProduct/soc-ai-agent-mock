@@ -102,6 +102,11 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 	review, items, err := c.resumeService.ReviewDocument(uint(docID), payload.CompanyName, payload.JobTitle, payload.CandidateType)
 	if err != nil {
 		log.Printf("resume_review: failed document_id=%d err=%v", docID, err)
+		var ve *services.ValidationError
+		if errors.As(err, &ve) {
+			http.Error(w, ve.Message, http.StatusUnprocessableEntity)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -164,13 +164,19 @@ export default function CompanyDetailPage() {
             </div>
 
             {/* ウェブサイト */}
-            <Button variant="outline" asChild>
-              <a href={company.website} target="_blank" rel="noopener noreferrer">
-                <Globe className="w-4 h-4 mr-2" />
-                公式サイトを見る
-                <ExternalLink className="w-3 h-3 ml-2" />
-              </a>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" asChild>
+                <a href={company.website} target="_blank" rel="noopener noreferrer">
+                  <Globe className="w-4 h-4 mr-2" />
+                  公式サイトを見る
+                  <ExternalLink className="w-3 h-3 ml-2" />
+                </a>
+              </Button>
+              <Button onClick={() => router.push(`/interview?company_id=${company.id}`)}>
+                <Briefcase className="w-4 h-4 mr-2" />
+                この企業で面接練習
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
