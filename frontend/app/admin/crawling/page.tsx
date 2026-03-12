@@ -57,7 +57,7 @@ export default function AdminCrawlingPage() {
   const [loading, setLoading] = useState(false)
 
   const [name, setName] = useState('')
-  const [targetType, setTargetType] = useState<'company' | 'popular_companies'>('company')
+  const [targetType, setTargetType] = useState<'company' | 'popular_companies' | 'job_site_company'>('company')
   const [sourceType, setSourceType] = useState('official')
   const [sourceUrl, setSourceUrl] = useState('')
   const [scheduleType, setScheduleType] = useState<'weekly' | 'monthly'>('weekly')
@@ -196,10 +196,11 @@ export default function AdminCrawlingPage() {
                   select
                   label="対象タイプ"
                   value={targetType}
-                  onChange={(e) => setTargetType(e.target.value as 'company' | 'popular_companies')}
+                  onChange={(e) => setTargetType(e.target.value as 'company' | 'popular_companies' | 'job_site_company')}
                 >
                   <MenuItem value="company">企業単体</MenuItem>
                   <MenuItem value="popular_companies">人気企業一覧</MenuItem>
+                  <MenuItem value="job_site_company">新卒求人サイト</MenuItem>
                 </TextField>
                 <TextField
                   label={targetType === 'company' ? '企業名' : '設定名'}
@@ -288,11 +289,24 @@ export default function AdminCrawlingPage() {
                         <Typography variant="subtitle1" fontWeight="bold">
                           {source.name}
                         </Typography>
-                        <Chip
-                          label={source.is_active ? '稼働中' : '停止中'}
-                          size="small"
-                          color={source.is_active ? 'success' : 'default'}
-                        />
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Chip
+                            label={
+                              source.target_type === 'company'
+                                ? '企業単体'
+                                : source.target_type === 'popular_companies'
+                                  ? '人気企業一覧'
+                                  : '新卒求人サイト'
+                            }
+                            size="small"
+                            variant="outlined"
+                          />
+                          <Chip
+                            label={source.is_active ? '稼働中' : '停止中'}
+                            size="small"
+                            color={source.is_active ? 'success' : 'default'}
+                          />
+                        </Stack>
                       </Box>
                       <Typography variant="body2" color="text.secondary">
                         {source.schedule_type === 'weekly'
