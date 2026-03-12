@@ -310,7 +310,7 @@ func (s *ResumeService) extractTextBlocks(doc *models.ResumeDocument, pdfPath st
 	if err := cmd.Run(); err != nil {
 		// stderr（スタックトレース含む）はサーバー側ログにのみ記録し、クライアントには漏らさない
 		log.Printf("ocr script error: %v\nstderr:\n%s", err, stderr.String())
-		return nil, fmt.Errorf("ocr failed")
+		return nil, fmt.Errorf("ocr failed: %w", err)
 	}
 
 	var payload ocrPayload
