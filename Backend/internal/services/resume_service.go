@@ -20,6 +20,13 @@ import (
 	"time"
 )
 
+// ValidationError はユーザー入力起因のエラーを表す。controller で 422 を返すために使用する。
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Message }
+
 type ResumeService struct {
 	repo       *repositories.ResumeRepository
 	storageDir string
@@ -121,7 +128,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 		return nil, nil, errors.New("s3 is required")
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
-		return nil, nil, errors.New("応募企業名または応募職種を入力してください")
+		return nil, nil, &ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
@@ -144,7 +151,14 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(blocks) == 0 {
+	hasText := false
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Text) != "" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
 		return nil, nil, errors.New("履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください")
 	}
 	if err := s.repo.ReplaceTextBlocks(doc.ID, blocks); err != nil {
