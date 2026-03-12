@@ -294,17 +294,32 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 		return HumanScoreResult{Action: PrecheckScore}
 	}
 
-	// 新卒ユーザーの短文回答（「はい」「ある」等）を有効スコアとして扱うため、
-	// shortValidAnswers に該当する場合は文字数に関わらず最小スコアを付与する
+	normalizedAnswer := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(answerTrimmed), " ", ""), "　", "")
+	// 末尾の句読点・記号を除去した形でも比較できるよう正規化する
+	normalizedStripped := strings.TrimRight(normalizedAnswer, "。、！？…,.!?・")
+
+	// skipPhrases を先に判定し、スキップが短答リストより優先されるようにする。
+	// 末尾記号を除去した上で完全一致（"なし！" 等も捕捉）
+	skipPhrases := []string{
+		"わからない", "分からない", "わかりません", "分かりません", "特にない", "特になし", "なし",
+	}
+	for _, phrase := range skipPhrases {
+		if normalizedStripped == phrase {
+			return HumanScoreResult{Action: PrecheckSkip, Reason: "skip_phrase"}
+		}
+	}
+
+	// 新卒ユーザーの短文回答（「はい」「ある」等）を評価対象として通すため、
+	// shortValidAnswers に該当する場合は文字数に関わらず通常のスコアリングへ進める。
+	// skipPhrases の後に置き、完全一致のみとすることで "ない" → "わからない" の誤マッチを防ぐ。
 	shortValidAnswers := []string{
 		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
 		"できる", "できない", "ある", "ない", "する", "しない",
 		"うん", "そう", "ええ", "まあ", "そうです", "そうですね",
 		"あります", "ないです", "あった", "なかった",
 	}
-	normalizedAnswer := strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(answerTrimmed), " ", ""), "　", "")
 	for _, valid := range shortValidAnswers {
-		if strings.Contains(normalizedAnswer, valid) {
+		if normalizedStripped == valid {
 			return HumanScoreResult{Action: PrecheckScore}
 		}
 	}

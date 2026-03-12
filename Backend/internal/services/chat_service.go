@@ -2403,6 +2403,24 @@ func isLikelyAnswer(answer, question string) bool {
 		return true
 	}
 
+	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
+
+	// 無回答パターンを先に判定し、shortValidAnswers の部分一致より優先させる。
+	// 「わからない」「わからないです」等の単体のみ無効（他の文章が続く場合は有効）
+	answerLowerStripped := strings.TrimRight(answerLower, "。、！？…,.!?・")
+	noAnswerPatterns := []string{
+		"わからない", "分からない", "わかりません", "分かりません",
+		"わからないです", "分からないです",
+	}
+	for _, pattern := range noAnswerPatterns {
+		if answerLowerStripped == pattern {
+			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
+			return false
+		}
+	}
+
+	// 「はい」「いいえ」「うん」などの短い回答は文字数チェックより先に判定する。
+	// noAnswerPatterns の後に置き、完全一致のみとすることで "ない" → "わからない" の誤マッチを防ぐ。
 	// 「はい」「いいえ」「うん」などの短い回答は文字数チェックより先に判定する
 	// （新卒ユーザーの短文回答を正しく有効扱いするため）
 	shortValidAnswers := []string{
@@ -2412,7 +2430,7 @@ func isLikelyAnswer(answer, question string) bool {
 		"あります", "ないです", "あった", "なかった",
 	}
 	for _, valid := range shortValidAnswers {
-		if strings.Contains(strings.ToLower(a), valid) {
+		if answerLowerStripped == valid {
 			fmt.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
 			return true
 		}
@@ -2428,19 +2446,6 @@ func isLikelyAnswer(answer, question string) bool {
 	if containsGreeting(a) {
 		fmt.Printf("[Validation] Fallback: Contains greeting: %s\n", a)
 		return false
-	}
-
-	// 明らかな無回答パターンをチェック（「わからない」単体のみ無効）
-	noAnswerPatterns := []string{
-		"わからない", "分からない", "わかりません", "分かりません",
-	}
-	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
-	for _, pattern := range noAnswerPatterns {
-		// 「わからない」だけの回答のみ無効（他の文章が続く場合は有効）
-		if answerLower == pattern || answerLower == pattern+"。" {
-			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
-			return false
-		}
 	}
 
 	if !isJobSelection && looksLikeKeywordList(a) {
