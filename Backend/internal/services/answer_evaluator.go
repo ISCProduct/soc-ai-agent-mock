@@ -309,8 +309,8 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 		}
 	}
 
-	// 新卒ユーザーの短文回答（「はい」「ある」等）を有効スコアとして扱うため、
-	// shortValidAnswers に該当する場合は文字数に関わらず最小スコアを付与する。
+	// 新卒ユーザーの短文回答（「はい」「ある」等）を評価対象として通すため、
+	// shortValidAnswers に該当する場合は文字数に関わらず通常のスコアリングへ進める。
 	// skipPhrases の後に置き、完全一致のみとすることで "ない" → "わからない" の誤マッチを防ぐ。
 	shortValidAnswers := []string{
 		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
