@@ -44,5 +44,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&CrawlSource{},
 		&CrawlRun{},
 		&AuditLog{},
+		&InterviewSession{},
+		&InterviewUtterance{},
+		&InterviewReport{},
 	)
 }

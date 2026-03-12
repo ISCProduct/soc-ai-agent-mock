@@ -84,6 +84,9 @@ func main() {
 	resumeRepo := repositories.NewResumeRepository(db)
 	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
 	jobEmbeddingRepo := repositories.NewJobCategoryEmbeddingRepository(db)
+	interviewSessionRepo := repositories.NewInterviewSessionRepository(db)
+	interviewUtteranceRepo := repositories.NewInterviewUtteranceRepository(db)
+	interviewReportRepo := repositories.NewInterviewReportRepository(db)
 
 	// サービス層の初期化
 	authService := services.NewAuthService(userRepo)
@@ -105,6 +108,8 @@ func main() {
 		matchRepo,
 		nil,
 	)
+	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, aiClient)
+	interviewService.StartWorker()
 
 	// コントローラー層の初期化
 	authController := controllers.NewAuthController(authService)
@@ -118,6 +123,8 @@ func main() {
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)
+	interviewController := controllers.NewInterviewController(interviewService)
+	realtimeController := controllers.NewRealtimeController(interviewService)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -125,6 +132,7 @@ func main() {
 	routes.SetupCompanyRoutes(relationController)
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController)
 	routes.SetupResumeRoutes(resumeController)
+	routes.SetupInterviewRoutes(interviewController, realtimeController)
 
 	go crawlService.StartScheduler()
 

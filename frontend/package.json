@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint ."
   },
@@ -28,13 +28,17 @@
     "react-day-picker": "9.8.0",
     "react-dom": "^19.2.0",
     "reactflow": "^11.11.4",
-    "tailwind-merge": "^2.4.0"
+    "tailwind-merge": "^2.4.0",
+    "three": "^0.165.0",
+    "wawa-lipsync": "^0.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@types/node": "22.19.1",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
+    "@types/three": "^0.165.0",
+    "baseline-browser-mapping": "^2.9.19",
     "postcss": "^8.5",
     "typescript": "5.9.3"
   }

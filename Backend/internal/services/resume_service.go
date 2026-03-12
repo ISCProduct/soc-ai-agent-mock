@@ -20,6 +20,13 @@ import (
 	"time"
 )
 
+// ValidationError はユーザー入力起因のエラーを表す。controller で 422 を返すために使用する。
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Message }
+
 type ResumeService struct {
 	repo       *repositories.ResumeRepository
 	storageDir string
@@ -120,6 +127,9 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	if s.s3 == nil || !s.s3.isEnabled() {
 		return nil, nil, errors.New("s3 is required")
 	}
+	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
+		return nil, nil, &ValidationError{Message: "応募企業名または応募職種を入力してください"}
+	}
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
@@ -141,11 +151,24 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	if err != nil {
 		return nil, nil, err
 	}
+	hasText := false
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Text) != "" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		return nil, nil, &ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+	}
 	if err := s.repo.ReplaceTextBlocks(doc.ID, blocks); err != nil {
 		return nil, nil, err
 	}
 
-	review, items := s.buildResumeReviewWithAI(blocks, companyName, jobTitle, candidateType)
+	review, items, err := s.buildResumeReviewWithAI(blocks, companyName, jobTitle, candidateType)
+	if err != nil {
+		return nil, nil, err
+	}
 	review.DocumentID = doc.ID
 	if err := s.repo.CreateReview(review); err != nil {
 		return nil, nil, err
@@ -288,7 +311,9 @@ func (s *ResumeService) extractTextBlocks(doc *models.ResumeDocument, pdfPath st
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ocr failed: %w (%s)", err, stderr.String())
+		// stderr（スタックトレース含む）はサーバー側ログにのみ記録し、クライアントには漏らさない
+		log.Printf("ocr script error: %v\nstderr:\n%s", err, stderr.String())
+		return nil, fmt.Errorf("ocr failed: %w", err)
 	}
 
 	var payload ocrPayload
@@ -650,11 +675,13 @@ func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string)
 	return response.Report, nil
 }
 
-func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem) {
+func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, 30000)
-	if strings.TrimSpace(text) == "" || s.aiClient == nil {
-		log.Println("resume_review: fallback (empty text or openai nil)")
-		return fallbackResumeReview(blocks)
+	if strings.TrimSpace(text) == "" {
+		return nil, nil, &ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+	}
+	if s.aiClient == nil {
+		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
 
 	var companyInfo string
@@ -705,16 +732,19 @@ OCRテキスト:
 %s`, companyName, jobTitle, companyInfo, candidateType, text)
 
 	modelOverride := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL"))
-	raw, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案を提示します。", prompt, 0.2, 900, modelOverride)
+	if modelOverride == "" {
+		modelOverride = "gpt-4o-mini"
+	}
+	raw, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, 0.2, 2000, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
-		return fallbackResumeReviewDetailed(blocks)
+		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
 	}
 
 	response := aiReviewResponse{}
 	if err := decodeJSON(raw, &response); err != nil {
 		log.Printf("resume_review: decode failed: %v", err)
-		return fallbackResumeReviewDetailed(blocks)
+		return nil, nil, fmt.Errorf("AIレビュー結果の解析に失敗しました。再度お試しください")
 	}
 
 	if response.Score <= 0 {
@@ -746,7 +776,7 @@ OCRテキスト:
 出力は次のJSONのみ:
 {"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
 			companyName, jobTitle, companyInfo, candidateType, blockList)
-		rawRetry, err := s.aiClient.ChatCompletionJSON(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。", retryPrompt, 0.2, 900, modelOverride)
+		rawRetry, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, 0.2, 2000, modelOverride)
 		if err == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
@@ -756,14 +786,14 @@ OCRテキスト:
 		}
 	}
 	if len(items) == 0 {
-		log.Println("resume_review: fallback detailed (no items after retry)")
-		return fallbackResumeReviewDetailed(blocks)
+		log.Println("resume_review: no items could be mapped after retry")
+		return nil, nil, fmt.Errorf("AIが生成した指摘内容を履歴書ブロックに紐づけられませんでした。再度お試しください")
 	}
 
 	return &models.ResumeReview{
 		Score:   response.Score,
 		Summary: response.Summary,
-	}, items
+	}, items, nil
 }
 
 func fallbackResumeReview(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
@@ -841,8 +871,12 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 			continue
 		}
 		var block *models.ResumeTextBlock
+		foundByIndex := false
 		if item.PageHint > 0 && item.BlockIndex > 0 {
 			block = findBlockByIndex(blocks, item.PageHint, item.BlockIndex)
+			if block != nil {
+				foundByIndex = true
+			}
 		}
 		if block == nil && runeLen(item.Quote) >= 6 {
 			block = findBestBlock(blocks, item.Quote, item.PageHint)
@@ -850,7 +884,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		if block == nil {
 			continue
 		}
-		if !quoteInBlock(item.Quote, block.Text) {
+		if !foundByIndex && !quoteInBlock(item.Quote, block.Text) {
 			continue
 		}
 		severity := strings.ToLower(item.Severity)
