@@ -44,6 +44,14 @@ func (c *AdminCompanyController) Detail(w http.ResponseWriter, r *http.Request) 
 		c.syncGBiz(w, r, strings.TrimSuffix(idStr, "/gbiz-sync"))
 		return
 	}
+	if strings.HasSuffix(idStr, "/publish") {
+		c.publish(w, r, strings.TrimSuffix(idStr, "/publish"))
+		return
+	}
+	if strings.HasSuffix(idStr, "/reject") {
+		c.reject(w, r, strings.TrimSuffix(idStr, "/reject"))
+		return
+	}
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		http.Error(w, "invalid company id", http.StatusBadRequest)
@@ -58,6 +66,63 @@ func (c *AdminCompanyController) Detail(w http.ResponseWriter, r *http.Request) 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (c *AdminCompanyController) publish(w http.ResponseWriter, r *http.Request, idStr string) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id, err := strconv.ParseUint(strings.Trim(idStr, "/"), 10, 32)
+	if err != nil {
+		http.Error(w, "invalid company id", http.StatusBadRequest)
+		return
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		http.Error(w, "company not found", http.StatusNotFound)
+		return
+	}
+	company.DataStatus = "published"
+	company.IsProvisional = false
+	if err := c.repo.Update(company); err != nil {
+		http.Error(w, "failed to publish company", http.StatusInternalServerError)
+		return
+	}
+	actor := r.Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]interface{}{
+		"name": company.Name,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(company)
+}
+
+func (c *AdminCompanyController) reject(w http.ResponseWriter, r *http.Request, idStr string) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id, err := strconv.ParseUint(strings.Trim(idStr, "/"), 10, 32)
+	if err != nil {
+		http.Error(w, "invalid company id", http.StatusBadRequest)
+		return
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		http.Error(w, "company not found", http.StatusNotFound)
+		return
+	}
+	company.IsActive = false
+	if err := c.repo.Update(company); err != nil {
+		http.Error(w, "failed to reject company", http.StatusInternalServerError)
+		return
+	}
+	actor := r.Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.reject", "company", company.ID, map[string]interface{}{
+		"name": company.Name,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "rejected"})
 }
 
 func (c *AdminCompanyController) list(w http.ResponseWriter, r *http.Request) {

@@ -125,6 +125,7 @@ func main() {
 	resumeController := controllers.NewResumeController(resumeService)
 	interviewController := controllers.NewInterviewController(interviewService)
 	realtimeController := controllers.NewRealtimeController(interviewService)
+	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -133,6 +134,7 @@ func main() {
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
+	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
 
