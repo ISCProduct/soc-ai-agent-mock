@@ -104,16 +104,16 @@ export default function InterviewPage() {
   const [companySearch, setCompanySearch] = useState('')
   const [selectedPosition, setSelectedPosition] = useState<Position>(POSITIONS[0])
 
-  const pcRef = useRef<RTCPeerConnection | null>(null)
-  const dcRef = useRef<RTCDataChannel | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [turnPending, setTurnPending] = useState(false)
+
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
   const sessionVideoRef = useRef<HTMLVideoElement | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const aiAudioStreamRef = useRef<MediaStream | null>(null)
-  const aiAudioCtxRef = useRef<AudioContext | null>(null)
-  const aiAnalyserRef = useRef<AnalyserNode | null>(null)
-  const aiAnimationRef = useRef<number | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const historyRef = useRef<{ role: string; content: string }[]>([])
+  const aiAudioRef = useRef<HTMLAudioElement | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sessionStartRef = useRef<number | null>(null)
@@ -201,11 +201,12 @@ export default function InterviewPage() {
 
   const cleanupConnection = () => {
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
-    if (aiAnimationRef.current) { cancelAnimationFrame(aiAnimationRef.current); aiAnimationRef.current = null }
-    if (aiAudioCtxRef.current) { aiAudioCtxRef.current.close().catch(() => undefined); aiAudioCtxRef.current = null; aiAnalyserRef.current = null }
-    if (dcRef.current) { dcRef.current.close(); dcRef.current = null }
-    if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
+    }
+    if (aiAudioRef.current) { aiAudioRef.current.pause(); aiAudioRef.current.src = '' }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+    setIsRecording(false); setTurnPending(false); setAiSpeaking(false)
   }
 
   const startTimer = () => {
@@ -231,6 +232,71 @@ export default function InterviewPage() {
     return msg || '接続に失敗しました。ネットワークを確認して再試行してください。'
   }
 
+  const parseMultipart = async (res: Response): Promise<{ meta: Record<string, string>; audio: Blob }> => {
+    const ct = res.headers.get('content-type') || ''
+    const m = ct.match(/boundary=([^\s;]+)/)
+    if (!m) throw new Error('No boundary in multipart response')
+    const boundary = '--' + m[1]
+    const buf = await res.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+
+    const findPattern = (needle: Uint8Array, from: number): number => {
+      outer: for (let i = from; i <= bytes.length - needle.length; i++) {
+        for (let j = 0; j < needle.length; j++) { if (bytes[i + j] !== needle[j]) continue outer }
+        return i
+      }
+      return -1
+    }
+    const enc = new TextEncoder()
+    const boundaryBytes = enc.encode(boundary)
+    const crlfcrlf = enc.encode('\r\n\r\n')
+
+    const b1 = findPattern(boundaryBytes, 0)
+    const h1End = findPattern(crlfcrlf, b1 + boundaryBytes.length)
+    const b2 = findPattern(boundaryBytes, h1End + 4)
+    const jsonBytes = bytes.slice(h1End + 4, b2 - 2)
+    const meta = JSON.parse(new TextDecoder().decode(jsonBytes).trim())
+
+    const h2End = findPattern(crlfcrlf, b2 + boundaryBytes.length)
+    const endBound = enc.encode(boundary + '--')
+    const bEnd = findPattern(endBound, h2End + 4)
+    const audioEnd = bEnd !== -1 ? bEnd - 2 : bytes.length
+    const audio = new Blob([bytes.slice(h2End + 4, audioEnd)], { type: 'audio/mpeg' })
+
+    return { meta, audio }
+  }
+
+  const playAudioBlob = (blob: Blob): Promise<void> => {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob)
+      const el = aiAudioRef.current || new Audio()
+      aiAudioRef.current = el
+      el.src = url
+      setAiSpeaking(true)
+      el.onended = () => { setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
+      el.onerror = () => { setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
+      el.play().catch(() => { setAiSpeaking(false); resolve() })
+    })
+  }
+
+  const doStartTurn = async (sessionId: number, userId: number) => {
+    const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+    const res = await fetch(`${BACKEND}/api/interviews/${sessionId}/start-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    const { meta, audio } = await parseMultipart(res)
+    const aiText: string = meta.ai_text || ''
+    if (aiText) {
+      historyRef.current.push({ role: 'assistant', content: aiText })
+      setUtterances(p => [...p, { role: 'ai', text: aiText }])
+      try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch { /* ignore */ }
+    }
+    await playAudioBlob(audio)
+  }
+
   const handleJoin = async () => {
     if (!user) return
     setErrorMessage(null)
@@ -240,18 +306,32 @@ export default function InterviewPage() {
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
     setEstimatedCost(0)
     setMicEnabled(true); setCameraEnabled(true)
+    historyRef.current = []
 
     try {
       setStatus('connecting')
       const nextGender = getNextAvatarGender()
       setAvatarGender(nextGender)
+
+      // Acquire camera/mic stream
+      let stream = streamRef.current
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+        } catch (err: any) {
+          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') throw new Error('NotAllowedError')
+          if (err.name === 'NotFoundError') throw new Error('NotFoundError')
+          throw err
+        }
+        streamRef.current = stream
+      }
+
       const created = await interviewApi.createSession(user.user_id)
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)
-      const token = await interviewApi.createRealtimeToken(user.user_id, created.id)
-      await startConnection(token, created.id)
       setStatus('connected')
       startTimer()
+      await doStartTurn(created.id, user.user_id)
     } catch (error: any) {
       setStatus('error')
       setErrorMessage(parseStartError(error))
@@ -283,105 +363,61 @@ export default function InterviewPage() {
     }, 3000)
   }
 
-  const startConnection = async (token: string, sessionId: number) => {
-    const pc = new RTCPeerConnection()
-    pcRef.current = pc
-    const dc = pc.createDataChannel('oai-events')
-    dcRef.current = dc
-    dc.onmessage = (e) => {
-      try { handleRealtimeEvent(JSON.parse(e.data), sessionId) } catch { /* ignore */ }
-    }
-    pc.ontrack = (event) => {
-      if (audioRef.current) {
-        audioRef.current.srcObject = event.streams[0]
-        audioRef.current.play().catch(() => undefined)
-        setupAiAudioAnalyser(event.streams[0])
-      }
-    }
-
-    // Reuse lobby stream if available, otherwise acquire new
-    let stream = streamRef.current
-    if (!stream) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
-      } catch (err: any) {
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')
-          throw new Error('NotAllowedError')
-        if (err.name === 'NotFoundError')
-          throw new Error('NotFoundError')
-        throw err
-      }
-      streamRef.current = stream
-    }
-
-    stream.getTracks().forEach(track => pc.addTrack(track, stream!))
-    const offer = await pc.createOffer()
-    await pc.setLocalDescription(offer)
-
-    const model = 'gpt-4o-realtime-preview'
-    const response = await fetch(`https://api.openai.com/v1/realtime?model=${model}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/sdp' },
-      body: offer.sdp,
-    })
-    if (!response.ok) throw new Error(await response.text())
-    await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() })
-
-    dc.onopen = () => {
-      dc.send(JSON.stringify({
-        type: 'conversation.item.create',
-        item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '面接を開始してください。最初の質問をお願いします。' }] },
-      }))
-      dc.send(JSON.stringify({ type: 'response.create', response: { modalities: ['audio'] } }))
-    }
+  const startRecording = () => {
+    if (!streamRef.current || isRecording || turnPending) return
+    const audioTracks = streamRef.current.getAudioTracks()
+    if (audioTracks.length === 0) return
+    const micStream = new MediaStream(audioTracks)
+    audioChunksRef.current = []
+    const mr = new MediaRecorder(micStream, { mimeType: 'audio/webm' })
+    mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+    mr.onstop = () => { void sendTurn() }
+    mediaRecorderRef.current = mr
+    mr.start()
+    setIsRecording(true)
   }
 
-  const setupAiAudioAnalyser = (stream: MediaStream) => {
-    if (aiAudioCtxRef.current) return
-    aiAudioStreamRef.current = stream
-    const ctx = new AudioContext()
-    aiAudioCtxRef.current = ctx
-    const source = ctx.createMediaStreamSource(stream)
-    const analyser = ctx.createAnalyser()
-    analyser.fftSize = 512
-    aiAnalyserRef.current = analyser
-    source.connect(analyser)
-    const data = new Uint8Array(analyser.frequencyBinCount)
-    const tick = () => {
-      analyser.getByteTimeDomainData(data)
-      let sum = 0
-      data.forEach(v => { const n = (v - 128) / 128; sum += n * n })
-      const level = Math.min(1, Math.sqrt(sum / data.length) * 2.5)
-      setAiLevel(level)
-      setAiSpeaking(level > 0.08)
-      aiAnimationRef.current = requestAnimationFrame(tick)
-    }
-    tick()
+  const stopRecording = () => {
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return
+    mediaRecorderRef.current.stop()
+    setIsRecording(false)
+    setTurnPending(true)
   }
 
-  const handleRealtimeEvent = async (event: any, sessionId: number) => {
-    if (!user) return
-    switch (event.type) {
-      case 'conversation.item.input_audio_transcription.delta':
-        if (event.delta) setPartialUser(p => p + event.delta); break
-      case 'conversation.item.input_audio_transcription.completed': {
-        const text = (event.transcript || event.text || partialUser).trim()
-        if (text) {
-          setUtterances(p => [...p, { role: 'user', text }]); setPartialUser('')
-          try { await interviewApi.saveUtterance(sessionId, user.user_id, 'user', text) } catch { /* ignore */ }
-        }
-        break
+  const sendTurn = async () => {
+    if (!user || !session) { setTurnPending(false); return }
+    const chunks = audioChunksRef.current
+    if (chunks.length === 0) { setTurnPending(false); return }
+    const audioBlob = new Blob(chunks, { type: 'audio/webm' })
+    const formData = new FormData()
+    formData.append('audio', audioBlob, 'audio.webm')
+    formData.append('user_id', String(user.user_id))
+    formData.append('history', JSON.stringify(historyRef.current))
+    try {
+      const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+      const res = await fetch(`${BACKEND}/api/interviews/${session.id}/turn`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { meta, audio } = await parseMultipart(res)
+      const userText: string = meta.user_text || ''
+      const aiText: string = meta.ai_text || ''
+      if (userText) {
+        historyRef.current.push({ role: 'user', content: userText })
+        setUtterances(p => [...p, { role: 'user', text: userText }])
+        try { await interviewApi.saveUtterance(session.id, user.user_id, 'user', userText) } catch { /* ignore */ }
       }
-      case 'response.audio_transcript.delta':
-        if (event.delta) setPartialAi(p => p + event.delta); break
-      case 'response.audio_transcript.done': {
-        const text = (event.transcript || partialAi).trim()
-        if (text) {
-          setUtterances(p => [...p, { role: 'ai', text }]); setPartialAi('')
-          try { await interviewApi.saveUtterance(sessionId, user.user_id, 'ai', text) } catch { /* ignore */ }
-        }
-        break
+      if (aiText) {
+        historyRef.current.push({ role: 'assistant', content: aiText })
+        setUtterances(p => [...p, { role: 'ai', text: aiText }])
+        try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch { /* ignore */ }
       }
+      await playAudioBlob(audio)
+    } catch (e: any) {
+      setErrorMessage(e.message || '通信エラーが発生しました')
+    } finally {
+      setTurnPending(false)
     }
   }
 
@@ -928,7 +964,7 @@ export default function InterviewPage() {
                 transition: 'box-shadow 0.3s',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <ThreeAvatar gender={avatarGender} audioStream={aiAudioStreamRef.current} level={aiLevel} speaking={aiSpeaking} />
+                <ThreeAvatar gender={avatarGender} audioStream={null} level={aiLevel} speaking={aiSpeaking} />
               </Box>
             </Box>
 
@@ -1112,10 +1148,21 @@ export default function InterviewPage() {
 
         {/* Center: controls */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, md: 1.5 }, mx: 'auto' }}>
-          <Tooltip title={micEnabled ? 'マイクをオフ' : 'マイクをオン'}>
+          <Tooltip title={isRecording ? '録音停止して送信' : turnPending ? '処理中...' : '録音開始（クリックして話す）'}>
             <span>
-              <IconButton onClick={toggleMic} disabled={!isConnected} sx={{ bgcolor: micEnabled ? 'rgba(255,255,255,0.08)' : '#ea4335', width: 48, height: 48, '&:hover': { bgcolor: micEnabled ? 'rgba(255,255,255,0.15)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' } }}>
-                {micEnabled ? <MicIcon sx={{ color: '#e8eaed' }} /> : <MicOffIcon sx={{ color: '#fff' }} />}
+              <IconButton
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={!isConnected || turnPending || aiSpeaking}
+                sx={{
+                  bgcolor: isRecording ? '#ea4335' : 'rgba(255,255,255,0.08)',
+                  width: 48, height: 48,
+                  animation: isRecording ? 'pulse 1s infinite' : 'none',
+                  '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.6 } },
+                  '&:hover': { bgcolor: isRecording ? '#c5221f' : 'rgba(255,255,255,0.15)' },
+                  '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
+                }}
+              >
+                {isRecording ? <MicIcon sx={{ color: '#fff' }} /> : <MicOffIcon sx={{ color: '#9aa0a6' }} />}
               </IconButton>
             </span>
           </Tooltip>
@@ -1170,7 +1217,7 @@ export default function InterviewPage() {
         </Box>
       </Box>
 
-      <audio ref={audioRef} autoPlay />
+      <audio ref={aiAudioRef} />
     </Box>
   )
 }
