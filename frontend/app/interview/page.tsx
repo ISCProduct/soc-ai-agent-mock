@@ -475,14 +475,21 @@ export default function InterviewPage() {
                 {/* Company section */}
                 <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0' }}>
                   <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2 }}>志望企業</Typography>
-                  {/* Search */}
-                  <Box sx={{ position: 'relative', mb: 3 }}>
+
+                  {/* Search / direct input */}
+                  <Box sx={{ position: 'relative', mb: 2 }}>
                     <SearchIcon sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: 20 }} />
                     <Box
                       component="input"
                       value={companySearch}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompanySearch(e.target.value)}
-                      placeholder="企業名・業種で検索（例：テック、製造、金融）"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        setCompanySearch(e.target.value)
+                        // 入力中は手動入力企業として即時反映
+                        if (e.target.value.trim()) {
+                          setInterviewCompany({ id: 0, name: e.target.value.trim() })
+                        }
+                      }}
+                      placeholder="企業名を入力、または下のリストから選択"
                       sx={{
                         width: '100%', pl: '40px', pr: 2, py: 1.5,
                         bgcolor: '#f8fafc', border: '1px solid #e2e8f0',
@@ -494,7 +501,18 @@ export default function InterviewPage() {
                     />
                   </Box>
 
-                  {/* Company chips */}
+                  {/* Manual entry confirmation chip */}
+                  {companySearch.trim() && interviewCompany?.id === 0 && (
+                    <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: `${PRIMARY}08`, border: `1px solid ${PRIMARY}30`, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CheckCircleIcon sx={{ color: PRIMARY, fontSize: 18 }} />
+                      <Typography sx={{ fontSize: 13, color: PRIMARY, fontWeight: 600 }}>
+                        「{interviewCompany.name}」で面接練習します
+                      </Typography>
+                    </Box>
+                  )}
+
+                  {/* Company chips from DB */}
+                  <Typography sx={{ fontSize: 12, color: '#94a3b8', mb: 1 }}>登録企業から選択</Typography>
                   {companiesLoading ? (
                     <LinearProgress sx={{ borderRadius: 1 }} />
                   ) : (
@@ -505,7 +523,7 @@ export default function InterviewPage() {
                           <Button
                             key={c.id}
                             size="small"
-                            onClick={() => setInterviewCompany(c)}
+                            onClick={() => { setInterviewCompany(c); setCompanySearch(c.name) }}
                             startIcon={isSelected ? <CheckCircleIcon sx={{ fontSize: '16px !important' }} /> : undefined}
                             sx={{
                               px: 2, py: 0.8, borderRadius: 2, fontWeight: 500, fontSize: 13,
@@ -520,7 +538,7 @@ export default function InterviewPage() {
                         )
                       })}
                       {filteredCompanies.length === 0 && !companiesLoading && (
-                        <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>企業が見つかりません</Typography>
+                        <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>登録企業が見つかりません</Typography>
                       )}
                     </Box>
                   )}
