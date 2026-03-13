@@ -301,7 +301,7 @@ export default function InterviewPage() {
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
       setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch { /* ignore */ }
+      try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
     }
     await playAudioBlob(audio)
   }
@@ -418,12 +418,12 @@ export default function InterviewPage() {
       if (userText) {
         historyRef.current.push({ role: 'user', content: userText })
         setUtterances(p => [...p, { role: 'user', text: userText }])
-        try { await interviewApi.saveUtterance(session.id, user.user_id, 'user', userText) } catch { /* ignore */ }
+        try { await interviewApi.saveUtterance(session.id, user.user_id, 'user', userText) } catch (e) { console.error('[utterance save error]', e) }
       }
       if (aiText) {
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
-        try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch { /* ignore */ }
+        try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
       }
       await playAudioBlob(audio)
     } catch (e: any) {
