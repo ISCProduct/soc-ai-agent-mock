@@ -78,6 +78,18 @@ func (r *UserRepository) DeleteUser(id uint) error {
 	return r.db.Delete(&models.User{}, id).Error
 }
 
+// GetUserByVerificationToken メール認証トークンでユーザー取得
+func (r *UserRepository) GetUserByVerificationToken(token string) (*models.User, error) {
+	var user models.User
+	if err := r.db.Where("email_verification_token = ?", token).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetUserByOAuth OAuth情報でユーザー取得
 func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
 	var user models.User

@@ -33,6 +33,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
   const [certificationsInProgress, setCertificationsInProgress] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [verificationSent, setVerificationSent] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -43,7 +44,14 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
       authService.saveAuth(response)
       onAuthSuccess(response)
     } catch (err: any) {
-      setError(err.message)
+      const msg = err.message || ''
+      if (msg === 'email_not_verified') {
+        setError('メールアドレスが未確認です。登録時に送信された確認メールをご確認ください。')
+      } else if (msg === 're_verification_required') {
+        setError('10日以上ログインがなかったため、再認証メールを送信しました。メールをご確認ください。')
+      } else {
+        setError(msg)
+      }
     } finally {
       setLoading(false)
     }
@@ -62,8 +70,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
         joinCertifications(certificationsAcquired),
         certificationsInProgress,
       )
-      authService.saveAuth(response)
-      onAuthSuccess(response)
+      setVerificationSent(true)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -118,6 +125,12 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
             4万社から最適な企業を選定
           </Typography>
+
+          {verificationSent && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              確認メールを送信しました。メールのリンクをクリックしてアカウントを有効化してください。
+            </Alert>
+          )}
 
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>

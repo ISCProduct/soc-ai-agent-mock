@@ -206,3 +206,61 @@ func (s *EmailService) SendAnalysisReport(user *models.User, summary *AnalysisSu
 	fmt.Printf("[EmailService] Email sent successfully to %s\n", user.Email)
 	return nil
 }
+
+// SendVerificationEmail メール認証用のメールを送信
+func (s *EmailService) SendVerificationEmail(user *models.User, token, appURL string) error {
+	verifyURL := appURL + "/verify-email?token=" + token
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>メール認証</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:500px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">メールアドレスの確認</h2>
+<p>%s さん、ご登録ありがとうございます。</p>
+<p>以下のボタンをクリックしてメールアドレスを確認してください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">メールアドレスを確認する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。身に覚えのない場合は無視してください。</p>
+</div>
+</body></html>`, user.Name, verifyURL)
+
+	if s.host == "" {
+		fmt.Printf("[EmailService] Verification email for %s: %s\n", user.Email, verifyURL)
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: メールアドレスの確認\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, user.Email, body,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg))
+}
+
+// SendReVerificationEmail 再認証メールを送信
+func (s *EmailService) SendReVerificationEmail(user *models.User, token, appURL string) error {
+	verifyURL := appURL + "/verify-email?token=" + token
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>再認証</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:500px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#ec5b13;">ログイン再認証のお願い</h2>
+<p>%s さん、前回のログインから10日以上が経過しました。</p>
+<p>セキュリティのため、以下のボタンをクリックして再認証を行ってください。</p>
+<a href="%s" style="display:inline-block;background:#ec5b13;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">再認証する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。</p>
+</div>
+</body></html>`, user.Name, verifyURL)
+
+	if s.host == "" {
+		fmt.Printf("[EmailService] Re-verification email for %s: %s\n", user.Email, verifyURL)
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: ログイン再認証のお願い\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, user.Email, body,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg))
+}
