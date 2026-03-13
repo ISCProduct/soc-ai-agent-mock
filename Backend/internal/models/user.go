@@ -15,8 +15,11 @@ type User struct {
 	OAuthProvider            string `gorm:"size:50;column:oauth_provider"`               // OAuth提供者 (google, github, など)
 	OAuthID                  string `gorm:"size:255;index;column:oauth_id"`              // OAuth提供者のユーザーID
 	AvatarURL                string `gorm:"size:500;column:avatar_url"`                  // プロフィール画像URL
-	CertificationsAcquired   string `gorm:"type:text;column:certifications_acquired"`    // 取得資格
-	CertificationsInProgress string `gorm:"type:text;column:certifications_in_progress"` // 勉強中の資格
+	CertificationsAcquired   string     `gorm:"type:text;column:certifications_acquired"`    // 取得資格
+	CertificationsInProgress string     `gorm:"type:text;column:certifications_in_progress"` // 勉強中の資格
+	EmailVerifiedAt          *time.Time `gorm:"column:email_verified_at"`                    // メール認証日時
+	EmailVerificationToken   string     `gorm:"size:255;column:email_verification_token"`    // メール認証トークン
+	LastLoginAt              *time.Time `gorm:"column:last_login_at"`                        // 最終ログイン日時
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 }

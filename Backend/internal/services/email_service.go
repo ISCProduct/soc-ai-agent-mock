@@ -207,152 +207,60 @@ func (s *EmailService) SendAnalysisReport(user *models.User, summary *AnalysisSu
 	return nil
 }
 
-// InterviewReportEmailData 面接レポートメールのデータ
-type InterviewReportEmailData struct {
-	UserName    string
-	SessionID   string
-	SentAt      string
-	Summary     []string
-	LogicScore  int
-	SpecScore   int
-	OwnScore    int
-	LogicEvid   string
-	SpecEvid    string
-	OwnEvid     string
-}
-
-const interviewReportEmailTemplate = `<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>AI面接練習レポート</title>
-  <style>
-    body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;margin:0;padding:20px;}
-    .container{max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);}
-    .header{background:linear-gradient(135deg,#ec5b13,#ff8a50);color:white;padding:32px 24px;text-align:center;}
-    .header h1{margin:0;font-size:22px;}
-    .header p{margin:8px 0 0;opacity:.9;font-size:13px;}
-    .section{padding:20px 24px;border-bottom:1px solid #e0e0e0;}
-    .section h2{margin:0 0 14px;font-size:16px;color:#ec5b13;}
-    .summary-item{display:flex;gap:8px;margin-bottom:8px;font-size:13px;line-height:1.6;color:#333;}
-    .bullet{color:#ec5b13;font-weight:bold;flex-shrink:0;}
-    .scores-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;}
-    .score-card{background:#fff8f5;border:1px solid #ffd5c0;border-radius:8px;padding:12px;text-align:center;}
-    .score-label{font-size:11px;color:#888;margin-bottom:4px;}
-    .score-value{font-size:28px;font-weight:bold;color:#ec5b13;}
-    .score-max{font-size:12px;color:#aaa;}
-    .bar-bg{background:#e0e0e0;border-radius:4px;height:8px;margin-top:4px;}
-    .bar-fill{background:#ec5b13;border-radius:4px;height:8px;}
-    .evidence-item{background:#f9f9f9;border-radius:6px;padding:12px;margin-bottom:8px;}
-    .evidence-label{font-size:11px;color:#ec5b13;font-weight:bold;margin-bottom:4px;}
-    .evidence-text{font-size:13px;color:#555;line-height:1.5;}
-    .footer{padding:20px 24px;text-align:center;background:#fafafa;color:#999;font-size:11px;}
-  </style>
-</head>
-<body>
-<div class="container">
-  <div class="header">
-    <h1>🎤 AI面接練習レポート</h1>
-    <p>{{.UserName}} さんの面接結果</p>
-    <p>{{.SentAt}}</p>
-  </div>
-
-  {{if .Summary}}
-  <div class="section">
-    <h2>📝 総合フィードバック</h2>
-    {{range .Summary}}
-    <div class="summary-item"><span class="bullet">▶</span><span>{{.}}</span></div>
-    {{end}}
-  </div>
-  {{end}}
-
-  <div class="section">
-    <h2>📊 評価スコア（5点満点）</h2>
-    <div class="scores-grid">
-      <div class="score-card">
-        <div class="score-label">論理性</div>
-        <div class="score-value">{{.LogicScore}}</div>
-        <div class="score-max">/ 5</div>
-        <div class="bar-bg"><div class="bar-fill" style="width:{{.LogicScore}}0%"></div></div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">具体性</div>
-        <div class="score-value">{{.SpecScore}}</div>
-        <div class="score-max">/ 5</div>
-        <div class="bar-bg"><div class="bar-fill" style="width:{{.SpecScore}}0%"></div></div>
-      </div>
-      <div class="score-card">
-        <div class="score-label">主体性</div>
-        <div class="score-value">{{.OwnScore}}</div>
-        <div class="score-max">/ 5</div>
-        <div class="bar-bg"><div class="bar-fill" style="width:{{.OwnScore}}0%"></div></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>🔍 評価の根拠</h2>
-    {{if .LogicEvid}}
-    <div class="evidence-item">
-      <div class="evidence-label">論理性</div>
-      <div class="evidence-text">{{.LogicEvid}}</div>
-    </div>
-    {{end}}
-    {{if .SpecEvid}}
-    <div class="evidence-item">
-      <div class="evidence-label">具体性</div>
-      <div class="evidence-text">{{.SpecEvid}}</div>
-    </div>
-    {{end}}
-    {{if .OwnEvid}}
-    <div class="evidence-item">
-      <div class="evidence-label">主体性</div>
-      <div class="evidence-text">{{.OwnEvid}}</div>
-    </div>
-    {{end}}
-  </div>
-
-  <div class="footer">
-    <p>このメールはAI就活エージェントから自動送信されました。</p>
-    <p>セッションID: {{.SessionID}}</p>
-  </div>
+// SendVerificationEmail メール認証用のメールを送信
+func (s *EmailService) SendVerificationEmail(user *models.User, token, appURL string) error {
+	verifyURL := appURL + "/verify-email?token=" + token
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>メール認証</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:500px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">メールアドレスの確認</h2>
+<p>%s さん、ご登録ありがとうございます。</p>
+<p>以下のボタンをクリックしてメールアドレスを確認してください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">メールアドレスを確認する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。身に覚えのない場合は無視してください。</p>
 </div>
-</body>
-</html>`
-
-// SendInterviewReport 面接練習レポートをメールで送信
-func (s *EmailService) SendInterviewReport(user *models.User, data InterviewReportEmailData) error {
-	tmpl, err := template.New("interview_report").Parse(interviewReportEmailTemplate)
-	if err != nil {
-		return fmt.Errorf("failed to parse email template: %w", err)
-	}
-
-	data.SentAt = time.Now().Format("2006年01月02日 15:04")
-	data.UserName = user.Name
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-
-	htmlBody := buf.String()
+</body></html>`, user.Name, verifyURL)
 
 	if s.host == "" {
-		fmt.Printf("[EmailService] SMTP not configured. Simulating interview report send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
+		fmt.Printf("[EmailService] Verification email for %s: %s\n", user.Email, verifyURL)
 		return nil
 	}
 
 	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: AI面接練習レポート\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, user.Email, htmlBody,
+		"From: %s\r\nTo: %s\r\nSubject: メールアドレスの確認\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, user.Email, body,
 	)
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg))
+}
 
-	if err := smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg)); err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
+// SendReVerificationEmail 再認証メールを送信
+func (s *EmailService) SendReVerificationEmail(user *models.User, token, appURL string) error {
+	verifyURL := appURL + "/verify-email?token=" + token
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>再認証</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:500px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#ec5b13;">ログイン再認証のお願い</h2>
+<p>%s さん、前回のログインから10日以上が経過しました。</p>
+<p>セキュリティのため、以下のボタンをクリックして再認証を行ってください。</p>
+<a href="%s" style="display:inline-block;background:#ec5b13;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">再認証する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。</p>
+</div>
+</body></html>`, user.Name, verifyURL)
+
+	if s.host == "" {
+		fmt.Printf("[EmailService] Re-verification email for %s: %s\n", user.Email, verifyURL)
+		return nil
 	}
 
-	fmt.Printf("[EmailService] Interview report email sent successfully to %s\n", user.Email)
-	return nil
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: ログイン再認証のお願い\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, user.Email, body,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg))
 }

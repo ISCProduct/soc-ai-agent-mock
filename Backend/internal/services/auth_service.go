@@ -7,17 +7,20 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService struct {
-	userRepo *repositories.UserRepository
+	userRepo     *repositories.UserRepository
+	emailService *EmailService
 }
 
-func NewAuthService(userRepo *repositories.UserRepository) *AuthService {
-	return &AuthService{userRepo: userRepo}
+func NewAuthService(userRepo *repositories.UserRepository, emailService *EmailService) *AuthService {
+	return &AuthService{userRepo: userRepo, emailService: emailService}
 }
 
 // RegisterRequest ユーザー登録リクエスト
@@ -60,6 +63,8 @@ type AuthResponse struct {
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`
 	Token                    string `json:"token,omitempty"` // 将来的なトークン認証用
+	EmailVerified            bool   `json:"email_verified"`
+	RequiresReVerification   bool   `json:"requires_re_verification,omitempty"`
 }
 
 // Register 新規ユーザー登録
@@ -106,9 +111,21 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		CertificationsInProgress: req.CertificationsInProgress,
 	}
 
+	// メール認証トークン生成
+	tokenBytes := make([]byte, 24)
+	rand.Read(tokenBytes)
+	user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
+
 	if err := s.userRepo.CreateUser(user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
+
+	// 認証メール送信（失敗しても登録は成功扱い）
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	go s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL)
 
 	return &AuthResponse{
 		UserID:                   user.ID,
@@ -120,6 +137,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
+		EmailVerified:            false,
 	}, nil
 }
 
@@ -150,6 +168,38 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	}
 	promoteAdminIfMatched(user, s.userRepo)
 
+	isOAuth := user.OAuthProvider != ""
+	emailVerified := user.EmailVerifiedAt != nil
+	requiresReVerification := false
+
+	if !isOAuth {
+		// メール認証チェック
+		if !emailVerified {
+			return nil, errors.New("email_not_verified")
+		}
+
+		// 10日以上ログインなし → 再認証
+		if user.LastLoginAt != nil && time.Since(*user.LastLoginAt) > 10*24*time.Hour {
+			tokenBytes := make([]byte, 24)
+			rand.Read(tokenBytes)
+			user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
+			user.EmailVerifiedAt = nil
+			s.userRepo.UpdateUser(user)
+			appURL := os.Getenv("APP_URL")
+			if appURL == "" {
+				appURL = "http://localhost:3000"
+			}
+			go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+			requiresReVerification = true
+			return nil, errors.New("re_verification_required")
+		}
+	}
+
+	// 最終ログイン更新
+	now := time.Now()
+	user.LastLoginAt = &now
+	s.userRepo.UpdateUser(user)
+
 	return &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
@@ -161,6 +211,8 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
+		EmailVerified:            emailVerified,
+		RequiresReVerification:   requiresReVerification,
 	}, nil
 }
 
@@ -267,4 +319,22 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
 	}, nil
+}
+
+// VerifyEmail トークンを検証してメールを認証済みにする
+func (s *AuthService) VerifyEmail(token string) error {
+	if token == "" {
+		return errors.New("token is required")
+	}
+	user, err := s.userRepo.GetUserByVerificationToken(token)
+	if err != nil {
+		return fmt.Errorf("failed to find user: %w", err)
+	}
+	if user == nil {
+		return errors.New("invalid or expired token")
+	}
+	now := time.Now()
+	user.EmailVerifiedAt = &now
+	user.EmailVerificationToken = ""
+	return s.userRepo.UpdateUser(user)
 }
