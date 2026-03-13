@@ -231,35 +231,27 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 	maxTokens := getIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
 	req := openai.RealtimeSessionRequest{
-		Type:             "realtime",
-		Model:            model,
-		OutputModalities: []string{"audio"},
-		Instructions:     buildRealtimeInstructions(),
-		Audio: map[string]interface{}{
-			"input": map[string]interface{}{
-				"transcription": map[string]interface{}{
-					"model": transcribeModel,
-				},
-				"turn_detection": map[string]interface{}{
-					"type":                "server_vad",
-					"threshold":           0.5,
-					"silence_duration_ms": 700,
-					"prefix_padding_ms":   300,
-					"create_response":     true,
-					"interrupt_response":  true,
-				},
-			},
-			"output": map[string]interface{}{
-				"voice": voice,
-			},
+		Model:        model,
+		Modalities:   []string{"audio"},
+		Voice:        voice,
+		Instructions: buildRealtimeInstructions(),
+		InputAudioTranscription: map[string]interface{}{
+			"model": transcribeModel,
 		},
-		MaxOutputTokens: maxTokens,
+		TurnDetection: map[string]interface{}{
+			"type":                "server_vad",
+			"threshold":           0.5,
+			"silence_duration_ms": 700,
+			"prefix_padding_ms":   300,
+			"create_response":     true,
+		},
+		MaxResponseOutputTokens: maxTokens,
 	}
 	resp, err := s.openaiClient.CreateRealtimeClientSecret(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	return resp.Value, nil
+	return resp.ClientSecret.Value, nil
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {

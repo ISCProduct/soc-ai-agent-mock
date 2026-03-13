@@ -318,7 +318,8 @@ export default function InterviewPage() {
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
 
-    const response = await fetch('https://api.openai.com/v1/realtime/calls', {
+    const model = 'gpt-4o-realtime-preview'
+    const response = await fetch(`https://api.openai.com/v1/realtime?model=${model}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/sdp' },
       body: offer.sdp,

@@ -10,34 +10,35 @@ import (
 	"time"
 )
 
+// RealtimeSessionRequest POST /v1/realtime/sessions のリクエストボディ
 type RealtimeSessionRequest struct {
-	Type             string                 `json:"type,omitempty"`
-	Model            string                 `json:"model"`
-	OutputModalities []string               `json:"output_modalities,omitempty"`
-	Instructions     string                 `json:"instructions,omitempty"`
-	Audio            map[string]interface{} `json:"audio,omitempty"`
-	MaxOutputTokens  interface{}            `json:"max_output_tokens,omitempty"`
+	Model                    string                 `json:"model"`
+	Modalities               []string               `json:"modalities,omitempty"`
+	Voice                    string                 `json:"voice,omitempty"`
+	Instructions             string                 `json:"instructions,omitempty"`
+	InputAudioTranscription  map[string]interface{} `json:"input_audio_transcription,omitempty"`
+	TurnDetection            map[string]interface{} `json:"turn_detection,omitempty"`
+	MaxResponseOutputTokens  interface{}            `json:"max_response_output_tokens,omitempty"`
 }
 
-type RealtimeClientSecretRequest struct {
-	Session RealtimeSessionRequest `json:"session"`
+// RealtimeSessionResponse POST /v1/realtime/sessions のレスポンス
+type RealtimeSessionResponse struct {
+	ID           string `json:"id"`
+	ClientSecret struct {
+		Value     string `json:"value"`
+		ExpiresAt int64  `json:"expires_at"`
+	} `json:"client_secret"`
 }
 
-type RealtimeClientSecretResponse struct {
-	Value     string `json:"value"`
-	ExpiresAt int64  `json:"expires_at"`
-}
-
-func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session RealtimeSessionRequest) (*RealtimeClientSecretResponse, error) {
+func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session RealtimeSessionRequest) (*RealtimeSessionResponse, error) {
 	if cli.apiKey == "" {
 		return nil, errors.New("openai api key is not set")
 	}
-	payload := RealtimeClientSecretRequest{Session: session}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(session)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/realtime/client_secrets", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/realtime/sessions", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -59,12 +60,12 @@ func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session Realt
 		return nil, errors.New(string(respBody))
 	}
 
-	var parsed RealtimeClientSecretResponse
+	var parsed RealtimeSessionResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, err
 	}
-	if parsed.Value == "" {
-		return nil, errors.New("missing value in realtime client secret response")
+	if parsed.ClientSecret.Value == "" {
+		return nil, errors.New("missing client_secret.value in realtime session response")
 	}
 	return &parsed, nil
 }
