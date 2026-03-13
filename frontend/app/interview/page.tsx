@@ -940,6 +940,19 @@ export default function InterviewPage() {
         </Box>
       </Box>
 
+      {/* ── Cost alert ── */}
+      {isConnected && estimatedCost >= interviewLimits.maxCostUSD * 0.8 && (
+        <Box sx={{ px: 2, pt: 1, flexShrink: 0 }}>
+          <Box sx={{ bgcolor: estimatedCost >= interviewLimits.maxCostUSD ? 'rgba(234,67,53,0.2)' : 'rgba(251,188,4,0.15)', border: `1px solid ${estimatedCost >= interviewLimits.maxCostUSD ? '#ea4335' : '#fbbc04'}`, borderRadius: 1, px: 2, py: 0.8, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontSize: 13, color: estimatedCost >= interviewLimits.maxCostUSD ? '#f28b82' : '#fdd663', fontWeight: 600 }}>
+              {estimatedCost >= interviewLimits.maxCostUSD
+                ? '⚠️ コスト上限に達しました。間もなく面接が終了します。'
+                : `⚠️ コスト上限の80%に達しました（$${estimatedCost.toFixed(2)} / $${interviewLimits.maxCostUSD.toFixed(2)}）`}
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
       {/* ── Main ── */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 2, px: 2, pb: '88px', pt: 2, overflow: 'hidden', minHeight: 0 }}>
 
