@@ -233,7 +233,7 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	req := openai.RealtimeSessionRequest{
 		Type:             "realtime",
 		Model:            model,
-		OutputModalities: []string{"audio", "text"},
+		OutputModalities: []string{"audio"},
 		Instructions:     buildRealtimeInstructions(),
 		Audio: map[string]interface{}{
 			"input": map[string]interface{}{
