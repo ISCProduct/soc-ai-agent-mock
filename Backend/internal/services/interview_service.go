@@ -274,7 +274,7 @@ type TurnResult struct {
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
-func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string) (*TurnResult, error) {
+func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, position, companyInfo string) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -296,7 +296,7 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(), history)
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, position, companyInfo), history)
 	if err != nil {
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
@@ -312,7 +312,7 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
-func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint) (*TurnResult, error) {
+func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint, companyName, position, companyInfo string) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -321,8 +321,8 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		return nil, errors.New("forbidden")
 	}
 
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(), []map[string]string{
-		{"role": "user", "content": "面接を開始してください。"},
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, position, companyInfo), []map[string]string{
+		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chat error: %w", err)
@@ -337,12 +337,27 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 	return &TurnResult{AIText: aiText, Audio: audio}, nil
 }
 
-func buildInterviewSystemPrompt() string {
-	return strings.TrimSpace(`あなたは日本語の就活面接官です。以下を守ってください。
+func buildInterviewSystemPrompt(companyName, position, companyInfo string) string {
+	base := `あなたは日本語の就活面接官です。以下を守ってください。
 - 1回の返答は2〜3文以内で短くまとめる
 - 必ず1つの質問で締めくくる
 - 応募者が話しやすいよう具体的に深掘りする
-- 評価・講評は面接終了まで行わない`)
+- 評価・講評は面接終了まで行わない`
+
+	if companyName != "" || position != "" {
+		base += "\n\n【面接情報】"
+		if companyName != "" {
+			base += "\n志望企業: " + companyName
+		}
+		if position != "" {
+			base += "\n応募職種: " + position
+		}
+		if companyInfo != "" {
+			base += "\n企業概要: " + companyInfo
+		}
+		base += "\n\n上記の企業・職種に合わせた質問を行ってください。"
+	}
+	return strings.TrimSpace(base)
 }
 
 func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {

@@ -286,7 +286,12 @@ export default function InterviewPage() {
     const res = await fetch(`${BACKEND}/api/interviews/${sessionId}/start-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify({
+        user_id: userId,
+        company_name: interviewCompany?.name || '',
+        position: selectedPosition?.title || '',
+        company_info: [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '),
+      }),
     })
     if (!res.ok) throw new Error(await res.text())
     const { meta, audio } = await parseMultipart(res)
@@ -395,6 +400,9 @@ export default function InterviewPage() {
     formData.append('audio', audioBlob, 'audio.webm')
     formData.append('user_id', String(user.user_id))
     formData.append('history', JSON.stringify(historyRef.current))
+    formData.append('company_name', interviewCompany?.name || '')
+    formData.append('position', selectedPosition?.title || '')
+    formData.append('company_info', [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '))
     try {
       const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
       const res = await fetch(`${BACKEND}/api/interviews/${session.id}/turn`, {
