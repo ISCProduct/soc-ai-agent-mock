@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Card,
   CardContent,
+  Chip,
   Divider,
   MenuItem,
   Stack,
   TextField,
   Typography,
-  Alert,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
 
@@ -25,6 +26,7 @@ type Company = {
   source_url?: string
   is_provisional?: boolean
   data_status?: string
+  is_active?: boolean
 }
 
 type JobCategory = {
@@ -63,6 +65,17 @@ type GraduateEmployment = {
   job_position?: JobPosition
 }
 
+const statusBadge = (status?: string) => {
+  if (status === 'published') return <Chip label="公開" color="success" size="small" />
+  return <Chip label="下書き" color="warning" size="small" />
+}
+
+const sourceLabel = (sourceType?: string) => {
+  if (sourceType === 'official') return '公式'
+  if (sourceType === 'job_site') return 'クローリング'
+  return '手動'
+}
+
 export default function AdminCompaniesPage() {
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -76,6 +89,8 @@ export default function AdminCompaniesPage() {
   const [jobPositions, setJobPositions] = useState<JobPosition[]>([])
   const [graduateEntries, setGraduateEntries] = useState<GraduateEmployment[]>([])
   const [error, setError] = useState('')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all')
+
   const [name, setName] = useState('')
   const [industry, setIndustry] = useState('')
   const [location, setLocation] = useState('')
@@ -120,25 +135,19 @@ export default function AdminCompaniesPage() {
   const fetchJobCategories = async () => {
     const res = await fetch('/api/admin/job-categories')
     const data = await res.json()
-    if (res.ok) {
-      setJobCategories(data?.job_categories || [])
-    }
+    if (res.ok) setJobCategories(data?.job_categories || [])
   }
 
   const fetchJobPositions = async () => {
     const res = await fetch('/api/admin/job-positions?limit=50')
     const data = await res.json()
-    if (res.ok) {
-      setJobPositions(data?.positions || [])
-    }
+    if (res.ok) setJobPositions(data?.positions || [])
   }
 
   const fetchGraduateEntries = async () => {
     const res = await fetch('/api/admin/graduate-employments?limit=50')
     const data = await res.json()
-    if (res.ok) {
-      setGraduateEntries(data?.entries || [])
-    }
+    if (res.ok) setGraduateEntries(data?.entries || [])
   }
 
   useEffect(() => {
@@ -181,6 +190,34 @@ export default function AdminCompaniesPage() {
     setSourceUrl('')
     setIsProvisional(true)
     setDataStatus('draft')
+    fetchCompanies()
+  }
+
+  const handlePublish = async (companyId: number) => {
+    const admin = authService.getStoredUser()
+    const res = await fetch(`/api/admin/companies/${companyId}/publish`, {
+      method: 'PATCH',
+      headers: { 'X-Admin-Email': admin?.email || '' },
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      setError(data?.error || '承認に失敗しました')
+      return
+    }
+    fetchCompanies()
+  }
+
+  const handleReject = async (companyId: number) => {
+    const admin = authService.getStoredUser()
+    const res = await fetch(`/api/admin/companies/${companyId}/reject`, {
+      method: 'PATCH',
+      headers: { 'X-Admin-Email': admin?.email || '' },
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      setError(data?.error || '却下に失敗しました')
+      return
+    }
     fetchCompanies()
   }
 
@@ -263,6 +300,11 @@ export default function AdminCompaniesPage() {
     setEmploymentNote('')
     fetchGraduateEntries()
   }
+
+  const filteredCompanies = companies.filter((c) => {
+    if (filterStatus === 'all') return true
+    return c.data_status === filterStatus
+  })
 
   return (
     <Box sx={{ p: 4, maxWidth: 1000, mx: 'auto' }}>
@@ -483,22 +525,62 @@ export default function AdminCompaniesPage() {
 
       <Card>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            企業一覧
-          </Typography>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+            <Typography variant="h6">企業一覧</Typography>
+            <Stack direction="row" spacing={1}>
+              {(['all', 'draft', 'published'] as const).map((s) => (
+                <Chip
+                  key={s}
+                  label={s === 'all' ? 'すべて' : s === 'draft' ? '下書き' : '公開'}
+                  variant={filterStatus === s ? 'filled' : 'outlined'}
+                  color={s === 'published' ? 'success' : s === 'draft' ? 'warning' : 'default'}
+                  onClick={() => setFilterStatus(s)}
+                  clickable
+                />
+              ))}
+            </Stack>
+          </Stack>
           <Divider sx={{ mb: 2 }} />
           <Stack spacing={1}>
-            {companies.map((company) => (
+            {filteredCompanies.map((company) => (
               <Box key={company.id} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
-                <Typography variant="subtitle1" fontWeight="bold">
-                  {company.name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {company.industry || '業種未設定'} / {company.location || '所在地未設定'}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {company.data_status || 'draft'} / {company.is_provisional ? '暫定' : '確定'} / {company.source_type || 'manual'}
-                </Typography>
+                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                  <Box>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        {company.name}
+                      </Typography>
+                      {statusBadge(company.data_status)}
+                      <Chip label={sourceLabel(company.source_type)} size="small" variant="outlined" />
+                      {company.is_provisional && (
+                        <Chip label="暫定" size="small" color="default" variant="outlined" />
+                      )}
+                    </Stack>
+                    <Typography variant="body2" color="text.secondary">
+                      {company.industry || '業種未設定'} / {company.location || '所在地未設定'}
+                    </Typography>
+                  </Box>
+                  {company.data_status !== 'published' && (
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        variant="contained"
+                        color="success"
+                        size="small"
+                        onClick={() => handlePublish(company.id)}
+                      >
+                        承認
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        size="small"
+                        onClick={() => handleReject(company.id)}
+                      >
+                        却下
+                      </Button>
+                    </Stack>
+                  )}
+                </Stack>
               </Box>
             ))}
           </Stack>
