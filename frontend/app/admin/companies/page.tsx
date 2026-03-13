@@ -50,7 +50,10 @@ export default function AdminCompaniesPage() {
 
   const fetchCompanies = async () => {
     setError('')
-    const res = await fetch('/api/admin/companies')
+    const admin = authService.getStoredUser()
+    const res = await fetch('/api/admin/companies', {
+      headers: { 'X-Admin-Email': admin?.email || '' },
+    })
     const data = await res.json()
     if (!res.ok) {
       setError(data?.error || '企業一覧の取得に失敗しました')

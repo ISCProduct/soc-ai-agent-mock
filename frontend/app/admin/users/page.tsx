@@ -62,7 +62,10 @@ export default function AdminUsersPage() {
       })
       if (query.trim()) params.set('q', query.trim())
 
-      const response = await fetch(`/api/admin/users?${params}`)
+      const admin = authService.getStoredUser()
+      const response = await fetch(`/api/admin/users?${params}`, {
+        headers: { 'X-Admin-Email': admin?.email || '' },
+      })
       const data = await response.json()
       if (cancelled) return
       if (!response.ok) {

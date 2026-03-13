@@ -2,6 +2,8 @@ package routes
 
 import (
 	"Backend/internal/controllers"
+	"Backend/internal/middleware"
+	"Backend/internal/repositories"
 	"net/http"
 )
 
@@ -11,18 +13,23 @@ func SetupAdminRoutes(
 	adminJobController *controllers.AdminJobController,
 	adminUserController *controllers.AdminUserController,
 	adminAuditController *controllers.AdminAuditController,
+	userRepo *repositories.UserRepository,
 ) {
-	http.HandleFunc("/api/admin/companies", adminCompanyController.ListOrCreate)
-	http.HandleFunc("/api/admin/companies/", adminCompanyController.Detail)
-	http.HandleFunc("/api/admin/crawl-sources", adminCrawlController.Sources)
-	http.HandleFunc("/api/admin/crawl-sources/", adminCrawlController.SourceDetail)
-	http.HandleFunc("/api/admin/crawl-runs", adminCrawlController.Runs)
-	http.HandleFunc("/api/admin/job-categories", adminJobController.JobCategories)
-	http.HandleFunc("/api/admin/job-positions", adminJobController.JobPositions)
-	http.HandleFunc("/api/admin/job-positions/", adminJobController.JobPositionAction)
-	http.HandleFunc("/api/admin/graduate-employments", adminJobController.GraduateEmployments)
-	http.HandleFunc("/api/admin/graduate-employments/", adminJobController.GraduateEmploymentDetail)
-	http.HandleFunc("/api/admin/users", adminUserController.List)
-	http.HandleFunc("/api/admin/users/", adminUserController.Update)
-	http.HandleFunc("/api/admin/audit-logs", adminAuditController.List)
+	auth := func(f http.HandlerFunc) http.HandlerFunc {
+		return middleware.AdminAuthFunc(userRepo, f)
+	}
+
+	http.HandleFunc("/api/admin/companies", auth(adminCompanyController.ListOrCreate))
+	http.HandleFunc("/api/admin/companies/", auth(adminCompanyController.Detail))
+	http.HandleFunc("/api/admin/crawl-sources", auth(adminCrawlController.Sources))
+	http.HandleFunc("/api/admin/crawl-sources/", auth(adminCrawlController.SourceDetail))
+	http.HandleFunc("/api/admin/crawl-runs", auth(adminCrawlController.Runs))
+	http.HandleFunc("/api/admin/job-categories", auth(adminJobController.JobCategories))
+	http.HandleFunc("/api/admin/job-positions", auth(adminJobController.JobPositions))
+	http.HandleFunc("/api/admin/job-positions/", auth(adminJobController.JobPositionAction))
+	http.HandleFunc("/api/admin/graduate-employments", auth(adminJobController.GraduateEmployments))
+	http.HandleFunc("/api/admin/graduate-employments/", auth(adminJobController.GraduateEmploymentDetail))
+	http.HandleFunc("/api/admin/users", auth(adminUserController.List))
+	http.HandleFunc("/api/admin/users/", auth(adminUserController.Update))
+	http.HandleFunc("/api/admin/audit-logs", auth(adminAuditController.List))
 }
