@@ -91,6 +91,8 @@ export default function InterviewPage() {
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
   const [reportStatus, setReportStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle')
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, setAiSpeaking] = useState(false)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
@@ -904,6 +906,26 @@ export default function InterviewPage() {
                   </Stack>
                 </Paper>
               )}
+              <Button
+                variant="outlined"
+                fullWidth
+                disabled={emailSending || emailSent || !user || user.is_guest}
+                onClick={async () => {
+                  if (!session || !user) return
+                  setEmailSending(true)
+                  try {
+                    await interviewApi.sendReportEmail(session.id, user.user_id)
+                    setEmailSent(true)
+                  } catch {
+                    // ignore
+                  } finally {
+                    setEmailSending(false)
+                  }
+                }}
+                sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
+              >
+                {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
+              </Button>
             </Stack>
           )}
 
