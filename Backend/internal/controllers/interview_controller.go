@@ -3,7 +3,10 @@ package controllers
 import (
 	"Backend/internal/services"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strconv"
 	"strings"
 )
@@ -55,7 +58,108 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.AddUtterance(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/turn") {
+		c.Turn(w, r)
+		return
+	}
+	if strings.HasSuffix(path, "/start-turn") {
+		c.StartTurn(w, r)
+		return
+	}
 	c.Get(w, r)
+}
+
+func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/turn")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+
+	// multipart から音声と履歴を取得
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.FormValue("user_id")
+	var userID uint
+	if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
+		userID = uint(id)
+	}
+	historyStr := r.FormValue("history")
+	var history []map[string]string
+	if historyStr != "" {
+		json.Unmarshal([]byte(historyStr), &history)
+	}
+
+	audioFile, _, err := r.FormFile("audio")
+	if err != nil {
+		http.Error(w, "audio file required", http.StatusBadRequest)
+		return
+	}
+	defer audioFile.Close()
+	audioData, err := io.ReadAll(audioFile)
+	if err != nil {
+		http.Error(w, "Failed to read audio", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := c.interviewService.Turn(r.Context(), userID, sessionID, audioData, history)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// multipart レスポンス: JSON メタ + audio
+	mw := multipart.NewWriter(w)
+	w.Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
+
+	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
+	json.NewEncoder(metaPart).Encode(map[string]string{
+		"user_text": result.UserText,
+		"ai_text":   result.AIText,
+	})
+
+	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
+	audioPart.Write(result.Audio)
+	mw.Close()
+}
+
+func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/start-turn")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		UserID uint `json:"user_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	result, err := c.interviewService.StartTurn(r.Context(), req.UserID, sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	mw := multipart.NewWriter(w)
+	w.Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
+
+	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
+	json.NewEncoder(metaPart).Encode(map[string]string{"ai_text": result.AIText})
+
+	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
+	audioPart.Write(result.Audio)
+	mw.Close()
 }
 
 func (c *InterviewController) Create(w http.ResponseWriter, r *http.Request) {

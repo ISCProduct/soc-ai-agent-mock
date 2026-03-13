@@ -231,35 +231,27 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 	maxTokens := getIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
 	req := openai.RealtimeSessionRequest{
-		Type:             "realtime",
-		Model:            model,
-		OutputModalities: []string{"audio", "text"},
-		Instructions:     buildRealtimeInstructions(),
-		Audio: map[string]interface{}{
-			"input": map[string]interface{}{
-				"transcription": map[string]interface{}{
-					"model": transcribeModel,
-				},
-				"turn_detection": map[string]interface{}{
-					"type":                "server_vad",
-					"threshold":           0.5,
-					"silence_duration_ms": 700,
-					"prefix_padding_ms":   300,
-					"create_response":     true,
-					"interrupt_response":  true,
-				},
-			},
-			"output": map[string]interface{}{
-				"voice": voice,
-			},
+		Model:        model,
+		Modalities:   []string{"audio"},
+		Voice:        voice,
+		Instructions: buildRealtimeInstructions(),
+		InputAudioTranscription: map[string]interface{}{
+			"model": transcribeModel,
 		},
-		MaxOutputTokens: maxTokens,
+		TurnDetection: map[string]interface{}{
+			"type":                "server_vad",
+			"threshold":           0.5,
+			"silence_duration_ms": 700,
+			"prefix_padding_ms":   300,
+			"create_response":     true,
+		},
+		MaxResponseOutputTokens: maxTokens,
 	}
 	resp, err := s.openaiClient.CreateRealtimeClientSecret(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	return resp.Value, nil
+	return resp.ClientSecret.Value, nil
 }
 
 func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
@@ -272,6 +264,85 @@ func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
 	}
 	rate := getFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18)
 	return minutes * rate
+}
+
+// TurnResult は1ターンの結果（AIテキスト + TTS音声バイト列）
+type TurnResult struct {
+	UserText string
+	AIText   string
+	Audio    []byte
+}
+
+// Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
+func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string) (*TurnResult, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+
+	// STT: Whisper でユーザー音声をテキスト化
+	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
+	if err != nil {
+		return nil, fmt.Errorf("transcribe error: %w", err)
+	}
+	if strings.TrimSpace(userText) == "" {
+		userText = "（聞き取れませんでした）"
+	}
+
+	// 履歴にユーザー発言を追加
+	history = append(history, map[string]string{"role": "user", "content": userText})
+
+	// Chat: 面接官として返答生成
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(), history)
+	if err != nil {
+		return nil, fmt.Errorf("chat error: %w", err)
+	}
+
+	// TTS: AI返答を音声化
+	voice := getEnv("OPENAI_TTS_VOICE", "alloy")
+	audio, err := s.openaiClient.TTS(ctx, aiText, voice)
+	if err != nil {
+		return nil, fmt.Errorf("tts error: %w", err)
+	}
+
+	return &TurnResult{UserText: userText, AIText: aiText, Audio: audio}, nil
+}
+
+// StartTurn は面接開始の最初のAI発話を生成します
+func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint) (*TurnResult, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(), []map[string]string{
+		{"role": "user", "content": "面接を開始してください。"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chat error: %w", err)
+	}
+
+	voice := getEnv("OPENAI_TTS_VOICE", "alloy")
+	audio, err := s.openaiClient.TTS(ctx, aiText, voice)
+	if err != nil {
+		return nil, fmt.Errorf("tts error: %w", err)
+	}
+
+	return &TurnResult{AIText: aiText, Audio: audio}, nil
+}
+
+func buildInterviewSystemPrompt() string {
+	return strings.TrimSpace(`あなたは日本語の就活面接官です。以下を守ってください。
+- 1回の返答は2〜3文以内で短くまとめる
+- 必ず1つの質問で締めくくる
+- 応募者が話しやすいよう具体的に深掘りする
+- 評価・講評は面接終了まで行わない`)
 }
 
 func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {

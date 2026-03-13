@@ -47,11 +47,57 @@ func (c *AdminJobController) JobPositions(w http.ResponseWriter, r *http.Request
 	switch r.Method {
 	case http.MethodGet:
 		c.listJobPositions(w, r)
-	case http.MethodPost:
-		c.createJobPosition(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (c *AdminJobController) JobPositionAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/admin/job-positions/")
+	parts := strings.SplitN(strings.Trim(path, "/"), "/", 2)
+	if len(parts) != 2 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	action := parts[1]
+
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var position models.CompanyJobPosition
+	if err := c.companyRepo.DB().First(&position, id).Error; err != nil {
+		http.Error(w, "job position not found", http.StatusNotFound)
+		return
+	}
+
+	actor := r.Header.Get("X-Admin-Email")
+	switch action {
+	case "publish":
+		position.DataStatus = "published"
+		position.IsActive = true
+	case "reject":
+		position.DataStatus = "rejected"
+		position.IsActive = false
+	default:
+		http.Error(w, "unknown action", http.StatusBadRequest)
+		return
+	}
+	if err := c.companyRepo.DB().Save(&position).Error; err != nil {
+		http.Error(w, "failed to update", http.StatusInternalServerError)
+		return
+	}
+	c.audit.Record(actor, "job_position."+action, "company_job_position", position.ID, map[string]interface{}{
+		"data_status": position.DataStatus,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(position)
 }
 
 func (c *AdminJobController) GraduateEmployments(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +106,77 @@ func (c *AdminJobController) GraduateEmployments(w http.ResponseWriter, r *http.
 		c.listGraduateEmployments(w, r)
 	case http.MethodPost:
 		c.createGraduateEmployment(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (c *AdminJobController) GraduateEmploymentDetail(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/graduate-employments/"), "/")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		entry, err := c.graduateRepo.FindByID(uint(id))
+		if err != nil || entry == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(entry)
+
+	case http.MethodPut:
+		entry, err := c.graduateRepo.FindByID(uint(id))
+		if err != nil || entry == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		type updateRequest struct {
+			CompanyID      uint   `json:"company_id"`
+			JobPositionID  *uint  `json:"job_position_id"`
+			GraduateName   string `json:"graduate_name"`
+			GraduationYear int    `json:"graduation_year"`
+			SchoolName     string `json:"school_name"`
+			Department     string `json:"department"`
+			HiredAt        string `json:"hired_at"`
+			Note           string `json:"note"`
+		}
+		var payload updateRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
+		if payload.CompanyID != 0 {
+			entry.CompanyID = payload.CompanyID
+		}
+		entry.JobPositionID = payload.JobPositionID
+		entry.GraduateName = strings.TrimSpace(payload.GraduateName)
+		entry.GraduationYear = payload.GraduationYear
+		entry.SchoolName = strings.TrimSpace(payload.SchoolName)
+		entry.Department = strings.TrimSpace(payload.Department)
+		entry.Note = strings.TrimSpace(payload.Note)
+		if strings.TrimSpace(payload.HiredAt) != "" {
+			if parsed, err := time.Parse("2006-01-02", payload.HiredAt); err == nil {
+				entry.HiredAt = &parsed
+			}
+		} else {
+			entry.HiredAt = nil
+		}
+		if err := c.graduateRepo.Update(entry); err != nil {
+			http.Error(w, "failed to update", http.StatusInternalServerError)
+			return
+		}
+		actor := r.Header.Get("X-Admin-Email")
+		c.audit.Record(actor, "graduate_employment.update", "graduate_employment", entry.ID, map[string]interface{}{
+			"company_id": entry.CompanyID,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(entry)
+
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}

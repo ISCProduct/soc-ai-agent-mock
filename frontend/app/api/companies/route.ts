@@ -8,10 +8,14 @@ export async function GET(request: NextRequest) {
     const limit = searchParams.get('limit') || '10'
     const offset = searchParams.get('offset') || '0'
     const industry = searchParams.get('industry') || ''
-    
+    const name = searchParams.get('name') || ''
+
     let url = `${API_BASE_URL}/api/companies?limit=${limit}&offset=${offset}`
     if (industry) {
       url += `&industry=${encodeURIComponent(industry)}`
+    }
+    if (name) {
+      url += `&name=${encodeURIComponent(name)}`
     }
     
     console.log('[API] Fetching companies from:', url)

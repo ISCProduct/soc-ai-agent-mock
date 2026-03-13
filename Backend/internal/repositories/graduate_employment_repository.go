@@ -18,6 +18,19 @@ func (r *GraduateEmploymentRepository) Create(entry *models.GraduateEmployment) 
 	return r.db.Create(entry).Error
 }
 
+func (r *GraduateEmploymentRepository) FindByID(id uint) (*models.GraduateEmployment, error) {
+	var entry models.GraduateEmployment
+	err := r.db.Preload("Company").Preload("JobPosition").First(&entry, id).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &entry, err
+}
+
+func (r *GraduateEmploymentRepository) Update(entry *models.GraduateEmployment) error {
+	return r.db.Save(entry).Error
+}
+
 func (r *GraduateEmploymentRepository) List(companyID *uint, limit int) ([]models.GraduateEmployment, error) {
 	if limit <= 0 {
 		limit = 50

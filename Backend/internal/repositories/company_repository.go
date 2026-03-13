@@ -14,6 +14,10 @@ func NewCompanyRepository(db *gorm.DB) *CompanyRepository {
 	return &CompanyRepository{db: db}
 }
 
+func (r *CompanyRepository) DB() *gorm.DB {
+	return r.db
+}
+
 // FindAllActive アクティブな企業を全て取得
 func (r *CompanyRepository) FindAllActive() ([]models.Company, error) {
 	var companies []models.Company
