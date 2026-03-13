@@ -148,17 +148,28 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 		}
 	}
 
+	name := r.URL.Query().Get("name")
+
 	query := ctrl.DB.Where("is_active = ?", true)
 
 	if industry != "" {
 		query = query.Where("industry = ?", industry)
 	}
 
+	if name != "" {
+		query = query.Where("name LIKE ?", "%"+name+"%")
+	}
+
+	order := "RAND()"
+	if name != "" {
+		order = "name ASC"
+	}
+
 	var companies []models.Company
 	err := query.
 		Limit(limit).
 		Offset(offset).
-		Order("RAND()"). // ランダムに取得
+		Order(order).
 		Find(&companies).Error
 
 	if err != nil {

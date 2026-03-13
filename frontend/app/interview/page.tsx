@@ -130,23 +130,27 @@ export default function InterviewPage() {
     setLoading(false)
   }, [router])
 
-  // Load company list for selection screen
+  // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
     if (loading) return
     let cancelled = false
-    setCompaniesLoading(true)
-    fetch('/api/companies?limit=20&offset=0', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (cancelled) return
-        const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
-        setAllCompanies(list)
-        if (list.length > 0) setInterviewCompany(list[0])
-      })
-      .catch(() => { /* ignore */ })
-      .finally(() => { if (!cancelled) setCompaniesLoading(false) })
-    return () => { cancelled = true }
-  }, [loading])
+    const timer = setTimeout(() => {
+      setCompaniesLoading(true)
+      const params = new URLSearchParams({ limit: '50', offset: '0' })
+      if (companySearch.trim()) params.set('name', companySearch.trim())
+      fetch(`/api/companies?${params}`, { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (cancelled) return
+          const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
+          setAllCompanies(list)
+          if (list.length > 0 && !interviewCompany) setInterviewCompany(list[0])
+        })
+        .catch(() => { /* ignore */ })
+        .finally(() => { if (!cancelled) setCompaniesLoading(false) })
+    }, companySearch ? 400 : 0)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [loading, companySearch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lobby camera preview
   useEffect(() => {
@@ -413,10 +417,8 @@ export default function InterviewPage() {
     '', `【勤務地・人数】 ${interviewCompany?.location || '未設定'} / ${interviewCompany?.employee_count ? interviewCompany.employee_count + '名' : '非公開'}`,
   ].join('\n')
 
-  const filteredCompanies = allCompanies.filter(c =>
-    c.name.toLowerCase().includes(companySearch.toLowerCase()) ||
-    (c.industry || '').toLowerCase().includes(companySearch.toLowerCase())
-  )
+  // allCompanies is already filtered by server-side search, no client-side filter needed
+  const filteredCompanies = allCompanies
 
   // ─────────────────────────────────────────────
   // SELECTION SCREEN  (Step 1 of 3)
@@ -497,7 +499,7 @@ export default function InterviewPage() {
                     <LinearProgress sx={{ borderRadius: 1 }} />
                   ) : (
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-                      {(filteredCompanies.length > 0 ? filteredCompanies : allCompanies).slice(0, 12).map(c => {
+                      {filteredCompanies.map(c => {
                         const isSelected = interviewCompany?.id === c.id
                         return (
                           <Button
