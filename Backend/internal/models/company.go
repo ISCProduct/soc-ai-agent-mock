@@ -71,7 +71,8 @@ type CompanyJobPosition struct {
 	PreferredSkills string `gorm:"type:text"` // JSON形式
 
 	// 募集ステータス
-	IsActive bool `gorm:"default:true"`
+	IsActive   bool   `gorm:"default:true"`
+	DataStatus string `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published, rejected
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

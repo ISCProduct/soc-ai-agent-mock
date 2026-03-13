@@ -47,11 +47,57 @@ func (c *AdminJobController) JobPositions(w http.ResponseWriter, r *http.Request
 	switch r.Method {
 	case http.MethodGet:
 		c.listJobPositions(w, r)
-	case http.MethodPost:
-		c.createJobPosition(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (c *AdminJobController) JobPositionAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/admin/job-positions/")
+	parts := strings.SplitN(strings.Trim(path, "/"), "/", 2)
+	if len(parts) != 2 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	action := parts[1]
+
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var position models.CompanyJobPosition
+	if err := c.companyRepo.DB().First(&position, id).Error; err != nil {
+		http.Error(w, "job position not found", http.StatusNotFound)
+		return
+	}
+
+	actor := r.Header.Get("X-Admin-Email")
+	switch action {
+	case "publish":
+		position.DataStatus = "published"
+		position.IsActive = true
+	case "reject":
+		position.DataStatus = "rejected"
+		position.IsActive = false
+	default:
+		http.Error(w, "unknown action", http.StatusBadRequest)
+		return
+	}
+	if err := c.companyRepo.DB().Save(&position).Error; err != nil {
+		http.Error(w, "failed to update", http.StatusInternalServerError)
+		return
+	}
+	c.audit.Record(actor, "job_position."+action, "company_job_position", position.ID, map[string]interface{}{
+		"data_status": position.DataStatus,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(position)
 }
 
 func (c *AdminJobController) GraduateEmployments(w http.ResponseWriter, r *http.Request) {

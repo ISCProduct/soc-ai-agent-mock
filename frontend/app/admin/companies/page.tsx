@@ -10,9 +10,7 @@ import {
   CardContent,
   Chip,
   Divider,
-  MenuItem,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
@@ -22,12 +20,9 @@ type Company = {
   name: string
   industry?: string
   location?: string
-  website_url?: string
   source_type?: string
-  source_url?: string
   is_provisional?: boolean
   data_status?: string
-  is_active?: boolean
 }
 
 const statusBadge = (status?: string) => {
@@ -53,15 +48,6 @@ export default function AdminCompaniesPage() {
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all')
 
-  const [name, setName] = useState('')
-  const [industry, setIndustry] = useState('')
-  const [location, setLocation] = useState('')
-  const [websiteUrl, setWebsiteUrl] = useState('')
-  const [sourceType, setSourceType] = useState('manual')
-  const [sourceUrl, setSourceUrl] = useState('')
-  const [dataStatus, setDataStatus] = useState('draft')
-  const [isProvisional, setIsProvisional] = useState(true)
-
   const fetchCompanies = async () => {
     setError('')
     const res = await fetch('/api/admin/companies')
@@ -76,42 +62,6 @@ export default function AdminCompaniesPage() {
   useEffect(() => {
     fetchCompanies()
   }, [])
-
-  const handleCreate = async () => {
-    setError('')
-    const admin = authService.getStoredUser()
-    const payload = {
-      name,
-      industry,
-      location,
-      website_url: websiteUrl,
-      source_type: sourceType,
-      source_url: sourceUrl,
-      is_provisional: isProvisional,
-      data_status: dataStatus,
-    }
-    const res = await fetch('/api/admin/companies', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
-      },
-      body: JSON.stringify(payload),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data?.error || '企業の作成に失敗しました')
-      return
-    }
-    setName('')
-    setIndustry('')
-    setLocation('')
-    setWebsiteUrl('')
-    setSourceUrl('')
-    setIsProvisional(true)
-    setDataStatus('draft')
-    fetchCompanies()
-  }
 
   const handlePublish = async (companyId: number) => {
     const admin = authService.getStoredUser()
@@ -159,10 +109,13 @@ export default function AdminCompaniesPage() {
           <Button variant="outlined" size="small" component={Link} href="/admin/graduate-employments">
             就職情報管理
           </Button>
+          <Button variant="contained" size="small" component={Link} href="/admin/companies/new">
+            + 企業を追加
+          </Button>
         </Stack>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        出典付きの企業情報を登録し、暫定/公開を管理します。
+        企業情報の公開ステータスを管理します。
       </Typography>
 
       {error && (
@@ -170,42 +123,6 @@ export default function AdminCompaniesPage() {
           {error}
         </Alert>
       )}
-
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            企業の追加
-          </Typography>
-          <Stack spacing={2}>
-            <TextField label="企業名" value={name} onChange={(e) => setName(e.target.value)} required />
-            <TextField label="業種" value={industry} onChange={(e) => setIndustry(e.target.value)} />
-            <TextField label="所在地" value={location} onChange={(e) => setLocation(e.target.value)} />
-            <TextField label="公式サイトURL" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} />
-            <TextField select label="出典タイプ" value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
-              <MenuItem value="official">公式サイト</MenuItem>
-              <MenuItem value="job_site">就活/転職サイト</MenuItem>
-              <MenuItem value="manual">手入力</MenuItem>
-            </TextField>
-            <TextField label="出典URL" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
-            <TextField select label="ステータス" value={dataStatus} onChange={(e) => setDataStatus(e.target.value)}>
-              <MenuItem value="draft">下書き</MenuItem>
-              <MenuItem value="published">公開</MenuItem>
-            </TextField>
-            <TextField
-              select
-              label="暫定データ"
-              value={isProvisional ? 'yes' : 'no'}
-              onChange={(e) => setIsProvisional(e.target.value === 'yes')}
-            >
-              <MenuItem value="yes">暫定</MenuItem>
-              <MenuItem value="no">確定</MenuItem>
-            </TextField>
-            <Button variant="contained" onClick={handleCreate}>
-              追加
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
 
       <Card>
         <CardContent>
