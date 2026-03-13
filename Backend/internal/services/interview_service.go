@@ -362,7 +362,14 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		return err
 	}
 	if len(utterances) == 0 {
-		return errors.New("no utterances")
+		// utterances が0件の場合は空レポートを保存して正常終了
+		empty := &models.InterviewReport{
+			SessionID:    sessionID,
+			SummaryText:  "発話データがありませんでした。",
+			ScoresJSON:   `{"logic":0,"specificity":0,"ownership":0}`,
+			EvidenceJSON: `{}`,
+		}
+		return s.reportRepo.Upsert(empty)
 	}
 	var transcriptBuilder strings.Builder
 	for _, u := range utterances {
