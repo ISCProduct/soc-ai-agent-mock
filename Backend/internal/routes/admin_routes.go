@@ -21,6 +21,7 @@ func SetupAdminRoutes(
 	http.HandleFunc("/api/admin/job-positions", adminJobController.JobPositions)
 	http.HandleFunc("/api/admin/job-positions/", adminJobController.JobPositionAction)
 	http.HandleFunc("/api/admin/graduate-employments", adminJobController.GraduateEmployments)
+	http.HandleFunc("/api/admin/graduate-employments/", adminJobController.GraduateEmploymentDetail)
 	http.HandleFunc("/api/admin/users", adminUserController.List)
 	http.HandleFunc("/api/admin/users/", adminUserController.Update)
 	http.HandleFunc("/api/admin/audit-logs", adminAuditController.List)
