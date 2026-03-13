@@ -47,7 +47,10 @@ export default function AdminJobPositionsPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published' | 'rejected'>('all')
 
   const fetchJobPositions = async () => {
-    const res = await fetch('/api/admin/job-positions?limit=100')
+    const admin = authService.getStoredUser()
+    const res = await fetch('/api/admin/job-positions?limit=100', {
+      headers: { 'X-Admin-Email': admin?.email || '' },
+    })
     const data = await res.json()
     if (res.ok) setJobPositions(data?.positions || [])
   }
