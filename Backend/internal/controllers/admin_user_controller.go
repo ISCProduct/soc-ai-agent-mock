@@ -42,7 +42,18 @@ func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	users, err := c.repo.ListUsers()
+
+	limit := 25
+	offset := 0
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	users, total, err := c.repo.ListUsersPaged(limit, offset, query)
 	if err != nil {
 		http.Error(w, "failed to fetch users", http.StatusInternalServerError)
 		return
@@ -63,7 +74,10 @@ func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"users": resp,
+		"users":  resp,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	})
 }
 

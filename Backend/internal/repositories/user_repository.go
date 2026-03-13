@@ -51,6 +51,23 @@ func (r *UserRepository) ListUsers() ([]models.User, error) {
 	return users, err
 }
 
+// ListUsersPaged ページング付きユーザー一覧を取得
+func (r *UserRepository) ListUsersPaged(limit, offset int, query string) ([]models.User, int64, error) {
+	var users []models.User
+	var total int64
+
+	q := r.db.Model(&models.User{})
+	if query != "" {
+		like := "%" + query + "%"
+		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
+	}
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := q.Order("created_at desc").Limit(limit).Offset(offset).Find(&users).Error
+	return users, total, err
+}
+
 // UpdateUser ユーザー情報更新
 func (r *UserRepository) UpdateUser(user *models.User) error {
 	return r.db.Save(user).Error
