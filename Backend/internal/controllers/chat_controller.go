@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services"
 	"encoding/json"
 	"fmt"
@@ -15,15 +16,19 @@ type ChatController struct {
 	chatService     *services.ChatService
 	matchingService *services.MatchingService
 	analysisService *services.AnalysisScoringService
+	userRepo        *repositories.UserRepository
+	emailService    *services.EmailService
 }
 
 const minEvaluatedCategoriesForFinal = 4
 
-func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService) *ChatController {
+func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService, userRepo *repositories.UserRepository, emailService *services.EmailService) *ChatController {
 	return &ChatController{
 		chatService:     chatService,
 		matchingService: matchingService,
 		analysisService: analysisService,
+		userRepo:        userRepo,
+		emailService:    emailService,
 	}
 }
 
@@ -402,6 +407,76 @@ func splitTechStack(techStack string) []string {
 		}
 	}
 	return result
+}
+
+// SendReport チャット分析結果をメールで送信
+func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID    uint   `json:"user_id"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.UserID == 0 || req.SessionID == "" {
+		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
+		return
+	}
+
+	// ユーザー情報取得
+	user, err := c.userRepo.GetUserByID(req.UserID)
+	if err != nil || user == nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// ゲストユーザーは送信不可
+	if user.IsGuest {
+		http.Error(w, "Guest users cannot receive email reports", http.StatusForbidden)
+		return
+	}
+
+	// 分析サマリー取得
+	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), req.UserID, req.SessionID)
+	if err != nil {
+		http.Error(w, "Failed to build analysis summary: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// おすすめ企業取得（最大5件）
+	matches, _ := c.matchingService.GetTopMatches(r.Context(), req.UserID, req.SessionID, 5)
+	userScores, _ := c.chatService.GetUserScores(req.UserID, req.SessionID)
+
+	var companies []services.EmailReportCompany
+	for i, match := range matches {
+		if match.Company.ID == 0 {
+			continue
+		}
+		companies = append(companies, services.EmailReportCompany{
+			Rank:   i + 1,
+			Name:   match.Company.Name,
+			Score:  int(match.MatchScore),
+			Reason: services.BuildMatchReason(match, userScores),
+		})
+	}
+
+	// メール送信
+	if err := c.emailService.SendAnalysisReport(user, summary, companies, req.SessionID); err != nil {
+		fmt.Printf("[SendReport] Failed to send email: %v\n", err)
+		http.Error(w, "Failed to send email", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "分析レポートを " + user.Email + " に送信しました",
+	})
 }
 
 // GetSessions ユーザーのチャットセッション一覧を取得

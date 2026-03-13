@@ -330,7 +330,7 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 	}
 
 	// skipPhrases は完全一致のみスキップ（Contains だと「資格なし」等が誤ってスキップされるため）
-	skipPhrases := []string{
+	skipPhrases = []string{
 		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし",
 	}
 	for _, phrase := range skipPhrases {
