@@ -97,6 +97,16 @@ export const interviewApi = {
     const data = await res.json()
     return data.client_secret
   },
+
+  async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/send-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
 }
 
 export const interviewLimits = {

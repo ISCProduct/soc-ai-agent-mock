@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Divider,
   Drawer,
   IconButton,
@@ -18,6 +19,7 @@ import {
 } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
 import MicOffIcon from '@mui/icons-material/MicOff'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import CallEndIcon from '@mui/icons-material/CallEnd'
@@ -89,6 +91,8 @@ export default function InterviewPage() {
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
   const [reportStatus, setReportStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle')
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, setAiSpeaking] = useState(false)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
@@ -284,7 +288,12 @@ export default function InterviewPage() {
     const res = await fetch(`${BACKEND}/api/interviews/${sessionId}/start-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify({
+        user_id: userId,
+        company_name: interviewCompany?.name || '',
+        position: selectedPosition?.title || '',
+        company_info: [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '),
+      }),
     })
     if (!res.ok) throw new Error(await res.text())
     const { meta, audio } = await parseMultipart(res)
@@ -292,7 +301,7 @@ export default function InterviewPage() {
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
       setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch { /* ignore */ }
+      try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
     }
     await playAudioBlob(audio)
   }
@@ -393,6 +402,9 @@ export default function InterviewPage() {
     formData.append('audio', audioBlob, 'audio.webm')
     formData.append('user_id', String(user.user_id))
     formData.append('history', JSON.stringify(historyRef.current))
+    formData.append('company_name', interviewCompany?.name || '')
+    formData.append('position', selectedPosition?.title || '')
+    formData.append('company_info', [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '))
     try {
       const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
       const res = await fetch(`${BACKEND}/api/interviews/${session.id}/turn`, {
@@ -406,12 +418,12 @@ export default function InterviewPage() {
       if (userText) {
         historyRef.current.push({ role: 'user', content: userText })
         setUtterances(p => [...p, { role: 'user', text: userText }])
-        try { await interviewApi.saveUtterance(session.id, user.user_id, 'user', userText) } catch { /* ignore */ }
+        try { await interviewApi.saveUtterance(session.id, user.user_id, 'user', userText) } catch (e) { console.error('[utterance save error]', e) }
       }
       if (aiText) {
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
-        try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch { /* ignore */ }
+        try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
       }
       await playAudioBlob(audio)
     } catch (e: any) {
@@ -894,6 +906,26 @@ export default function InterviewPage() {
                   </Stack>
                 </Paper>
               )}
+              <Button
+                variant="outlined"
+                fullWidth
+                disabled={emailSending || emailSent || !user || user.is_guest}
+                onClick={async () => {
+                  if (!session || !user) return
+                  setEmailSending(true)
+                  try {
+                    await interviewApi.sendReportEmail(session.id, user.user_id)
+                    setEmailSent(true)
+                  } catch {
+                    // ignore
+                  } finally {
+                    setEmailSending(false)
+                  }
+                }}
+                sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
+              >
+                {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
+              </Button>
             </Stack>
           )}
 
@@ -939,6 +971,19 @@ export default function InterviewPage() {
           )}
         </Box>
       </Box>
+
+      {/* ── Cost alert ── */}
+      {isConnected && estimatedCost >= interviewLimits.maxCostUSD * 0.8 && (
+        <Box sx={{ px: 2, pt: 1, flexShrink: 0 }}>
+          <Box sx={{ bgcolor: estimatedCost >= interviewLimits.maxCostUSD ? 'rgba(234,67,53,0.2)' : 'rgba(251,188,4,0.15)', border: `1px solid ${estimatedCost >= interviewLimits.maxCostUSD ? '#ea4335' : '#fbbc04'}`, borderRadius: 1, px: 2, py: 0.8, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontSize: 13, color: estimatedCost >= interviewLimits.maxCostUSD ? '#f28b82' : '#fdd663', fontWeight: 600 }}>
+              {estimatedCost >= interviewLimits.maxCostUSD
+                ? '⚠️ コスト上限に達しました。間もなく面接が終了します。'
+                : `⚠️ コスト上限の80%に達しました（$${estimatedCost.toFixed(2)} / $${interviewLimits.maxCostUSD.toFixed(2)}）`}
+            </Typography>
+          </Box>
+        </Box>
+      )}
 
       {/* ── Main ── */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 2, px: 2, pb: '88px', pt: 2, overflow: 'hidden', minHeight: 0 }}>
@@ -1148,24 +1193,41 @@ export default function InterviewPage() {
 
         {/* Center: controls */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, md: 1.5 }, mx: 'auto' }}>
-          <Tooltip title={isRecording ? '録音停止して送信' : turnPending ? '処理中...' : '録音開始（クリックして話す）'}>
-            <span>
-              <IconButton
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={!isConnected || turnPending || aiSpeaking}
-                sx={{
-                  bgcolor: isRecording ? '#ea4335' : 'rgba(255,255,255,0.08)',
-                  width: 48, height: 48,
-                  animation: isRecording ? 'pulse 1s infinite' : 'none',
-                  '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.6 } },
-                  '&:hover': { bgcolor: isRecording ? '#c5221f' : 'rgba(255,255,255,0.15)' },
-                  '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
-                }}
-              >
-                {isRecording ? <MicIcon sx={{ color: '#fff' }} /> : <MicOffIcon sx={{ color: '#9aa0a6' }} />}
-              </IconButton>
-            </span>
-          </Tooltip>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+            <Tooltip title={
+              aiSpeaking ? 'AI発話中...' :
+              turnPending ? 'AIが考えています...' :
+              isRecording ? 'クリックして送信' :
+              'クリックして話す'
+            }>
+              <span>
+                <IconButton
+                  onClick={isRecording ? stopRecording : startRecording}
+                  disabled={!isConnected || turnPending || aiSpeaking}
+                  sx={{
+                    bgcolor: isRecording ? '#ea4335' : aiSpeaking ? `${PRIMARY}40` : 'rgba(255,255,255,0.08)',
+                    width: 52, height: 52,
+                    animation: isRecording ? 'micPulse 1s infinite' : 'none',
+                    '@keyframes micPulse': { '0%,100%': { boxShadow: `0 0 0 0 rgba(234,67,53,0.4)` }, '50%': { boxShadow: `0 0 0 8px rgba(234,67,53,0)` } },
+                    '&:hover': { bgcolor: isRecording ? '#c5221f' : 'rgba(255,255,255,0.15)' },
+                    '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
+                  }}
+                >
+                  {turnPending
+                    ? <CircularProgress size={22} sx={{ color: '#9aa0a6' }} />
+                    : aiSpeaking
+                      ? <VolumeUpIcon sx={{ color: PRIMARY }} />
+                      : isRecording
+                        ? <MicIcon sx={{ color: '#fff' }} />
+                        : <MicIcon sx={{ color: '#e8eaed' }} />
+                  }
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Typography sx={{ fontSize: 10, color: isRecording ? '#ea4335' : aiSpeaking ? PRIMARY : '#9aa0a6', fontWeight: 600, letterSpacing: 0.5, lineHeight: 1 }}>
+              {isRecording ? '録音中' : turnPending ? '処理中' : aiSpeaking ? 'AI発話中' : '話す'}
+            </Typography>
+          </Box>
 
           <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
             <span>

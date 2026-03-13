@@ -1,0 +1,228 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Divider,
+  IconButton,
+  LinearProgress,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import PsychologyIcon from '@mui/icons-material/Psychology'
+import { authService, User } from '@/lib/auth'
+import { interviewApi, InterviewDetail, InterviewSession } from '@/lib/interview'
+
+const PRIMARY = '#ec5b13'
+
+const statusLabel = (s: string) => {
+  if (s === 'finished') return <Chip label="完了" color="success" size="small" />
+  if (s === 'in_progress') return <Chip label="進行中" color="warning" size="small" />
+  return <Chip label="未開始" size="small" />
+}
+
+const parseJsonSafe = (v?: string) => { try { return v ? JSON.parse(v) : null } catch { return null } }
+
+export default function InterviewHistoryPage() {
+  const router = useRouter()
+  const [user, setUser] = useState<User | null>(null)
+  const [sessions, setSessions] = useState<InterviewSession[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [selectedDetail, setSelectedDetail] = useState<InterviewDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  const limit = 10
+
+  useEffect(() => {
+    const storedUser = authService.getStoredUser()
+    if (!storedUser) { router.replace('/login'); return }
+    setUser(storedUser)
+  }, [router])
+
+  useEffect(() => {
+    if (!user) return
+    setLoading(true)
+    interviewApi.listSessions(user.user_id, page, limit)
+      .then(data => { setSessions(data.sessions); setTotal(data.total) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [user, page])
+
+  const handleSelectSession = async (session: InterviewSession) => {
+    if (!user) return
+    setDetailLoading(true)
+    setSelectedDetail(null)
+    try {
+      const detail = await interviewApi.getDetail(session.id, user.user_id)
+      setSelectedDetail(detail)
+    } catch { /* ignore */ }
+    finally { setDetailLoading(false) }
+  }
+
+  const totalPages = Math.ceil(total / limit)
+
+  return (
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f8f6f6' }}>
+      {/* Header */}
+      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 3, lg: 8 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{ color: PRIMARY }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
+          <Typography sx={{ fontWeight: 700, fontSize: 20, color: '#0f172a' }}>面接履歴</Typography>
+        </Box>
+        <IconButton onClick={() => router.push('/interview')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
+          <ArrowBackIcon />
+        </IconButton>
+      </Box>
+
+      <Box sx={{ display: 'flex', maxWidth: 1100, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
+        {/* Session list */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>セッション一覧</Typography>
+          {loading ? (
+            <CircularProgress size={32} sx={{ color: PRIMARY }} />
+          ) : sessions.length === 0 ? (
+            <Typography color="text.secondary">面接履歴がありません。</Typography>
+          ) : (
+            <Stack spacing={1.5}>
+              {sessions.map(s => (
+                <Paper
+                  key={s.id}
+                  elevation={0}
+                  onClick={() => handleSelectSession(s)}
+                  sx={{
+                    p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', cursor: 'pointer',
+                    borderColor: selectedDetail?.session.id === s.id ? PRIMARY : '#e2e8f0',
+                    bgcolor: selectedDetail?.session.id === s.id ? `${PRIMARY}05` : '#fff',
+                    '&:hover': { borderColor: PRIMARY, bgcolor: `${PRIMARY}05` },
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Box>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                        <Typography sx={{ fontWeight: 600, fontSize: 15 }}>
+                          面接セッション #{s.id}
+                        </Typography>
+                        {statusLabel(s.status)}
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary">
+                        {s.started_at
+                          ? new Date(s.started_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : new Date(s.created_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                        ${s.estimated_cost_usd.toFixed(3)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">推定コスト</Typography>
+                    </Box>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          )}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 3 }}>
+              <Button size="small" disabled={page === 1} onClick={() => setPage(p => p - 1)}>前へ</Button>
+              <Typography sx={{ lineHeight: '32px', fontSize: 13, color: '#64748b' }}>{page} / {totalPages}</Typography>
+              <Button size="small" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>次へ</Button>
+            </Stack>
+          )}
+        </Box>
+
+        {/* Detail panel */}
+        <Box sx={{ width: { xs: '100%', md: 420 }, flexShrink: 0 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>詳細・レポート</Typography>
+          {detailLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={32} sx={{ color: PRIMARY }} />
+            </Box>
+          ) : !selectedDetail ? (
+            <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+              <Typography color="text.secondary" fontSize={14}>左のセッションを選択すると詳細が表示されます。</Typography>
+            </Paper>
+          ) : (
+            <Stack spacing={2}>
+              {/* Report */}
+              {selectedDetail.report ? (
+                <>
+                  <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${PRIMARY}30`, bgcolor: `${PRIMARY}05` }}>
+                    <Typography sx={{ fontWeight: 700, color: PRIMARY, mb: 1 }}>要約</Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-line', color: '#475569', lineHeight: 1.8 }}>
+                      {selectedDetail.report.summary_text || '—'}
+                    </Typography>
+                  </Paper>
+                  {(() => {
+                    const scores = parseJsonSafe(selectedDetail.report.scores_json)
+                    const evidence = parseJsonSafe(selectedDetail.report.evidence_json)
+                    return scores ? (
+                      <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+                        <Typography sx={{ fontWeight: 700, mb: 1.5 }}>評価スコア</Typography>
+                        <Stack spacing={1}>
+                          {Object.entries(scores).map(([k, v]) => (
+                            <Box key={k}>
+                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                <Typography variant="body2" color="text.secondary">{k}</Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <LinearProgress
+                                    variant="determinate"
+                                    value={Number(v) * 20}
+                                    sx={{ width: 80, height: 6, borderRadius: 3, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
+                                  />
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: PRIMARY, minWidth: 24 }}>{String(v)}</Typography>
+                                </Box>
+                              </Stack>
+                              {evidence?.[k] && (
+                                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.3, display: 'block' }}>{evidence[k]}</Typography>
+                              )}
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Paper>
+                    ) : null
+                  })()}
+                </>
+              ) : (
+                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {selectedDetail.session.status === 'finished' ? 'レポートを生成中です...' : 'レポートは面接終了後に生成されます。'}
+                  </Typography>
+                </Paper>
+              )}
+
+              {/* Utterances */}
+              {selectedDetail.utterances.length > 0 && (
+                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+                  <Typography sx={{ fontWeight: 700, mb: 1.5 }}>発話ログ</Typography>
+                  <Stack spacing={1} sx={{ maxHeight: 320, overflowY: 'auto' }}>
+                    {selectedDetail.utterances.map((u, i) => (
+                      <Box key={i} sx={{ display: 'flex', flexDirection: 'column', alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
+                        <Typography sx={{ fontSize: 10, fontWeight: 700, color: u.role === 'ai' ? '#64748b' : PRIMARY, mb: 0.3 }}>
+                          {u.role === 'ai' ? '面接官AI' : 'あなた'}
+                        </Typography>
+                        <Box sx={{ bgcolor: u.role === 'ai' ? '#f1f5f9' : `${PRIMARY}15`, px: 1.5, py: 0.8, borderRadius: 1.5, maxWidth: '90%' }}>
+                          <Typography variant="body2" sx={{ color: '#0f172a', lineHeight: 1.6 }}>{u.text}</Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
+            </Stack>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  )
+}
