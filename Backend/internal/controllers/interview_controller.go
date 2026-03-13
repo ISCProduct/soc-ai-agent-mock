@@ -66,7 +66,43 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.StartTurn(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/send-report") {
+		c.SendReport(w, r)
+		return
+	}
 	c.Get(w, r)
+}
+
+func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/send-report")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		UserID uint `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == 0 {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	if err := c.interviewService.SendReportEmail(req.UserID, sessionID); err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "user not found" || err.Error() == "report not found" {
+			status = http.StatusNotFound
+		}
+		if err.Error() == "guest users cannot receive email reports" {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "レポートをメールで送信しました"})
 }
 
 func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {

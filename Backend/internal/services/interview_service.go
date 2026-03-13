@@ -22,6 +22,7 @@ type InterviewService struct {
 	utterRepo    *repositories.InterviewUtteranceRepository
 	reportRepo   *repositories.InterviewReportRepository
 	userRepo     *repositories.UserRepository
+	emailService *EmailService
 	openaiClient *openai.Client
 	jobCh        chan uint
 	workerOnce   sync.Once
@@ -32,6 +33,7 @@ func NewInterviewService(
 	utterRepo *repositories.InterviewUtteranceRepository,
 	reportRepo *repositories.InterviewReportRepository,
 	userRepo *repositories.UserRepository,
+	emailService *EmailService,
 	openaiClient *openai.Client,
 ) *InterviewService {
 	return &InterviewService{
@@ -39,6 +41,7 @@ func NewInterviewService(
 		utterRepo:    utterRepo,
 		reportRepo:   reportRepo,
 		userRepo:     userRepo,
+		emailService: emailService,
 		openaiClient: openaiClient,
 		jobCh:        make(chan uint, 100),
 	}
@@ -416,6 +419,47 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		EvidenceJSON: string(evidenceJSON),
 	}
 	return s.reportRepo.Upsert(report)
+}
+
+// SendReportEmail 面接レポートをメールで送信
+func (s *InterviewService) SendReportEmail(userID, sessionID uint) error {
+	user, err := s.userRepo.GetUserByID(userID)
+	if err != nil || user == nil {
+		return errors.New("user not found")
+	}
+	if user.IsGuest {
+		return errors.New("guest users cannot receive email reports")
+	}
+
+	report, err := s.reportRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return errors.New("report not found")
+	}
+
+	var scores map[string]int
+	json.Unmarshal([]byte(report.ScoresJSON), &scores)
+	var evidence map[string]string
+	json.Unmarshal([]byte(report.EvidenceJSON), &evidence)
+
+	summary := strings.Split(strings.TrimSpace(report.SummaryText), "\n")
+	var filtered []string
+	for _, line := range summary {
+		if strings.TrimSpace(line) != "" {
+			filtered = append(filtered, strings.TrimSpace(line))
+		}
+	}
+
+	data := InterviewReportEmailData{
+		SessionID:  fmt.Sprintf("%d", sessionID),
+		Summary:    filtered,
+		LogicScore: scores["logic"],
+		SpecScore:  scores["specificity"],
+		OwnScore:   scores["ownership"],
+		LogicEvid:  evidence["logic"],
+		SpecEvid:   evidence["specificity"],
+		OwnEvid:    evidence["ownership"],
+	}
+	return s.emailService.SendInterviewReport(user, data)
 }
 
 func toSessionResponse(session *models.InterviewSession) *InterviewSessionResponse {
