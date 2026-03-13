@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Divider,
   Drawer,
   IconButton,
@@ -18,6 +19,7 @@ import {
 } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
 import MicOffIcon from '@mui/icons-material/MicOff'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import CallEndIcon from '@mui/icons-material/CallEnd'
@@ -1161,24 +1163,41 @@ export default function InterviewPage() {
 
         {/* Center: controls */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, md: 1.5 }, mx: 'auto' }}>
-          <Tooltip title={isRecording ? '録音停止して送信' : turnPending ? '処理中...' : '録音開始（クリックして話す）'}>
-            <span>
-              <IconButton
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={!isConnected || turnPending || aiSpeaking}
-                sx={{
-                  bgcolor: isRecording ? '#ea4335' : 'rgba(255,255,255,0.08)',
-                  width: 48, height: 48,
-                  animation: isRecording ? 'pulse 1s infinite' : 'none',
-                  '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.6 } },
-                  '&:hover': { bgcolor: isRecording ? '#c5221f' : 'rgba(255,255,255,0.15)' },
-                  '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
-                }}
-              >
-                {isRecording ? <MicIcon sx={{ color: '#fff' }} /> : <MicOffIcon sx={{ color: '#9aa0a6' }} />}
-              </IconButton>
-            </span>
-          </Tooltip>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+            <Tooltip title={
+              aiSpeaking ? 'AI発話中...' :
+              turnPending ? 'AIが考えています...' :
+              isRecording ? 'クリックして送信' :
+              'クリックして話す'
+            }>
+              <span>
+                <IconButton
+                  onClick={isRecording ? stopRecording : startRecording}
+                  disabled={!isConnected || turnPending || aiSpeaking}
+                  sx={{
+                    bgcolor: isRecording ? '#ea4335' : aiSpeaking ? `${PRIMARY}40` : 'rgba(255,255,255,0.08)',
+                    width: 52, height: 52,
+                    animation: isRecording ? 'micPulse 1s infinite' : 'none',
+                    '@keyframes micPulse': { '0%,100%': { boxShadow: `0 0 0 0 rgba(234,67,53,0.4)` }, '50%': { boxShadow: `0 0 0 8px rgba(234,67,53,0)` } },
+                    '&:hover': { bgcolor: isRecording ? '#c5221f' : 'rgba(255,255,255,0.15)' },
+                    '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
+                  }}
+                >
+                  {turnPending
+                    ? <CircularProgress size={22} sx={{ color: '#9aa0a6' }} />
+                    : aiSpeaking
+                      ? <VolumeUpIcon sx={{ color: PRIMARY }} />
+                      : isRecording
+                        ? <MicIcon sx={{ color: '#fff' }} />
+                        : <MicIcon sx={{ color: '#e8eaed' }} />
+                  }
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Typography sx={{ fontSize: 10, color: isRecording ? '#ea4335' : aiSpeaking ? PRIMARY : '#9aa0a6', fontWeight: 600, letterSpacing: 0.5, lineHeight: 1 }}>
+              {isRecording ? '録音中' : turnPending ? '処理中' : aiSpeaking ? 'AI発話中' : '話す'}
+            </Typography>
+          </Box>
 
           <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
             <span>
