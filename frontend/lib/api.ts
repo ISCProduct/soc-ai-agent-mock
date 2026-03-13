@@ -138,6 +138,23 @@ export async function sendMessage(message: string): Promise<{ message: string }>
     }
 }
 
+export async function sendAnalysisReport(userId: number, sessionId: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_BASE}/chat/send-report`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: userId, session_id: sessionId }),
+    })
+
+    if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || `Send report error: ${response.statusText}`)
+    }
+
+    return response.json()
+}
+
 export async function getCompanyDetail(companyId: number) {
     const response = await fetch(`${API_BASE}/companies/${companyId}`)
     
