@@ -28,6 +28,10 @@ import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import LightbulbIcon from '@mui/icons-material/Lightbulb'
 import SendIcon from '@mui/icons-material/Send'
+import SearchIcon from '@mui/icons-material/Search'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ApartmentIcon from '@mui/icons-material/Apartment'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
 import ThreeAvatar from './components/ThreeAvatar'
@@ -54,11 +58,28 @@ type InterviewCompany = {
   welfare_details?: string
 }
 
+type Position = {
+  id: string
+  title: string
+  department: string
+  icon: string
+  questions: number
+}
+
+const POSITIONS: Position[] = [
+  { id: 'engineer', title: 'ソフトウェアエンジニア', department: 'Engineering', icon: '💻', questions: 8 },
+  { id: 'designer', title: 'プロダクトデザイナー', department: 'Design', icon: '🎨', questions: 7 },
+  { id: 'sales', title: '営業職', department: 'Sales', icon: '📈', questions: 7 },
+  { id: 'marketing', title: 'マーケティング', department: 'Growth', icon: '📣', questions: 6 },
+  { id: 'pm', title: 'プロダクトマネージャー', department: 'Product', icon: '🧭', questions: 9 },
+  { id: 'data', title: 'データアナリスト', department: 'Data', icon: '📊', questions: 7 },
+]
+
 export default function InterviewPage() {
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState<'lobby' | 'connecting' | 'connected' | 'error' | 'finished'>('lobby')
+  const [status, setStatus] = useState<'selection' | 'lobby' | 'connecting' | 'connected' | 'error' | 'finished'>('selection')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [utterances, setUtterances] = useState<Utterance[]>([])
   const [partialUser, setPartialUser] = useState('')
@@ -77,6 +98,11 @@ export default function InterviewPage() {
   const [noteInput, setNoteInput] = useState('')
   const [lobbyPermissionError, setLobbyPermissionError] = useState<string | null>(null)
   const [captionsVisible, setCaptionsVisible] = useState(true)
+  // Selection screen state
+  const [allCompanies, setAllCompanies] = useState<InterviewCompany[]>([])
+  const [companiesLoading, setCompaniesLoading] = useState(false)
+  const [companySearch, setCompanySearch] = useState('')
+  const [selectedPosition, setSelectedPosition] = useState<Position>(POSITIONS[0])
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const dcRef = useRef<RTCDataChannel | null>(null)
@@ -104,36 +130,23 @@ export default function InterviewPage() {
     setLoading(false)
   }, [router])
 
-  // Company loading
+  // Load company list for selection screen
   useEffect(() => {
+    if (loading) return
     let cancelled = false
-    const fromQuery = (() => {
-      try { return Number(new URLSearchParams(window.location.search).get('company_id') || '') }
-      catch { return NaN }
-    })()
-    const fromStorage = (() => {
-      try { return Number(localStorage.getItem('interview_company_id') || '') }
-      catch { return NaN }
-    })()
-    const companyId = Number.isFinite(fromQuery) && fromQuery > 0 ? fromQuery
-      : Number.isFinite(fromStorage) && fromStorage > 0 ? fromStorage : NaN
-
-    const load = async () => {
-      try {
-        if (Number.isFinite(companyId)) {
-          const res = await fetch(`/api/companies/${companyId}`, { cache: 'no-store' })
-          if (res.ok) { if (!cancelled) setInterviewCompany(await res.json()); return }
-        }
-        const res = await fetch('/api/companies?limit=1&offset=0', { cache: 'no-store' })
-        if (!res.ok) return
-        const data = await res.json()
-        const first = Array.isArray(data?.companies) ? data.companies[0] : null
-        if (!cancelled && first) setInterviewCompany(first)
-      } catch { /* ignore */ }
-    }
-    load()
+    setCompaniesLoading(true)
+    fetch('/api/companies?limit=20&offset=0', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled) return
+        const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
+        setAllCompanies(list)
+        if (list.length > 0) setInterviewCompany(list[0])
+      })
+      .catch(() => { /* ignore */ })
+      .finally(() => { if (!cancelled) setCompaniesLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [loading])
 
   // Lobby camera preview
   useEffect(() => {
@@ -399,6 +412,220 @@ export default function InterviewPage() {
     `${interviewCompany?.culture || 'チームで成果を重視する文化'} / ${interviewCompany?.welfare_details || '情報準備中'}`,
     '', `【勤務地・人数】 ${interviewCompany?.location || '未設定'} / ${interviewCompany?.employee_count ? interviewCompany.employee_count + '名' : '非公開'}`,
   ].join('\n')
+
+  const filteredCompanies = allCompanies.filter(c =>
+    c.name.toLowerCase().includes(companySearch.toLowerCase()) ||
+    (c.industry || '').toLowerCase().includes(companySearch.toLowerCase())
+  )
+
+  // ─────────────────────────────────────────────
+  // SELECTION SCREEN  (Step 1 of 3)
+  // ─────────────────────────────────────────────
+  if (status === 'selection') {
+    return (
+      <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT }}>
+        {/* Header */}
+        <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 3, lg: 10 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ color: PRIMARY, display: 'flex', alignItems: 'center' }}>
+              <PsychologyIcon sx={{ fontSize: 32 }} />
+            </Box>
+            <Typography sx={{ fontWeight: 700, fontSize: 20, color: '#0f172a' }}>InterviewAI</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <IconButton sx={{ bgcolor: '#f1f5f9', color: '#475569' }} size="small" onClick={() => router.push('/')}>
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: `${PRIMARY}30`, border: `1px solid ${PRIMARY}50`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography sx={{ fontWeight: 700, color: PRIMARY, fontSize: 14 }}>
+                {(user.name || 'U').charAt(0).toUpperCase()}
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Main */}
+        <Box component="main" sx={{ display: 'flex', justifyContent: 'center', py: 5, px: { xs: 3, lg: 10 } }}>
+          <Box sx={{ maxWidth: 896, width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+
+            {/* Step indicator + Title */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Typography sx={{ color: PRIMARY, fontWeight: 600, fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
+                  Step 1 / 3
+                </Typography>
+                <Box sx={{ height: 4, width: 96, bgcolor: '#e2e8f0', borderRadius: 9999, overflow: 'hidden' }}>
+                  <Box sx={{ height: '100%', width: '33%', bgcolor: PRIMARY }} />
+                </Box>
+              </Box>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a' }}>練習する企業・職種を選ぶ</Typography>
+              <Typography sx={{ color: '#64748b', fontSize: 15 }}>
+                志望企業と職種を選択して、AIが面接内容をカスタマイズします。
+              </Typography>
+            </Box>
+
+            {/* 3-col grid */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 4, alignItems: 'start' }}>
+
+              {/* Left: Company + Position */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+
+                {/* Company section */}
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0' }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2 }}>志望企業</Typography>
+                  {/* Search */}
+                  <Box sx={{ position: 'relative', mb: 3 }}>
+                    <SearchIcon sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: 20 }} />
+                    <Box
+                      component="input"
+                      value={companySearch}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompanySearch(e.target.value)}
+                      placeholder="企業名・業種で検索（例：テック、製造、金融）"
+                      sx={{
+                        width: '100%', pl: '40px', pr: 2, py: 1.5,
+                        bgcolor: '#f8fafc', border: '1px solid #e2e8f0',
+                        borderRadius: 2, fontSize: 14, color: '#0f172a',
+                        outline: 'none', boxSizing: 'border-box',
+                        '&:focus': { borderColor: PRIMARY, boxShadow: `0 0 0 2px ${PRIMARY}20` },
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                  </Box>
+
+                  {/* Company chips */}
+                  {companiesLoading ? (
+                    <LinearProgress sx={{ borderRadius: 1 }} />
+                  ) : (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+                      {(filteredCompanies.length > 0 ? filteredCompanies : allCompanies).slice(0, 12).map(c => {
+                        const isSelected = interviewCompany?.id === c.id
+                        return (
+                          <Button
+                            key={c.id}
+                            size="small"
+                            onClick={() => setInterviewCompany(c)}
+                            startIcon={isSelected ? <CheckCircleIcon sx={{ fontSize: '16px !important' }} /> : undefined}
+                            sx={{
+                              px: 2, py: 0.8, borderRadius: 2, fontWeight: 500, fontSize: 13,
+                              textTransform: 'none',
+                              bgcolor: isSelected ? PRIMARY : '#f1f5f9',
+                              color: isSelected ? '#fff' : '#475569',
+                              '&:hover': { bgcolor: isSelected ? `${PRIMARY}e0` : '#e2e8f0' },
+                            }}
+                          >
+                            {c.name}
+                          </Button>
+                        )
+                      })}
+                      {filteredCompanies.length === 0 && !companiesLoading && (
+                        <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>企業が見つかりません</Typography>
+                      )}
+                    </Box>
+                  )}
+                </Paper>
+
+                {/* Position section */}
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0' }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2 }}>応募職種</Typography>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+                    {POSITIONS.map(pos => {
+                      const isSelected = selectedPosition.id === pos.id
+                      return (
+                        <Box
+                          key={pos.id}
+                          onClick={() => setSelectedPosition(pos)}
+                          sx={{
+                            position: 'relative', display: 'flex', alignItems: 'center', gap: 1.5,
+                            p: 2, borderRadius: 2, cursor: 'pointer',
+                            border: `2px solid ${isSelected ? PRIMARY : 'transparent'}`,
+                            bgcolor: isSelected ? `${PRIMARY}08` : '#f8fafc',
+                            transition: 'all 0.15s',
+                            '&:hover': { borderColor: isSelected ? PRIMARY : '#cbd5e1' },
+                          }}
+                        >
+                          <Typography sx={{ fontSize: 22 }}>{pos.icon}</Typography>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>{pos.title}</Typography>
+                            <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>{pos.department}</Typography>
+                          </Box>
+                          <Box sx={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+                            {isSelected
+                              ? <CheckCircleIcon sx={{ color: PRIMARY, fontSize: 20 }} />
+                              : <Box sx={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #cbd5e1' }} />
+                            }
+                          </Box>
+                        </Box>
+                      )
+                    })}
+                  </Box>
+                </Paper>
+              </Box>
+
+              {/* Right: Summary + CTA */}
+              <Box sx={{ position: { md: 'sticky' }, top: 32, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${PRIMARY}30`, bgcolor: `${PRIMARY}05` }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+                    <Box sx={{ width: 48, height: 48, borderRadius: 2, bgcolor: '#fff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ApartmentIcon sx={{ color: PRIMARY }} />
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontWeight: 700, fontSize: 15 }}>{interviewCompany?.name || '企業未選択'}</Typography>
+                      <Typography sx={{ fontSize: 13, color: '#64748b' }}>{interviewCompany?.industry || '業種未設定'}</Typography>
+                    </Box>
+                  </Box>
+
+                  <Stack spacing={2.5}>
+                    <Box>
+                      <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>応募ポジション</Typography>
+                      <Typography sx={{ fontWeight: 600, fontSize: 15 }}>{selectedPosition.title}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>企業概要</Typography>
+                      <Typography sx={{ fontSize: 13, color: '#64748b', lineHeight: 1.7 }}>
+                        {interviewCompany?.description
+                          ? interviewCompany.description.slice(0, 120) + (interviewCompany.description.length > 120 ? '...' : '')
+                          : '企業を選択すると詳細が表示されます。'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ pt: 2, borderTop: `1px solid ${PRIMARY}15` }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <Typography sx={{ fontSize: 14 }}>⏱</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#475569' }}>所要時間: {interviewLimits.maxMinutes}分</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography sx={{ fontSize: 14 }}>❓</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#475569' }}>{selectedPosition.questions}問 技術・行動面接</Typography>
+                      </Box>
+                    </Box>
+                  </Stack>
+                </Paper>
+
+                <Button
+                  variant="contained"
+                  fullWidth
+                  endIcon={<ArrowForwardIcon />}
+                  disabled={!interviewCompany}
+                  onClick={() => setStatus('lobby')}
+                  sx={{
+                    bgcolor: PRIMARY, '&:hover': { bgcolor: `${PRIMARY}e0` },
+                    borderRadius: 2, py: 1.8, fontWeight: 700, fontSize: 16,
+                    textTransform: 'none',
+                    boxShadow: `0 8px 24px ${PRIMARY}30`,
+                    '&:disabled': { bgcolor: '#e2e8f0', color: '#94a3b8', boxShadow: 'none' },
+                  }}
+                >
+                  面接を開始する
+                </Button>
+                <Typography sx={{ fontSize: 12, textAlign: 'center', color: '#94a3b8' }}>
+                  開始すると<Box component="a" href="#" sx={{ textDecoration: 'underline', color: 'inherit' }}>利用規約</Box>に同意したことになります
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+    )
+  }
 
   // ─────────────────────────────────────────────
   // LOBBY SCREEN
