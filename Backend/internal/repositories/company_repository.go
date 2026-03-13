@@ -78,9 +78,24 @@ func (r *CompanyRepository) Update(company *models.Company) error {
 	return r.db.Save(company).Error
 }
 
+// FindJobPositionByCompanyAndTitle 企業IDと職種タイトルで募集職種を取得
+func (r *CompanyRepository) FindJobPositionByCompanyAndTitle(companyID uint, title string) (*models.CompanyJobPosition, error) {
+	var position models.CompanyJobPosition
+	err := r.db.Where("company_id = ? AND title = ?", companyID, title).First(&position).Error
+	if err != nil {
+		return nil, err
+	}
+	return &position, nil
+}
+
 // CreateJobPosition 募集職種を作成
 func (r *CompanyRepository) CreateJobPosition(position *models.CompanyJobPosition) error {
 	return r.db.Create(position).Error
+}
+
+// UpdateJobPosition 募集職種を更新
+func (r *CompanyRepository) UpdateJobPosition(position *models.CompanyJobPosition) error {
+	return r.db.Save(position).Error
 }
 
 // FindJobPositionsByCompany 企業の募集職種を取得

@@ -57,7 +57,7 @@ export default function AdminCrawlingPage() {
   const [loading, setLoading] = useState(false)
 
   const [name, setName] = useState('')
-  const [targetType, setTargetType] = useState<'company' | 'popular_companies'>('company')
+  const [targetType, setTargetType] = useState<'company' | 'popular_companies' | 'job_site_company' | 'job_listing'>('job_site_company')
   const [sourceType, setSourceType] = useState('official')
   const [sourceUrl, setSourceUrl] = useState('')
   const [scheduleType, setScheduleType] = useState<'weekly' | 'monthly'>('weekly')
@@ -123,7 +123,7 @@ export default function AdminCrawlingPage() {
       return
     }
     setName('')
-    setTargetType('company')
+    setTargetType('job_site_company')
     setSourceUrl('')
     setScheduleType('weekly')
     setScheduleDay(1)
@@ -196,11 +196,32 @@ export default function AdminCrawlingPage() {
                   select
                   label="対象タイプ"
                   value={targetType}
-                  onChange={(e) => setTargetType(e.target.value as 'company' | 'popular_companies')}
+                  onChange={(e) =>
+                    setTargetType(
+                      e.target.value as 'company' | 'popular_companies' | 'job_site_company' | 'job_listing',
+                    )
+                  }
                 >
-                  <MenuItem value="company">企業単体</MenuItem>
+                  <MenuItem value="job_site_company">会社情報（企業ページ）</MenuItem>
+                  <MenuItem value="job_listing">求人情報（募集職種）</MenuItem>
                   <MenuItem value="popular_companies">人気企業一覧</MenuItem>
+                  <MenuItem value="company">企業単体（名前のみ）</MenuItem>
                 </TextField>
+                {targetType === 'job_site_company' && (
+                  <Typography variant="caption" color="text.secondary">
+                    新卒求人サイトの企業詳細ページURLを指定すると、会社概要・業界・従業員数・企業文化・福利厚生などを自動取得します。
+                  </Typography>
+                )}
+                {targetType === 'job_listing' && (
+                  <Typography variant="caption" color="text.secondary">
+                    新卒求人サイトの募集職種ページURLを指定すると、職種名・仕事内容・給与・勤務地・必要スキルなどを自動取得します。
+                  </Typography>
+                )}
+                {targetType === 'popular_companies' && (
+                  <Typography variant="caption" color="text.secondary">
+                    人気企業ランキング等のページURLを指定すると、AIが会社名を一覧抽出してDBに登録します。
+                  </Typography>
+                )}
                 <TextField
                   label={targetType === 'company' ? '企業名' : '設定名'}
                   value={name}
@@ -288,11 +309,33 @@ export default function AdminCrawlingPage() {
                         <Typography variant="subtitle1" fontWeight="bold">
                           {source.name}
                         </Typography>
-                        <Chip
-                          label={source.is_active ? '稼働中' : '停止中'}
-                          size="small"
-                          color={source.is_active ? 'success' : 'default'}
-                        />
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Chip
+                            label={
+                              source.target_type === 'company'
+                                ? '企業単体'
+                                : source.target_type === 'popular_companies'
+                                  ? '人気企業一覧'
+                                  : source.target_type === 'job_site_company'
+                                    ? '会社情報'
+                                    : '求人情報'
+                            }
+                            size="small"
+                            variant="outlined"
+                            color={
+                              source.target_type === 'job_listing'
+                                ? 'primary'
+                                : source.target_type === 'job_site_company'
+                                  ? 'secondary'
+                                  : 'default'
+                            }
+                          />
+                          <Chip
+                            label={source.is_active ? '稼働中' : '停止中'}
+                            size="small"
+                            color={source.is_active ? 'success' : 'default'}
+                          />
+                        </Stack>
                       </Box>
                       <Typography variant="body2" color="text.secondary">
                         {source.schedule_type === 'weekly'
