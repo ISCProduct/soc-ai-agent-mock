@@ -108,13 +108,14 @@ func main() {
 		matchRepo,
 		nil,
 	)
+	emailService := services.NewEmailService()
 	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, aiClient)
 	interviewService.StartWorker()
 
 	// コントローラー層の初期化
 	authController := controllers.NewAuthController(authService)
 	oauthController := controllers.NewOAuthController(oauthService)
-	chatController := controllers.NewChatController(chatService, matchingService, analysisService)
+	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := &controllers.CompanyRelationController{DB: db}
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizService)

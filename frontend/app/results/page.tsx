@@ -15,8 +15,12 @@ import {
   Chip,
   Tabs,
   Tab,
+  Snackbar,
+  Alert,
 } from '@mui/material'
-import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon, Refresh } from '@mui/icons-material'
+import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon, Refresh, Email } from '@mui/icons-material'
+import { sendAnalysisReport } from '@/lib/api'
+import { authService } from '@/lib/auth'
 import ReactFlow, {
   Node,
   Edge,
@@ -136,6 +140,12 @@ function ResultsContent() {
   const [relations, setRelations] = useState<CapitalRelation[]>([])
   const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([])
   const [diagramLoading, setDiagramLoading] = useState(false)
+  const [emailSending, setEmailSending] = useState(false)
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  })
 
   const userId = searchParams.get('user_id')
   const sessionId = searchParams.get('session_id')
@@ -243,6 +253,24 @@ function ResultsContent() {
       loadDiagramData()
     }
   }, [selectedCompany, detailTab, relations.length, marketInfo.length])
+
+  const handleSendEmail = async () => {
+    const user = authService.getStoredUser()
+    if (!user || user.is_guest) {
+      setSnackbar({ open: true, message: 'ゲストユーザーはメール送信できません', severity: 'error' })
+      return
+    }
+    if (!userId || !sessionId) return
+    setEmailSending(true)
+    try {
+      const result = await sendAnalysisReport(Number(userId), sessionId)
+      setSnackbar({ open: true, message: result.message || '分析レポートを送信しました', severity: 'success' })
+    } catch (err) {
+      setSnackbar({ open: true, message: err instanceof Error ? err.message : 'メール送信に失敗しました', severity: 'error' })
+    } finally {
+      setEmailSending(false)
+    }
+  }
 
   const handleBack = () => {
     router.push('/')
@@ -836,9 +864,17 @@ function ResultsContent() {
         backgroundColor: '#fff',
         flexShrink: 0,
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={handleBack}>
             チャットに戻る
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Email />}
+            onClick={handleSendEmail}
+            disabled={emailSending}
+          >
+            {emailSending ? '送信中...' : '結果をメールで受け取る'}
           </Button>
         </Box>
         <Box sx={{ textAlign: 'center' }}>
@@ -964,12 +1000,28 @@ function ResultsContent() {
           </Stack>
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
-            <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={handleReset}>
-              最初からやり直す
-            </Button>
+            <Stack direction="row" spacing={2} justifyContent="center">
+              <Button variant="contained" startIcon={<Email />} onClick={handleSendEmail} disabled={emailSending}>
+                {emailSending ? '送信中...' : '結果をメールで受け取る'}
+              </Button>
+              <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={handleReset}>
+                最初からやり直す
+              </Button>
+            </Stack>
           </Box>
         </Box>
       </Box>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }
