@@ -121,6 +121,57 @@ func (c *AuthController) GetUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// RequestRegistration メールアドレスに確認リンクを送信
+func (c *AuthController) RequestRegistration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := c.authService.RequestRegistration(body.Email); err != nil {
+		if err.Error() == "email already exists" {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "confirmation email sent"})
+}
+
+// VerifyRegistration 仮登録トークンを検証してメールアドレスを返す
+func (c *AuthController) VerifyRegistration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+
+	email, err := c.authService.ValidateRegistrationToken(token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"email": email, "token": token})
+}
+
 // UpdateProfile ユーザープロフィール更新
 func (c *AuthController) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

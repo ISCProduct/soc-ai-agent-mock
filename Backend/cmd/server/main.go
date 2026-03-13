@@ -87,9 +87,11 @@ func main() {
 	interviewSessionRepo := repositories.NewInterviewSessionRepository(db)
 	interviewUtteranceRepo := repositories.NewInterviewUtteranceRepository(db)
 	interviewReportRepo := repositories.NewInterviewReportRepository(db)
+	pendingRegistrationRepo := repositories.NewPendingRegistrationRepository(db)
 
 	// サービス層の初期化
-	authService := services.NewAuthService(userRepo)
+	emailService := services.NewEmailService()
+	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
@@ -108,7 +110,6 @@ func main() {
 		matchRepo,
 		nil,
 	)
-	emailService := services.NewEmailService()
 	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient)
 	interviewService.StartWorker()
 

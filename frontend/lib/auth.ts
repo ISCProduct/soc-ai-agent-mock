@@ -62,6 +62,18 @@ export const authService = {
     return res.json()
   },
 
+  async requestRegistration(email: string): Promise<void> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/request-registration`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    if (!res.ok) {
+      const error = await res.text()
+      throw new Error(error || 'Failed to send registration email')
+    }
+  },
+
   async register(
     email: string,
     password: string,
@@ -69,6 +81,7 @@ export const authService = {
     targetLevel: string,
     certificationsAcquired: string,
     certificationsInProgress: string,
+    registrationToken?: string,
   ): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
@@ -80,6 +93,7 @@ export const authService = {
         target_level: targetLevel,
         certifications_acquired: certificationsAcquired,
         certifications_in_progress: certificationsInProgress,
+        registration_token: registrationToken,
       }),
     })
     if (!res.ok) {

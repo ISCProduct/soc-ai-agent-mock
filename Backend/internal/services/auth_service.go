@@ -8,16 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService struct {
-	userRepo *repositories.UserRepository
+	userRepo        *repositories.UserRepository
+	pendingRepo     *repositories.PendingRegistrationRepository
+	emailService    *EmailService
 }
 
-func NewAuthService(userRepo *repositories.UserRepository) *AuthService {
-	return &AuthService{userRepo: userRepo}
+func NewAuthService(userRepo *repositories.UserRepository, pendingRepo *repositories.PendingRegistrationRepository, emailService *EmailService) *AuthService {
+	return &AuthService{userRepo: userRepo, pendingRepo: pendingRepo, emailService: emailService}
 }
 
 // RegisterRequest ユーザー登録リクエスト
@@ -29,6 +32,7 @@ type RegisterRequest struct {
 	SchoolName               string `json:"school_name"`
 	CertificationsAcquired   string `json:"certifications_acquired"`
 	CertificationsInProgress string `json:"certifications_in_progress"`
+	RegistrationToken        string `json:"registration_token"`
 }
 
 // LoginRequest ログインリクエスト
@@ -62,11 +66,73 @@ type AuthResponse struct {
 	Token                    string `json:"token,omitempty"` // 将来的なトークン認証用
 }
 
+// RequestRegistration メールアドレスに確認URLを送信して仮登録を作成
+func (s *AuthService) RequestRegistration(email string) error {
+	if email == "" {
+		return errors.New("email is required")
+	}
+
+	// 既存ユーザーチェック
+	existing, err := s.userRepo.GetUserByEmail(email)
+	if err != nil {
+		return fmt.Errorf("failed to check existing user: %w", err)
+	}
+	if existing != nil {
+		return errors.New("email already exists")
+	}
+
+	// 以前の仮登録を削除
+	_ = s.pendingRepo.DeleteByEmail(email)
+
+	// トークン生成
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Errorf("failed to generate token: %w", err)
+	}
+	token := base64.URLEncoding.EncodeToString(b)
+
+	pending := &models.PendingRegistration{
+		Token:     token,
+		Email:     email,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := s.pendingRepo.Create(pending); err != nil {
+		return fmt.Errorf("failed to save pending registration: %w", err)
+	}
+
+	return s.emailService.SendRegistrationEmail(email, token)
+}
+
+// ValidateRegistrationToken 仮登録トークンを検証してメールアドレスを返す
+func (s *AuthService) ValidateRegistrationToken(token string) (string, error) {
+	pending, err := s.pendingRepo.FindByToken(token)
+	if err != nil {
+		return "", fmt.Errorf("failed to find token: %w", err)
+	}
+	if pending == nil {
+		return "", errors.New("invalid or expired token")
+	}
+	return pending.Email, nil
+}
+
 // Register 新規ユーザー登録
 func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	// バリデーション
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
+	}
+
+	// トークン検証
+	if req.RegistrationToken != "" {
+		pending, err := s.pendingRepo.FindByToken(req.RegistrationToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate token: %w", err)
+		}
+		if pending == nil || pending.Email != req.Email {
+			return nil, errors.New("invalid or expired registration token")
+		}
+		// 使用済みトークンを削除
+		_ = s.pendingRepo.DeleteByEmail(req.Email)
 	}
 	if req.TargetLevel == "" {
 		req.TargetLevel = "新卒"

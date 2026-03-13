@@ -12,12 +12,10 @@ import {
   Tab,
   Divider,
   Alert,
-  MenuItem,
 } from '@mui/material'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import { authService, AuthResponse } from '@/lib/auth'
-import { CERTIFICATION_OPTIONS, joinCertifications } from '@/lib/profile'
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -27,12 +25,10 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
   const [tabValue, setTabValue] = useState(0)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
-  const [targetLevel, setTargetLevel] = useState('新卒')
-  const [certificationsAcquired, setCertificationsAcquired] = useState<string[]>([])
-  const [certificationsInProgress, setCertificationsInProgress] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  // 新規登録: メール送信完了状態
+  const [registrationEmailSent, setRegistrationEmailSent] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,21 +45,13 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     }
   }
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRequestRegistration = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      const response = await authService.register(
-        email,
-        password,
-        name,
-        targetLevel,
-        joinCertifications(certificationsAcquired),
-        certificationsInProgress,
-      )
-      authService.saveAuth(response)
-      onAuthSuccess(response)
+      await authService.requestRegistration(email)
+      setRegistrationEmailSent(true)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -150,17 +138,6 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 required
                 sx={{ mb: 3 }}
               />
-              <TextField
-                fullWidth
-                select
-                label="区分"
-                value={targetLevel}
-                onChange={(e) => setTargetLevel(e.target.value)}
-                sx={{ mb: 3 }}
-              >
-                <MenuItem value="新卒">新卒</MenuItem>
-                <MenuItem value="中途">中途</MenuItem>
-              </TextField>
               <Button
                 type="submit"
                 fullWidth
@@ -171,16 +148,16 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 ログイン
               </Button>
             </Box>
+          ) : registrationEmailSent ? (
+            <Alert severity="success">
+              <strong>確認メールを送信しました</strong><br />
+              {email} 宛に確認リンクを送りました。メールを確認して登録を完了してください。
+            </Alert>
           ) : (
-            <Box component="form" onSubmit={handleRegister}>
-              <TextField
-                fullWidth
-                label="名前"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                sx={{ mb: 2 }}
-              />
+            <Box component="form" onSubmit={handleRequestRegistration}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                まずメールアドレスを入力してください。確認リンクをお送りします。
+              </Typography>
               <TextField
                 fullWidth
                 label="メールアドレス"
@@ -188,48 +165,6 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                sx={{ mb: 2 }}
-              />
-              <TextField
-                fullWidth
-                label="パスワード"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                sx={{ mb: 3 }}
-              />
-              <TextField
-                fullWidth
-                select
-                label="取得資格"
-                value={certificationsAcquired}
-                onChange={(e) =>
-                  setCertificationsAcquired(
-                    typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
-                  )
-                }
-                SelectProps={{
-                  multiple: true,
-                  renderValue: (selected) => (selected as string[]).join(', '),
-                }}
-                helperText="複数選択可"
-                sx={{ mb: 2 }}
-              >
-                {CERTIFICATION_OPTIONS.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                fullWidth
-                label="勉強中の資格"
-                value={certificationsInProgress}
-                onChange={(e) => setCertificationsInProgress(e.target.value)}
-                placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
-                multiline
-                minRows={3}
                 sx={{ mb: 3 }}
               />
               <Button
@@ -239,7 +174,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 size="large"
                 disabled={loading}
               >
-                登録
+                確認メールを送る
               </Button>
             </Box>
           )}

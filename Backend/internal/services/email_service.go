@@ -356,3 +356,69 @@ func (s *EmailService) SendInterviewReport(user *models.User, data InterviewRepo
 	fmt.Printf("[EmailService] Interview report email sent successfully to %s\n", user.Email)
 	return nil
 }
+
+const registrationEmailTemplate = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>メールアドレス確認</title>
+  <style>
+    body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;margin:0;padding:20px;}
+    .container{max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+    .header{background:linear-gradient(135deg,#1976D2,#42A5F5);color:white;padding:32px 24px;text-align:center;}
+    .header h1{margin:0;font-size:22px;}
+    .body{padding:24px;}
+    .btn{display:inline-block;margin:20px 0;padding:14px 28px;background:#1976D2;color:white;text-decoration:none;border-radius:6px;font-size:15px;}
+    .footer{padding:20px 24px;text-align:center;background:#fafafa;color:#999;font-size:11px;}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header"><h1>メールアドレス確認</h1></div>
+  <div class="body">
+    <p>IT業界キャリアエージェントへのご登録ありがとうございます。</p>
+    <p>以下のボタンをクリックしてメールアドレスを確認し、アカウント情報の入力に進んでください。</p>
+    <a class="btn" href="{{.VerifyURL}}">メールアドレスを確認する</a>
+    <p style="color:#888;font-size:12px;">このリンクは24時間有効です。身に覚えのない場合は無視してください。</p>
+  </div>
+  <div class="footer"><p>IT業界キャリアエージェント</p></div>
+</div>
+</body>
+</html>`
+
+// SendRegistrationEmail 仮登録確認メールを送信
+func (s *EmailService) SendRegistrationEmail(email, token string) error {
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+	verifyURL := fmt.Sprintf("%s/verify-registration?token=%s", frontendURL, token)
+
+	type data struct{ VerifyURL string }
+	tmpl, err := template.New("reg").Parse(registrationEmailTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data{VerifyURL: verifyURL}); err != nil {
+		return fmt.Errorf("failed to render template: %w", err)
+	}
+	htmlBody := buf.String()
+
+	if s.host == "" {
+		fmt.Printf("[EmailService] SMTP not configured. Simulating registration email to %s (verify_url: %s)\n", email, verifyURL)
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: メールアドレスの確認\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, email, htmlBody,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	if err := smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg)); err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+	fmt.Printf("[EmailService] Registration email sent to %s\n", email)
+	return nil
+}
