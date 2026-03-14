@@ -56,6 +56,10 @@ export const authService = {
       body: JSON.stringify({ email, password }),
     })
     if (!res.ok) {
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'email_not_verified')
+      }
       const error = await res.text()
       throw new Error(error || 'Login failed')
     }

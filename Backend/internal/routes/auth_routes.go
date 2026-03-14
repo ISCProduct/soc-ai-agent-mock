@@ -15,6 +15,7 @@ func SetupAuthRoutes(authController *controllers.AuthController, oauthController
 	http.HandleFunc("/api/auth/guest", authController.CreateGuest)
 	http.HandleFunc("/api/auth/user", authController.GetUser)
 	http.HandleFunc("/api/auth/profile", authController.UpdateProfile)
+	http.HandleFunc("/api/auth/verify-email", authController.VerifyEmail)
 
 	// OAuth エンドポイント
 	http.HandleFunc("/api/auth/google", oauthController.GoogleLogin)

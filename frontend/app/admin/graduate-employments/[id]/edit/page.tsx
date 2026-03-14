@@ -44,10 +44,12 @@ export default function AdminGraduateEmploymentEditPage() {
 
   useEffect(() => {
     if (!id) return
+    const admin = authService.getStoredUser()
+    const headers = { 'X-Admin-Email': admin?.email || '' }
     Promise.all([
-      fetch('/api/admin/companies').then((r) => r.json()),
-      fetch('/api/admin/job-positions?limit=100').then((r) => r.json()),
-      fetch(`/api/admin/graduate-employments/${id}`).then((r) => r.json()),
+      fetch('/api/admin/companies', { headers }).then((r) => r.json()),
+      fetch('/api/admin/job-positions?limit=100', { headers }).then((r) => r.json()),
+      fetch(`/api/admin/graduate-employments/${id}`, { headers }).then((r) => r.json()),
     ]).then(([companiesData, positionsData, entry]) => {
       setCompanies(companiesData?.companies || [])
       setJobPositions(positionsData?.positions || [])
