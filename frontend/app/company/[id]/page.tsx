@@ -57,13 +57,14 @@ export default function CompanyDetailPage() {
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('capital')
+  const [jobPositions, setJobPositions] = useState<{ id: number; title: string; employment_type?: string; work_location?: string; description?: string; job_category?: { name: string } }[]>([])
 
   useEffect(() => {
     const fetchCompanyDetail = async () => {
       try {
         // バックエンドから企業詳細を取得
         const response = await fetch(`/api/companies/${params.id}`)
-        
+
         if (response.ok) {
           const data = await response.json()
           setCompany(data)
@@ -79,7 +80,20 @@ export default function CompanyDetailPage() {
       }
     }
 
+    const fetchJobPositions = async () => {
+      try {
+        const res = await fetch(`/api/companies/${params.id}/job-positions`)
+        if (res.ok) {
+          const data = await res.json()
+          setJobPositions(data.positions || [])
+        }
+      } catch {
+        // job positions are optional
+      }
+    }
+
     fetchCompanyDetail()
+    fetchJobPositions()
   }, [params.id])
 
   if (loading) {
@@ -317,6 +331,37 @@ export default function CompanyDetailPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* 公開求人情報 */}
+        {jobPositions.length > 0 && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Briefcase className="w-5 h-5" />
+                募集職種
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {jobPositions.map((pos) => (
+                  <div key={pos.id} className="border rounded-lg p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{pos.title}</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {[pos.job_category?.name, pos.employment_type, pos.work_location].filter(Boolean).join(' / ')}
+                        </p>
+                        {pos.description && (
+                          <p className="text-sm mt-2 text-muted-foreground line-clamp-2">{pos.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* 企業関連図 */}
         <Card className="mt-6">

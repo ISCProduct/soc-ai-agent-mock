@@ -109,7 +109,7 @@ func main() {
 		matchRepo,
 		nil,
 	)
-	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, aiClient)
+	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient)
 	interviewService.StartWorker()
 
 	// コントローラー層の初期化
