@@ -4,13 +4,46 @@ import json
 import os
 
 import fitz  # PyMuPDF
-from PIL import Image, ImageDraw, ImageFont
-import io
 
-NOTE_WIDTH_PT = 260
-FONT_SIZE_PT = 9
-MARGIN_PT = 8
-LINE_SPACING = 1.4
+SEVERITY_COLORS = {
+    "critical": {
+        "highlight": (1.0, 0.82, 0.82),
+        "border":    (0.78, 0.15, 0.15),
+        "label_bg":  (0.78, 0.15, 0.15),
+        "label_fg":  (1.0, 1.0, 1.0),
+        "badge":     (0.85, 0.15, 0.15),
+        "ja":        "重大",
+    },
+    "warning": {
+        "highlight": (1.0, 0.95, 0.75),
+        "border":    (0.75, 0.50, 0.05),
+        "label_bg":  (0.85, 0.60, 0.05),
+        "label_fg":  (1.0, 1.0, 1.0),
+        "badge":     (0.85, 0.55, 0.05),
+        "ja":        "注意",
+    },
+    "info": {
+        "highlight": (0.82, 0.92, 1.0),
+        "border":    (0.18, 0.48, 0.78),
+        "label_bg":  (0.18, 0.48, 0.78),
+        "label_fg":  (1.0, 1.0, 1.0),
+        "badge":     (0.18, 0.48, 0.78),
+        "ja":        "情報",
+    },
+}
+DEFAULT_COLOR = {
+    "highlight": (0.90, 0.90, 0.90),
+    "border":    (0.40, 0.40, 0.40),
+    "label_bg":  (0.40, 0.40, 0.40),
+    "label_fg":  (1.0, 1.0, 1.0),
+    "badge":     (0.40, 0.40, 0.40),
+    "ja":        "",
+}
+
+
+def color(c):
+    """SEVERITY_COLORS エントリまたは DEFAULT_COLOR を返す。"""
+    return SEVERITY_COLORS.get(c, DEFAULT_COLOR)
 
 
 def resolve_japanese_font():
@@ -37,136 +70,172 @@ def resolve_japanese_font():
     return None
 
 
-def load_font(font_path, font_size_px):
-    if font_path.lower().endswith(".ttc"):
-        return ImageFont.truetype(font_path, font_size_px, index=0)
-    return ImageFont.truetype(font_path, font_size_px)
+def draw_number_badge(page, rect, number, severity):
+    """指摘箇所に番号バッジを描画する。"""
+    c = color(severity)
+    size = 14
+    cx = rect.x0
+    cy = rect.y0
+    badge_rect = fitz.Rect(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
+    page.draw_circle((cx, cy), size / 2, color=c["badge"], fill=c["badge"])
+    page.insert_text(
+        (badge_rect.x0 + 2, badge_rect.y0 + 2),
+        str(number),
+        fontsize=8,
+        color=c["label_fg"],
+    )
 
 
-def wrap_text(draw, text, font, max_width):
-    lines = []
-    for raw_line in text.split("\n"):
-        line = raw_line.strip()
-        if not line:
-            lines.append("")
+def annotate_pages(doc, items):
+    """各ページの指摘箇所をハイライト＋番号バッジで示す。"""
+    for idx, item in enumerate(items, start=1):
+        page_number = item.get("page_number", 1)
+        bbox = item.get("bbox", [20, 20, 200, 60])
+        page_width = item.get("page_width")
+        page_height = item.get("page_height")
+        severity = item.get("severity", "")
+
+        page_index = max(0, page_number - 1)
+        if page_index >= len(doc):
             continue
-        if " " in line:
-            words = line.split()
+
+        page = doc[page_index]
+        rect = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+        page_rect = page.rect
+
+        if page_width and page_height:
+            sx = page_rect.width / float(page_width)
+            sy = page_rect.height / float(page_height)
+            rect = fitz.Rect(rect.x0 * sx, rect.y0 * sy, rect.x1 * sx, rect.y1 * sy)
         else:
-            words = list(line)
-        current = ""
-        for word in words:
-            test = word if current == "" else f"{current} {word}" if " " in line else current + word
-            bbox = draw.textbbox((0, 0), test, font=font)
-            if bbox[2] <= max_width:
-                current = test
-            else:
-                if current:
-                    lines.append(current)
-                current = word
-        if current:
-            lines.append(current)
-    return lines
+            if 0 <= rect.x0 <= 1.5 and 0 <= rect.y0 <= 1.5 and 0 <= rect.x1 <= 1.5 and 0 <= rect.y1 <= 1.5:
+                rect = fitz.Rect(
+                    rect.x0 * page_rect.width,
+                    rect.y0 * page_rect.height,
+                    rect.x1 * page_rect.width,
+                    rect.y1 * page_rect.height,
+                )
+
+        c = color(severity)
+        page.draw_rect(rect, color=c["border"], fill=c["highlight"], width=1.5)
+        draw_number_badge(page, rect, idx, severity)
 
 
-def calc_note_height_pt(text, font_path, note_width_pt=NOTE_WIDTH_PT):
-    """テキスト内容に応じた吹き出しの高さ（pt）を計算する。"""
-    scale = 2
-    width_px = int(note_width_pt * scale)
-    margin_px = int(MARGIN_PT * scale)
-    font_size_px = int(FONT_SIZE_PT * scale)
-    font = load_font(font_path, font_size_px)
-    dummy = Image.new("RGB", (width_px, 10))
-    draw = ImageDraw.Draw(dummy)
-    lines = wrap_text(draw, text, font, width_px - margin_px * 2)
-    line_height_px = int(font_size_px * LINE_SPACING)
-    total_height_px = margin_px * 2 + max(1, len(lines)) * line_height_px
-    return total_height_px / scale
+def add_summary_page(doc, items, font_path):
+    """指摘内容の一覧ページを末尾に追加する。"""
+    PAGE_W, PAGE_H = 595, 842  # A4
+    MARGIN = 50
+    LINE_H = 16
+    ITEM_GAP = 10
 
+    page = doc.new_page(width=PAGE_W, height=PAGE_H)
 
-def resolve_note_rect(page_rect, target_rect, note_height, note_width=NOTE_WIDTH_PT):
-    margin = 6
+    # ---- ヘッダー ----
+    page.draw_rect(
+        fitz.Rect(0, 0, PAGE_W, 60),
+        color=(0.15, 0.25, 0.45),
+        fill=(0.15, 0.25, 0.45),
+        width=0,
+    )
+    page.insert_text(
+        (MARGIN, 38),
+        "レビュー指摘一覧",
+        fontsize=20,
+        color=(1, 1, 1),
+        fontname="helv",
+    )
 
-    center_y = (target_rect.y0 + target_rect.y1) / 2
-    top = max(page_rect.y0 + margin, center_y - note_height / 2)
-    bottom = min(page_rect.y1 - margin, top + note_height)
-    top = bottom - note_height
+    # ---- 凡例 ----
+    legend_y = 75
+    page.insert_text((MARGIN, legend_y), "重要度:", fontsize=9, color=(0.3, 0.3, 0.3))
+    lx = MARGIN + 48
+    for sev, label in [("critical", "重大"), ("warning", "注意"), ("info", "情報")]:
+        c = color(sev)
+        page.draw_rect(
+            fitz.Rect(lx, legend_y - 9, lx + 36, legend_y + 2),
+            color=c["badge"], fill=c["badge"], width=0,
+        )
+        page.insert_text((lx + 4, legend_y), label, fontsize=8, color=(1, 1, 1))
+        lx += 46
 
-    right_space = page_rect.x1 - target_rect.x1 - margin
-    left_space = target_rect.x0 - page_rect.x0 - margin
+    # ---- 罫線 ----
+    y = 95
+    page.draw_line((MARGIN, y), (PAGE_W - MARGIN, y), color=(0.7, 0.7, 0.7), width=0.5)
+    y += 12
 
-    if right_space >= note_width:
-        left = target_rect.x1 + margin
-        right = left + note_width
-    elif left_space >= note_width:
-        right = target_rect.x0 - margin
-        left = right - note_width
-    else:
-        left = max(page_rect.x0 + margin, target_rect.x0)
-        right = min(page_rect.x1 - margin, left + note_width)
-        left = right - note_width
+    for idx, item in enumerate(items, start=1):
+        severity = item.get("severity", "")
+        page_num = item.get("page_number", "-")
+        message = item.get("message", "")
+        suggestion = item.get("suggestion", "")
+        c = color(severity)
+        sev_ja = c["ja"] or severity
 
-    note_rect = fitz.Rect(left, top, right, bottom)
-    if note_rect.y0 < page_rect.y0 + margin:
-        note_rect.y1 = note_rect.y1 + (page_rect.y0 + margin - note_rect.y0)
-        note_rect.y0 = page_rect.y0 + margin
-    if note_rect.y1 > page_rect.y1 - margin:
-        note_rect.y0 = note_rect.y0 - (note_rect.y1 - (page_rect.y1 - margin))
-        note_rect.y1 = page_rect.y1 - margin
+        # ページ送り
+        if y > PAGE_H - MARGIN - 60:
+            page = doc.new_page(width=PAGE_W, height=PAGE_H)
+            page.draw_rect(
+                fitz.Rect(0, 0, PAGE_W, 60),
+                color=(0.15, 0.25, 0.45),
+                fill=(0.15, 0.25, 0.45),
+                width=0,
+            )
+            page.insert_text((MARGIN, 38), "レビュー指摘一覧（続き）", fontsize=20, color=(1, 1, 1))
+            y = 75
 
-    return note_rect
+        # ---- 番号バッジ + 重要度タグ + ページ番号 ----
+        badge_r = fitz.Rect(MARGIN, y, MARGIN + 18, y + 14)
+        page.draw_rect(badge_r, color=c["badge"], fill=c["badge"], width=0)
+        page.insert_text((MARGIN + 3, y + 11), str(idx), fontsize=8, color=(1, 1, 1))
 
+        tag_x = MARGIN + 24
+        tag_r = fitz.Rect(tag_x, y, tag_x + 30, y + 14)
+        page.draw_rect(tag_r, color=c["badge"], fill=c["badge"], width=0)
+        page.insert_text((tag_x + 3, y + 11), sev_ja, fontsize=8, color=(1, 1, 1))
 
-def draw_callout(page, target_rect, note_rect, border_color):
-    target_x = (target_rect.x0 + target_rect.x1) / 2
-    if note_rect.y1 <= target_rect.y0:
-        base_y = note_rect.y1
-        target_y = target_rect.y0
-    else:
-        base_y = note_rect.y0
-        target_y = target_rect.y1
+        page.insert_text(
+            (tag_x + 36, y + 11),
+            f"P{page_num}",
+            fontsize=9,
+            color=(0.4, 0.4, 0.4),
+        )
+        y += LINE_H + 2
 
-    base_x = min(max(target_x, note_rect.x0 + 10), note_rect.x1 - 10)
-    page.draw_line((base_x, base_y), (target_x, target_y), color=border_color, width=1.5)
+        # ---- 指摘テキスト ----
+        text_x = MARGIN + 10
+        max_w = PAGE_W - MARGIN - text_x
 
+        msg_rect = fitz.Rect(text_x, y, text_x + max_w, y + LINE_H * 4)
+        page.insert_textbox(
+            msg_rect,
+            f"指摘: {message}",
+            fontsize=10,
+            color=(0.1, 0.1, 0.1),
+            fontname="helv",
+        )
+        # テキストの実際の高さを推定（1行16pt、最大4行）
+        approx_lines = max(1, len(message) // 38 + 1)
+        y += min(approx_lines, 4) * LINE_H + 2
 
-def severity_colors(severity):
-    """severity に応じた (bg_color, border_color, text_color) を返す。"""
-    if severity == "critical":
-        return (255, 235, 235), (200, 50, 50), (120, 20, 20)
-    elif severity == "warning":
-        return (255, 248, 220), (200, 140, 30), (100, 60, 0)
-    else:  # info or unknown
-        return (235, 245, 255), (60, 130, 200), (20, 60, 120)
+        if suggestion:
+            sug_rect = fitz.Rect(text_x, y, text_x + max_w, y + LINE_H * 4)
+            page.insert_textbox(
+                sug_rect,
+                f"改善案: {suggestion}",
+                fontsize=10,
+                color=(0.2, 0.4, 0.2),
+                fontname="helv",
+            )
+            approx_lines_sug = max(1, len(suggestion) // 38 + 1)
+            y += min(approx_lines_sug, 4) * LINE_H + 2
 
-
-def render_note_image(text, width_pt, height_pt, font_path, severity=""):
-    scale = 2
-    width_px = max(1, int(width_pt * scale))
-    height_px = max(1, int(height_pt * scale))
-    margin_px = int(MARGIN_PT * scale)
-    font_size_px = int(FONT_SIZE_PT * scale)
-    font = load_font(font_path, font_size_px)
-
-    bg_color, border_color_rgb, text_color = severity_colors(severity)
-
-    image = Image.new("RGB", (width_px, height_px), bg_color)
-    draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, width_px - 1, height_px - 1], outline=border_color_rgb, width=3)
-
-    max_width = width_px - margin_px * 2
-    lines = wrap_text(draw, text, font, max_width)
-    line_height_px = int(font_size_px * LINE_SPACING)
-    y = margin_px
-    for line in lines:
-        if y + font_size_px > height_px - margin_px:
-            break
-        draw.text((margin_px, y), line, font=font, fill=text_color)
-        y += line_height_px
-
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
+        # ---- 区切り線 ----
+        y += ITEM_GAP
+        page.draw_line(
+            (MARGIN, y), (PAGE_W - MARGIN, y),
+            color=(0.85, 0.85, 0.85), width=0.5,
+        )
+        y += 8
 
 
 def main():
@@ -189,61 +258,9 @@ def main():
     if not font_path:
         raise SystemExit("Japanese font not found. Set ANNOTATION_FONT_PATH.")
 
-    for item in items:
-        page_number = item.get("page_number", 1)
-        bbox = item.get("bbox", [20, 20, 200, 60])
-        page_width = item.get("page_width")
-        page_height = item.get("page_height")
-        message = item.get("message", "")
-        suggestion = item.get("suggestion", "")
-        severity = item.get("severity", "")
-
-        page_index = max(0, page_number - 1)
-        if page_index >= len(doc):
-            continue
-
-        page = doc[page_index]
-        rect = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
-        page_rect = page.rect
-
-        if page_width and page_height:
-            scale_x = page_rect.width / float(page_width)
-            scale_y = page_rect.height / float(page_height)
-            rect = fitz.Rect(
-                rect.x0 * scale_x,
-                rect.y0 * scale_y,
-                rect.x1 * scale_x,
-                rect.y1 * scale_y,
-            )
-        else:
-            if 0 <= rect.x0 <= 1.5 and 0 <= rect.y0 <= 1.5 and 0 <= rect.x1 <= 1.5 and 0 <= rect.y1 <= 1.5:
-                rect = fitz.Rect(
-                    rect.x0 * page_rect.width,
-                    rect.y0 * page_rect.height,
-                    rect.x1 * page_rect.width,
-                    rect.y1 * page_rect.height,
-                )
-
-        highlight_color = (1.0, 0.85, 0.85) if severity == "critical" else (1.0, 0.95, 0.7) if severity == "warning" else (0.85, 0.93, 1.0)
-        page.draw_rect(rect, color=(0.8, 0.2, 0.2), width=1.5)
-        page.draw_rect(rect, color=highlight_color, fill=highlight_color, width=0)
-
-        severity_label = {"critical": "重大", "warning": "注意", "info": "情報"}.get(severity, severity)
-        note_parts = []
-        if severity_label:
-            note_parts.append(f"【{severity_label}】")
-        note_parts.append(f"指摘: {message}")
-        if suggestion:
-            note_parts.append(f"改善案: {suggestion}")
-        note = "\n".join(note_parts)
-
-        if note:
-            note_height = calc_note_height_pt(note, font_path, NOTE_WIDTH_PT)
-            note_rect = resolve_note_rect(page_rect, rect, note_height)
-            border_color_fitz = (0.78, 0.2, 0.2) if severity == "critical" else (0.78, 0.55, 0.12) if severity == "warning" else (0.24, 0.51, 0.78)
-            draw_callout(page, rect, note_rect, border_color_fitz)
-            note_image = render_note_image(note, note_rect.width, note_rect.height, font_path, severity)
-            page.insert_image(note_rect, stream=note_image, keep_proportion=False, overlay=True)
+    if items:
+        annotate_pages(doc, items)
+        add_summary_page(doc, items, font_path)
 
     doc.save(args.output, garbage=4, deflate=True)
     doc.close()
