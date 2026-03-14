@@ -124,6 +124,41 @@ func (ctrl *CompanyRelationController) GetAllMarketInfo(w http.ResponseWriter, r
 	json.NewEncoder(w).Encode(marketInfos)
 }
 
+// GetCompanyJobPositions 企業の公開済み求人一覧を取得
+func (ctrl *CompanyRelationController) GetCompanyJobPositions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// path: /api/companies/{id}/job-positions → ["api","companies","{id}","job-positions"]
+	if len(pathParts) < 3 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid company ID", http.StatusBadRequest)
+		return
+	}
+
+	var positions []models.CompanyJobPosition
+	err = ctrl.DB.
+		Where("company_id = ? AND is_active = ? AND data_status = ?", companyID, true, "published").
+		Preload("JobCategory").
+		Order("created_at desc").
+		Find(&positions).Error
+	if err != nil {
+		http.Error(w, "Failed to fetch job positions", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"positions": positions,
+	})
+}
+
 // GetCompanies 企業一覧を取得
 func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")

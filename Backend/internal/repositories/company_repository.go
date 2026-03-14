@@ -102,10 +102,10 @@ func (r *CompanyRepository) UpdateJobPosition(position *models.CompanyJobPositio
 	return r.db.Save(position).Error
 }
 
-// FindJobPositionsByCompany 企業の募集職種を取得
+// FindJobPositionsByCompany 企業の公開済み募集職種を取得（公開ユーザー向け）
 func (r *CompanyRepository) FindJobPositionsByCompany(companyID uint) ([]models.CompanyJobPosition, error) {
 	var positions []models.CompanyJobPosition
-	err := r.db.Where("company_id = ? AND is_active = ?", companyID, true).
+	err := r.db.Where("company_id = ? AND is_active = ? AND data_status = ?", companyID, true, "published").
 		Preload("JobCategory").
 		Find(&positions).Error
 	return positions, err
