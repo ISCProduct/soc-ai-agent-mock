@@ -15,6 +15,7 @@ import {
   List,
   ListItem,
   ListItemText,
+  Chip,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
 
@@ -47,7 +48,8 @@ export default function ResumePage() {
   const [documentId, setDocumentId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [reviewLoading, setReviewLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [uploadError, setUploadError] = useState('')
+  const [reviewError, setReviewError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function ResumePage() {
   }, [])
 
   const handleUpload = async () => {
-    setError('')
+    setUploadError('')
     setReview(null)
     setLoading(true)
     try {
@@ -104,7 +106,7 @@ export default function ResumePage() {
       const data = await response.json()
       setDocumentId(data?.document?.id ?? null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
+      setUploadError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setLoading(false)
     }
@@ -112,14 +114,14 @@ export default function ResumePage() {
 
   const handleReview = async () => {
     if (!documentId) {
-      setError('document_id が未設定です')
+      setReviewError('document_id が未設定です')
       return
     }
     if (!companyName.trim() && !jobTitle.trim()) {
-      setError('企業名が未入力の場合は応募職種を入力してください')
+      setReviewError('企業名が未入力の場合は応募職種を入力してください')
       return
     }
-    setError('')
+    setReviewError('')
     setReviewLoading(true)
     try {
       const response = await fetch(`/api/resume/review?document_id=${documentId}`, {
@@ -148,15 +150,33 @@ export default function ResumePage() {
       }
       setReview(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Review failed')
+      setReviewError(err instanceof Error ? err.message : 'Review failed')
     } finally {
       setReviewLoading(false)
     }
   }
 
+  const severityColor = (severity: string): 'error' | 'warning' | 'info' | 'default' => {
+    switch (severity) {
+      case 'critical': return 'error'
+      case 'warning': return 'warning'
+      case 'info': return 'info'
+      default: return 'default'
+    }
+  }
+
+  const severityLabel = (severity: string): string => {
+    switch (severity) {
+      case 'critical': return '重大'
+      case 'warning': return '注意'
+      case 'info': return '情報'
+      default: return severity
+    }
+  }
+
   const handleDownload = () => {
     if (!documentId) {
-      setError('document_id が未設定です')
+      setReviewError('document_id が未設定です')
       return
     }
     window.open(`/api/resume/annotated?document_id=${documentId}`, '_blank')
@@ -208,9 +228,21 @@ export default function ResumePage() {
           <Button variant="contained" onClick={handleUpload} disabled={loading}>
             アップロード
           </Button>
-          {loading && <LinearProgress />}
+          {loading && (
+            <Box>
+              <LinearProgress />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                アップロード中...
+              </Typography>
+            </Box>
+          )}
+          {uploadError && (
+            <Alert severity="error">{uploadError}</Alert>
+          )}
           {documentId && (
-            <Alert severity="success">document_id: {documentId}</Alert>
+            <Alert severity="success">
+              アップロード完了！下のフォームでレビューを実行してください。
+            </Alert>
           )}
         </Stack>
       </Paper>
@@ -246,7 +278,17 @@ export default function ResumePage() {
           <Button variant="contained" onClick={handleReview} disabled={reviewLoading || !documentId}>
             レビューを生成
           </Button>
-          {reviewLoading && <LinearProgress />}
+          {reviewLoading && (
+            <Box>
+              <LinearProgress />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                レビューを生成中...（通常30〜60秒かかります）
+              </Typography>
+            </Box>
+          )}
+          {reviewError && (
+            <Alert severity="error">{reviewError}</Alert>
+          )}
           {review && (
             <>
               <Divider />
@@ -256,10 +298,16 @@ export default function ResumePage() {
               </Typography>
               <List dense>
                 {review.items.map((item) => (
-                  <ListItem key={item.id} alignItems="flex-start">
+                  <ListItem key={item.id} alignItems="flex-start" sx={{ gap: 1 }}>
+                    <Chip
+                      label={severityLabel(item.severity)}
+                      color={severityColor(item.severity)}
+                      size="small"
+                      sx={{ mt: 0.5, flexShrink: 0 }}
+                    />
                     <ListItemText
-                      primary={`P${item.page_number} (${item.severity}) - ${item.message}`}
-                      secondary={item.suggestion}
+                      primary={`P${item.page_number} - ${item.message}`}
+                      secondary={item.suggestion ? `改善案: ${item.suggestion}` : undefined}
                     />
                   </ListItem>
                 ))}
@@ -271,12 +319,6 @@ export default function ResumePage() {
           )}
         </Stack>
       </Paper>
-
-      {error && (
-        <Alert severity="error" sx={{ mt: 3 }}>
-          {error}
-        </Alert>
-      )}
     </Box>
   )
 }

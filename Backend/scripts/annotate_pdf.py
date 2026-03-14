@@ -161,6 +161,7 @@ def main():
         page_height = item.get("page_height")
         message = item.get("message", "")
         suggestion = item.get("suggestion", "")
+        severity = item.get("severity", "")
 
         page_index = max(0, page_number - 1)
         if page_index >= len(doc):
@@ -190,9 +191,14 @@ def main():
         page.draw_rect(rect, color=(1, 0.2, 0.2), width=1.5)
         page.draw_rect(rect, color=(1, 0.9, 0.6), fill=(1, 0.9, 0.6), width=0)
 
-        note = message
+        severity_label = {"critical": "重大", "warning": "注意", "info": "情報"}.get(severity, severity)
+        note_parts = []
+        if severity_label:
+            note_parts.append(f"【{severity_label}】")
+        note_parts.append(f"指摘: {message}")
         if suggestion:
-            note = f"{message}\n改善案: {suggestion}"
+            note_parts.append(f"改善案: {suggestion}")
+        note = "\n".join(note_parts)
         if note:
             note_rect = resolve_note_rect(page_rect, rect)
             draw_callout(page, rect, note_rect, (0.6, 0.4, 0.1))
