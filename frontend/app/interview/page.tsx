@@ -14,7 +14,6 @@ import {
   LinearProgress,
   Paper,
   Stack,
-  Switch,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -36,7 +35,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ApartmentIcon from '@mui/icons-material/Apartment'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { authService, User } from '@/lib/auth'
-import { interviewApi, interviewLimits, InterviewReport, InterviewSession, INTERVIEW_LANGUAGES } from '@/lib/interview'
+import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
 import ThreeAvatar from './components/ThreeAvatar'
 
 const PRIMARY = '#ec5b13'
@@ -108,8 +107,6 @@ export default function InterviewPage() {
   const [companiesLoading, setCompaniesLoading] = useState(false)
   const [companySearch, setCompanySearch] = useState('')
   const [selectedPosition, setSelectedPosition] = useState<Position>(POSITIONS[0])
-  const [selectedLanguage, setSelectedLanguage] = useState('ja')
-  const [foreignLangMode, setForeignLangMode] = useState(false)
 
   const [isRecording, setIsRecording] = useState(false)
   const [turnPending, setTurnPending] = useState(false)
@@ -338,7 +335,7 @@ export default function InterviewPage() {
         streamRef.current = stream
       }
 
-      const created = await interviewApi.createSession(user.user_id, selectedLanguage)
+      const created = await interviewApi.createSession(user.user_id)
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)
       setStatus('connected')
@@ -668,47 +665,6 @@ export default function InterviewPage() {
                         <Typography sx={{ fontSize: 14 }}>❓</Typography>
                         <Typography sx={{ fontSize: 13, color: '#475569' }}>{selectedPosition.questions}問 技術・行動面接</Typography>
                       </Box>
-                    </Box>
-                    <Box sx={{ pt: 2, borderTop: `1px solid ${PRIMARY}15` }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Box>
-                          <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>外国語で面接練習する</Typography>
-                          <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: 0.3 }}>
-                            {foreignLangMode
-                              ? `AIが${INTERVIEW_LANGUAGES.find(l => l.code === selectedLanguage)?.label ?? selectedLanguage}で面接を行います`
-                              : 'AIが日本語で面接を行います（デフォルト）'}
-                          </Typography>
-                        </Box>
-                        <Switch
-                          checked={foreignLangMode}
-                          onChange={(e) => {
-                            setForeignLangMode(e.target.checked)
-                            if (!e.target.checked) setSelectedLanguage('ja')
-                          }}
-                          size="small"
-                          sx={{ '& .MuiSwitch-thumb': { bgcolor: foreignLangMode ? PRIMARY : undefined } }}
-                        />
-                      </Box>
-                      {foreignLangMode && (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
-                          {INTERVIEW_LANGUAGES.filter(l => l.code !== 'ja').map(lang => (
-                            <Button
-                              key={lang.code}
-                              size="small"
-                              onClick={() => setSelectedLanguage(lang.code)}
-                              sx={{
-                                px: 1.5, py: 0.5, borderRadius: 1.5, fontWeight: 600, fontSize: 12,
-                                textTransform: 'none', minWidth: 0,
-                                bgcolor: selectedLanguage === lang.code ? PRIMARY : '#f1f5f9',
-                                color: selectedLanguage === lang.code ? '#fff' : '#475569',
-                                '&:hover': { bgcolor: selectedLanguage === lang.code ? `${PRIMARY}e0` : '#e2e8f0' },
-                              }}
-                            >
-                              {lang.label}
-                            </Button>
-                          ))}
-                        </Box>
-                      )}
                     </Box>
                   </Stack>
                 </Paper>
