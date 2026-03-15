@@ -3,7 +3,7 @@ FROM golang:1.24-bullseye AS builder
 
 WORKDIR /app
 
-ENV GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=auto
 ENV ANNOTATION_FONT_PATH=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 
 # Install build dependencies
@@ -41,7 +41,7 @@ FROM golang:1.24-bullseye
 
 WORKDIR /app
 
-ENV GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=auto
 
 # Install runtime dependencies (OCR + PDF conversion)
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list \
