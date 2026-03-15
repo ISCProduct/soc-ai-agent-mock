@@ -168,7 +168,11 @@ def run(
     # Phase 1: スクレイピング
     raw_companies = collect(sites, query, max_pages, config)
     if not raw_companies:
-        logger.error("No companies collected. Exiting.")
+        logger.error(
+            "No companies collected. "
+            "ヒント: マイナビはログイン必須のためスキップされます。"
+            "リクナビ・キャリタスが取得できない場合はネットワークやrobots.txtを確認してください。"
+        )
         sys.exit(1)
 
     # Phase 2: 名寄せ

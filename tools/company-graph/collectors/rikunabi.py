@@ -1,7 +1,12 @@
-"""リクナビ2027 クローラー"""
+"""リクナビ クローラー
+
+検索ページ(/n/job_search/)から求人票URL一覧を取得し、
+各求人票詳細ページ(h2: '{会社名}｜{業種}')から会社名を抽出する。
+"""
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urljoin
 
 from collectors.base import BaseCrawler
@@ -10,47 +15,67 @@ from models import RawCompany
 logger = logging.getLogger(__name__)
 
 SITE_KEY = "rikunabi"
+_JOB_DESC_RE = re.compile(r"/n/job_descriptions/([a-z0-9]+)/")
+_BASE = "https://job.rikunabi.com"
 
 
 class RikunabiCrawler(BaseCrawler):
     def search(self, keyword: str = "", max_pages: int = 5) -> list[str]:
-        sel = self.selectors
+        """検索結果ページから求人票URLを収集する。"""
+        search_url = self.cfg.get("search_url", f"{_BASE}/n/job_search/")
+        seen: set[str] = set()
         urls: list[str] = []
-        search_url = self.cfg.get("search_url", self.base_url)
 
         for page in range(1, max_pages + 1):
-            page_url = f"{search_url}?page={page}"
-            if keyword:
-                page_url += f"&keyword={keyword}"
-            soup = self.get(page_url)
+            params = f"?keyword={keyword}&page={page}" if keyword else f"?page={page}"
+            soup = self.get(search_url + params)
             if soup is None:
                 break
-            items = soup.select(sel.get("company_list", ""))
-            if not items:
+
+            new_found = 0
+            for a in soup.find_all("a", href=True):
+                href = str(a["href"])
+                if _JOB_DESC_RE.search(href):
+                    full_url = urljoin(_BASE, href.split("?")[0])
+                    if not full_url.endswith("/"):
+                        full_url += "/"
+                    if full_url not in seen:
+                        seen.add(full_url)
+                        urls.append(full_url)
+                        new_found += 1
+            logger.debug("[rikunabi] page %d: %d new job URLs", page, new_found)
+            if new_found == 0:
                 break
-            for item in items:
-                a = item.select_one(sel.get("company_link", "a"))
-                if a and a.get("href"):
-                    urls.append(urljoin(self.base_url, a["href"]))
-            logger.debug("[rikunabi] page %d: %d items", page, len(items))
+
         return urls
 
     def parse_detail(self, url: str) -> RawCompany | None:
         soup = self.get(url)
         if soup is None:
             return None
-        d = self.selectors.get("detail", {})
-        address = self._text(soup, d.get("address", ""))
+
+        # h2 は "{会社名}｜{業種}" 形式
+        h2 = soup.find("h2")
+        if not h2:
+            return None
+        h2_text = h2.get_text(strip=True)
+        company_name = h2_text.split("｜")[0].strip()
+        if not company_name:
+            return None
+
+        h1 = soup.find("h1")
+        description = h1.get_text(strip=True) if h1 else ""
+
         return RawCompany(
             source_site=SITE_KEY,
             source_url=url,
-            raw_name=self._text(soup, d.get("company_name", "h1")),
-            address=address,
-            postal_code=self._extract_postal(address),
-            website=self._attr(soup, d.get("website", ""), "href"),
-            capital=self._text(soup, d.get("capital", "")),
-            employees=self._text(soup, d.get("employees", "")),
-            related_companies_text=self._text(soup, d.get("related_companies", "")),
-            business_partners_text=self._text(soup, d.get("business_partners", "")),
-            business_description=self._text(soup, d.get("business_description", "")),
+            raw_name=company_name,
+            address="",
+            postal_code="",
+            website="",
+            capital="",
+            employees="",
+            related_companies_text="",
+            business_partners_text="",
+            business_description=description,
         )

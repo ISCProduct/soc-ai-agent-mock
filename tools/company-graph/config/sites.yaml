@@ -27,41 +27,47 @@ sites:
 
   rikunabi:
     name: リクナビ{year}
-    base_url: https://job.rikunabi.com/{year}/
+    base_url: https://job.rikunabi.com/n/
     search_url: https://job.rikunabi.com/n/job_search/
     rate_limit_sec: 3.0
     user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    # 検索結果は求人票リスト。求人票詳細ページから会社名を取得する。
     selectors:
-      company_list: ".rnn-companyCard, [class*=companyCard]"
-      company_link: ".rnn-companyCard__name a, [class*=companyCard] a"
+      # 求人票URL（/n/job_descriptions/{id}/）への a タグを選択
+      company_list: "a[href*='/n/job_descriptions/']"
+      company_link: "a[href*='/n/job_descriptions/']"
       detail:
-        company_name: "h1.rnn-companyName, [data-label='会社名']"
-        address: "[data-label='本社所在地'], [data-label='所在地']"
-        website: "[data-label='URL'] a, [data-label='ホームページ'] a"
-        capital: "[data-label='資本金']"
-        employees: "[data-label='従業員数']"
-        related_companies: "[data-label='関連会社'], [data-label='グループ会社']"
-        business_partners: "[data-label='主要取引先'], [data-label='取引先']"
-        business_description: "[data-label='事業内容'], .rnn-companyPR"
+        # 求人詳細h2: "{会社名}｜{業種}" 形式
+        company_name: "h2"
+        address: ""
+        website: ""
+        capital: ""
+        employees: ""
+        related_companies: ""
+        business_partners: ""
+        business_description: "h1"
 
   career_tasu:
-    name: キャリタス就活{year}
-    base_url: https://job.career-tasu.jp/{year}/
-    search_url: https://job.career-tasu.jp/{year}/search/company/
+    # キャリタスはURLに年度を含まない（全年共通）
+    name: キャリタス就活
+    base_url: https://job.career-tasu.jp/
+    search_url: https://job.career-tasu.jp/condition-search/result/
     rate_limit_sec: 3.0
     user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     selectors:
-      company_list: ".company-list__item"
-      company_link: ".company-list__item a.company-name"
+      # 検索結果: /corp/{id}/default/ へのリンク
+      company_list: "a[href*='/corp/']"
+      company_link: "a[href*='/corp/']"
       detail:
-        company_name: "h1.company-name, .company-info td.company-name"
-        address: ".company-info tr:contains('所在地') td"
-        website: ".company-info tr:contains('URL') td a"
-        capital: ".company-info tr:contains('資本金') td"
-        employees: ".company-info tr:contains('従業員') td"
-        related_companies: ".company-info tr:contains('関連会社') td, .company-info tr:contains('グループ') td"
-        business_partners: ".company-info tr:contains('取引先') td"
-        business_description: ".company-info tr:contains('事業内容') td, .company-pr"
+        # 企業詳細ページ
+        company_name: "h1, title"
+        address: ""
+        website: ""
+        capital: ""
+        employees: ""
+        related_companies: ""
+        business_partners: ""
+        business_description: ""
 
 # gBizINFO API 設定
 gbizinfo:
