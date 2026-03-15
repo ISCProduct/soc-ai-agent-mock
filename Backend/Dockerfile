@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.25-bullseye AS builder
+FROM golang:1.24-bullseye AS builder
 
 WORKDIR /app
 
@@ -37,7 +37,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/seed-large ./cmd/seed-large
 
 # Runtime stage
-FROM golang:1.25-bullseye
+FROM golang:1.24-bullseye
 
 WORKDIR /app
 
