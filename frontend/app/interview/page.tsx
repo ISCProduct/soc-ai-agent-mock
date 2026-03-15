@@ -14,6 +14,7 @@ import {
   LinearProgress,
   Paper,
   Stack,
+  Switch,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -108,6 +109,7 @@ export default function InterviewPage() {
   const [companySearch, setCompanySearch] = useState('')
   const [selectedPosition, setSelectedPosition] = useState<Position>(POSITIONS[0])
   const [selectedLanguage, setSelectedLanguage] = useState('ja')
+  const [foreignLangMode, setForeignLangMode] = useState(false)
 
   const [isRecording, setIsRecording] = useState(false)
   const [turnPending, setTurnPending] = useState(false)
@@ -668,25 +670,45 @@ export default function InterviewPage() {
                       </Box>
                     </Box>
                     <Box sx={{ pt: 2, borderTop: `1px solid ${PRIMARY}15` }}>
-                      <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, mb: 1 }}>面接言語</Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                        {INTERVIEW_LANGUAGES.map(lang => (
-                          <Button
-                            key={lang.code}
-                            size="small"
-                            onClick={() => setSelectedLanguage(lang.code)}
-                            sx={{
-                              px: 1.5, py: 0.5, borderRadius: 1.5, fontWeight: 600, fontSize: 12,
-                              textTransform: 'none', minWidth: 0,
-                              bgcolor: selectedLanguage === lang.code ? PRIMARY : '#f1f5f9',
-                              color: selectedLanguage === lang.code ? '#fff' : '#475569',
-                              '&:hover': { bgcolor: selectedLanguage === lang.code ? `${PRIMARY}e0` : '#e2e8f0' },
-                            }}
-                          >
-                            {lang.label}
-                          </Button>
-                        ))}
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Box>
+                          <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>外国語で面接練習する</Typography>
+                          <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: 0.3 }}>
+                            {foreignLangMode
+                              ? `AIが${INTERVIEW_LANGUAGES.find(l => l.code === selectedLanguage)?.label ?? selectedLanguage}で面接を行います`
+                              : 'AIが日本語で面接を行います（デフォルト）'}
+                          </Typography>
+                        </Box>
+                        <Switch
+                          checked={foreignLangMode}
+                          onChange={(e) => {
+                            setForeignLangMode(e.target.checked)
+                            if (!e.target.checked) setSelectedLanguage('ja')
+                          }}
+                          size="small"
+                          sx={{ '& .MuiSwitch-thumb': { bgcolor: foreignLangMode ? PRIMARY : undefined } }}
+                        />
                       </Box>
+                      {foreignLangMode && (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+                          {INTERVIEW_LANGUAGES.filter(l => l.code !== 'ja').map(lang => (
+                            <Button
+                              key={lang.code}
+                              size="small"
+                              onClick={() => setSelectedLanguage(lang.code)}
+                              sx={{
+                                px: 1.5, py: 0.5, borderRadius: 1.5, fontWeight: 600, fontSize: 12,
+                                textTransform: 'none', minWidth: 0,
+                                bgcolor: selectedLanguage === lang.code ? PRIMARY : '#f1f5f9',
+                                color: selectedLanguage === lang.code ? '#fff' : '#475569',
+                                '&:hover': { bgcolor: selectedLanguage === lang.code ? `${PRIMARY}e0` : '#e2e8f0' },
+                              }}
+                            >
+                              {lang.label}
+                            </Button>
+                          ))}
+                        </Box>
+                      )}
                     </Box>
                   </Stack>
                 </Paper>
