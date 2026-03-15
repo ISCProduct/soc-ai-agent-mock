@@ -337,6 +337,39 @@ const interviewReportEmailTemplate = `<!DOCTYPE html>
 </body>
 </html>`
 
+// SendRegistrationEmail 仮登録確認メールを送信（メールアドレスのみ、Userオブジェクト不要）
+func (s *EmailService) SendRegistrationEmail(email, token string) error {
+	appURL := os.Getenv("NEXT_PUBLIC_BACKEND_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	registerURL := appURL + "/register/confirm?token=" + token
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>会員登録の確認</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:500px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">会員登録の確認</h2>
+<p>ご登録ありがとうございます。</p>
+<p>以下のボタンをクリックして会員登録を完了してください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">会員登録を完了する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。身に覚えのない場合は無視してください。</p>
+</div>
+</body></html>`, registerURL)
+
+	if s.host == "" {
+		fmt.Printf("[EmailService] Registration email for %s: %s\n", email, registerURL)
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: 会員登録の確認\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, email, body,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
+}
+
 // SendInterviewReport 面接練習レポートをメールで送信
 func (s *EmailService) SendInterviewReport(user *models.User, data InterviewReportEmailData) error {
 	data.SentAt = time.Now().Format("2006年01月02日 15:04")
