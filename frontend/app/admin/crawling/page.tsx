@@ -7,8 +7,11 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   Divider,
+  FormControlLabel,
+  FormGroup,
   MenuItem,
   Stack,
   TextField,
@@ -50,6 +53,12 @@ const WEEKDAY_OPTIONS = [
   { value: 6, label: '土' },
 ]
 
+const SITE_OPTIONS = [
+  { key: 'mynavi', label: 'マイナビ' },
+  { key: 'rikunabi', label: 'リクナビ' },
+  { key: 'career_tasu', label: 'キャリタス就活' },
+]
+
 export default function AdminCrawlingPage() {
   const [sources, setSources] = useState<CrawlSource[]>([])
   const [runs, setRuns] = useState<CrawlRun[]>([])
@@ -63,6 +72,22 @@ export default function AdminCrawlingPage() {
   const [scheduleType, setScheduleType] = useState<'weekly' | 'monthly'>('weekly')
   const [scheduleDay, setScheduleDay] = useState(1)
   const [scheduleTime, setScheduleTime] = useState('09:00')
+
+  // マルチソースクロール（company-graph パイプライン）
+  const [graphSites, setGraphSites] = useState<string[]>(['mynavi', 'rikunabi', 'career_tasu'])
+  const [graphQuery, setGraphQuery] = useState('IT')
+  const [graphPages, setGraphPages] = useState(2)
+  const [graphYear, setGraphYear] = useState<string>('')
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [graphResult, setGraphResult] = useState<{ ok: boolean; logs: string; error?: string } | null>(null)
+  const [autoYear, setAutoYear] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch('/api/admin/company-graph-crawl')
+      .then((r) => r.json())
+      .then((d) => setAutoYear(d.target_year))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -159,6 +184,34 @@ export default function AdminCrawlingPage() {
       await loadSources()
       await loadRuns()
     }
+  }
+
+  const handleGraphCrawl = async () => {
+    setGraphLoading(true)
+    setGraphResult(null)
+    const admin = authService.getStoredUser()
+    const response = await fetch('/api/admin/company-graph-crawl', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Email': admin?.email || '',
+      },
+      body: JSON.stringify({
+        sites: graphSites,
+        query: graphQuery,
+        pages: graphPages,
+        year: graphYear ? Number(graphYear) : undefined,
+      }),
+    })
+    const data = await response.json()
+    setGraphResult(data)
+    setGraphLoading(false)
+  }
+
+  const toggleGraphSite = (key: string) => {
+    setGraphSites((prev) =>
+      prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key],
+    )
   }
 
   const scheduleLabel = useMemo(() => {
@@ -385,6 +438,117 @@ export default function AdminCrawlingPage() {
               </Box>
             ))}
           </Stack>
+        </CardContent>
+      </Card>
+
+      {/* マルチソース企業グラフクロール */}
+      <Card sx={{ mt: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            マルチソース企業グラフクロール（gBizINFO連携）
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            マイナビ・リクナビ・キャリタス就活から一括取得し、gBizINFO APIで法人番号に名寄せして
+            企業関係グラフ（GraphML / JSON）を生成します。年度は自動計算されます（手動指定も可）。
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="body2" fontWeight="bold" sx={{ mb: 1 }}>
+                    対象サイト
+                  </Typography>
+                  <FormGroup row>
+                    {SITE_OPTIONS.map((s) => (
+                      <FormControlLabel
+                        key={s.key}
+                        control={
+                          <Checkbox
+                            checked={graphSites.includes(s.key)}
+                            onChange={() => toggleGraphSite(s.key)}
+                            size="small"
+                          />
+                        }
+                        label={s.label}
+                      />
+                    ))}
+                  </FormGroup>
+                </Box>
+                <TextField
+                  label="検索キーワード"
+                  value={graphQuery}
+                  onChange={(e) => setGraphQuery(e.target.value)}
+                  size="small"
+                  placeholder="例: IT, 製造, 金融"
+                />
+                <TextField
+                  label="最大ページ数（サイトごと）"
+                  type="number"
+                  value={graphPages}
+                  onChange={(e) => setGraphPages(Number(e.target.value))}
+                  size="small"
+                  inputProps={{ min: 1, max: 20 }}
+                />
+                <TextField
+                  label={`年度指定（省略時は自動: ${autoYear ?? '計算中'}年度）`}
+                  type="number"
+                  value={graphYear}
+                  onChange={(e) => setGraphYear(e.target.value)}
+                  size="small"
+                  placeholder={String(autoYear ?? '')}
+                  helperText="4月以降は当年+2、3月以前は当年+1を自動適用"
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleGraphCrawl}
+                  disabled={graphLoading || graphSites.length === 0}
+                >
+                  {graphLoading ? 'クロール実行中...' : 'クロール実行'}
+                </Button>
+              </Stack>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              {graphResult && (
+                <Box>
+                  {graphResult.ok ? (
+                    <Alert severity="success" sx={{ mb: 1 }}>
+                      完了しました。GraphML / JSON を出力しました。
+                    </Alert>
+                  ) : (
+                    <Alert severity="error" sx={{ mb: 1 }}>
+                      {graphResult.error || 'エラーが発生しました'}
+                    </Alert>
+                  )}
+                  <Box
+                    component="pre"
+                    sx={{
+                      fontSize: 11,
+                      bgcolor: '#f5f5f5',
+                      p: 1.5,
+                      borderRadius: 1,
+                      maxHeight: 300,
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {graphResult.logs}
+                  </Box>
+                </Box>
+              )}
+              {!graphResult && !graphLoading && (
+                <Box sx={{ color: 'text.secondary', fontSize: 14, pt: 1 }}>
+                  実行するとここにログが表示されます。
+                </Box>
+              )}
+              {graphLoading && (
+                <Box sx={{ color: 'text.secondary', fontSize: 14, pt: 1 }}>
+                  クロール中です。完了まで数分かかる場合があります...
+                </Box>
+              )}
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
     </Box>

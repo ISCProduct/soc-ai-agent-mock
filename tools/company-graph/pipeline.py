@@ -3,13 +3,20 @@
 
 Usage:
   python pipeline.py --sites mynavi rikunabi --query "IT" --pages 3 --out output/
+  python pipeline.py --year 2028  # 年度を手動指定（省略時は自動計算）
 
 環境変数:
   GBIZINFO_API_KEY  gBizINFO API トークン（必須）
+
+年度自動計算ルール:
+  4月以降: 当年 + 2（例: 2026年4月 → 2028年度）
+  3月以前: 当年 + 1（例: 2026年3月 → 2027年度）
 """
 from __future__ import annotations
 
 import argparse
+import datetime
+import json
 import logging
 import sys
 from pathlib import Path
@@ -40,9 +47,35 @@ _CRAWLERS = {
 _CONFIG_PATH = Path(__file__).parent / "config" / "sites.yaml"
 
 
-def load_config() -> dict:
+def resolve_year(override: int | None = None) -> int:
+    """対象卒業年度を返す。
+
+    - override が指定された場合はそれを使用。
+    - 4月以降: 当年 + 2（新年度の採用サイトが開設されるタイミング）
+    - 3月以前: 当年 + 1（現行メインシーズン）
+    """
+    if override:
+        return override
+    today = datetime.date.today()
+    return today.year + 2 if today.month >= 4 else today.year + 1
+
+
+def apply_year_template(config: dict, year: int) -> dict:
+    """設定値中の {year} / {year2d} プレースホルダーを展開する。"""
+    year2d = str(year)[-2:]
+    raw = json.dumps(config, ensure_ascii=False)
+    raw = raw.replace("{year}", str(year)).replace("{year2d}", year2d)
+    return json.loads(raw)
+
+
+def load_config(year: int | None = None) -> tuple[dict, int]:
+    """設定を読み込み、年度プレースホルダーを展開して返す。"""
     with _CONFIG_PATH.open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        raw_config = yaml.safe_load(f)
+    target_year = resolve_year(year)
+    config = apply_year_template(raw_config, target_year)
+    logger.info("Target graduation year: %d", target_year)
+    return config, target_year
 
 
 def collect(sites: list[str], query: str, max_pages: int, config: dict) -> list[RawCompany]:
@@ -57,7 +90,7 @@ def collect(sites: list[str], query: str, max_pages: int, config: dict) -> list[
         crawler = cls(site_cfg)
         logger.info("Collecting from %s (query=%r, max_pages=%d)…", site_name, query, max_pages)
         try:
-            companies = crawler.search(query, max_pages=max_pages)
+            companies = crawler.crawl(keyword=query, max_pages=max_pages)
             logger.info("  → %d companies fetched", len(companies))
             all_companies.extend(companies)
         except Exception as exc:
@@ -127,8 +160,9 @@ def run(
     output_dir: Path,
     gbizinfo_api_key: str | None = None,
     match_threshold: float = 0.75,
+    year: int | None = None,
 ) -> None:
-    config = load_config()
+    config, target_year = load_config(year)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Phase 1: スクレイピング
@@ -201,6 +235,16 @@ def main() -> None:
         default=0.75,
         help="名寄せ一致スコアの閾値 0–1 (default: 0.75)",
     )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        metavar="YYYY",
+        help=(
+            "対象卒業年度を手動指定 (例: 2028)。"
+            "省略時は自動計算: 4月以降 → 当年+2、3月以前 → 当年+1"
+        ),
+    )
     args = parser.parse_args()
 
     run(
@@ -210,6 +254,7 @@ def main() -> None:
         output_dir=args.out,
         gbizinfo_api_key=args.api_key,
         match_threshold=args.threshold,
+        year=args.year,
     )
 
 

@@ -1,16 +1,20 @@
 # 媒体別スクレイピング設定
 # robots.txt を事前確認すること。取得禁止パスは使用しないこと。
+#
+# URL 内の {year} は4桁年度（例: 2027）、{year2d} は下2桁（例: 27）に自動展開されます。
+# 年度は実行時に自動計算（4月以降: 当年+2、3月以前: 当年+1）しますが、
+# CLI の --year オプションで手動上書き可能です。
 
 sites:
   mynavi:
-    name: マイナビ2027
-    base_url: https://job.mynavi.jp/27/
-    search_url: https://job.mynavi.jp/27/pc/search/corp-----/index.html
+    name: マイナビ{year}
+    base_url: https://job.mynavi.jp/{year2d}/
+    search_url: https://job.mynavi.jp/{year2d}/pc/corpinfo/displayCorpSearch/index
     rate_limit_sec: 3.0
-    user_agent: "Mozilla/5.0 (compatible; CompanyGraphBot/1.0; +https://example.com/bot)"
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     selectors:
-      company_list: "ul.companyList > li"
-      company_link: "a.companyName"
+      company_list: "ul.companyList > li, .companyCassette"
+      company_link: "a.companyName, a.corpName"
       detail:
         company_name: "h1.companyName, .basicInfo th:contains('会社名') + td"
         address: ".basicInfo th:contains('本社所在地') + td"
@@ -22,14 +26,14 @@ sites:
         business_description: ".basicInfo th:contains('事業内容') + td, .companyPR"
 
   rikunabi:
-    name: リクナビ2027
-    base_url: https://job.rikunabi.com/2027/
-    search_url: https://job.rikunabi.com/2027/search/
+    name: リクナビ{year}
+    base_url: https://job.rikunabi.com/{year}/
+    search_url: https://job.rikunabi.com/n/job_search/
     rate_limit_sec: 3.0
-    user_agent: "Mozilla/5.0 (compatible; CompanyGraphBot/1.0; +https://example.com/bot)"
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     selectors:
-      company_list: ".rnn-companyCard"
-      company_link: ".rnn-companyCard__name a"
+      company_list: ".rnn-companyCard, [class*=companyCard]"
+      company_link: ".rnn-companyCard__name a, [class*=companyCard] a"
       detail:
         company_name: "h1.rnn-companyName, [data-label='会社名']"
         address: "[data-label='本社所在地'], [data-label='所在地']"
@@ -41,11 +45,11 @@ sites:
         business_description: "[data-label='事業内容'], .rnn-companyPR"
 
   career_tasu:
-    name: キャリタス就活2027
-    base_url: https://job.career-tasu.jp/2027/
-    search_url: https://job.career-tasu.jp/2027/search/company/
+    name: キャリタス就活{year}
+    base_url: https://job.career-tasu.jp/{year}/
+    search_url: https://job.career-tasu.jp/{year}/search/company/
     rate_limit_sec: 3.0
-    user_agent: "Mozilla/5.0 (compatible; CompanyGraphBot/1.0; +https://example.com/bot)"
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     selectors:
       company_list: ".company-list__item"
       company_link: ".company-list__item a.company-name"
