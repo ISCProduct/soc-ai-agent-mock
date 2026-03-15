@@ -7,6 +7,7 @@ type InterviewSession struct {
 	ID               uint       `gorm:"primaryKey"`
 	UserID           uint       `gorm:"index;not null"`
 	Status           string     `gorm:"size:32;index;not null"`
+	Language         string     `gorm:"size:16;not null;default:'ja'"`
 	StartedAt        *time.Time `gorm:"index"`
 	EndedAt          *time.Time `gorm:"index"`
 	EstimatedCostUSD float64    `gorm:"type:decimal(10,4);default:0"`
