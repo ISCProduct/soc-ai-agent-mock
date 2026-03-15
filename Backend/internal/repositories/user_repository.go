@@ -90,6 +90,18 @@ func (r *UserRepository) GetUserByVerificationToken(token string) (*models.User,
 	return &user, nil
 }
 
+// GetUserByPasswordResetToken パスワードリセットトークンでユーザー取得
+func (r *UserRepository) GetUserByPasswordResetToken(token string) (*models.User, error) {
+	var user models.User
+	if err := r.db.Where("password_reset_token = ?", token).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetUserByOAuth OAuth情報でユーザー取得
 func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*models.User, error) {
 	var user models.User

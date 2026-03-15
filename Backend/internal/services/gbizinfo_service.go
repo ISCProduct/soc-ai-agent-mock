@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,36 @@ type GBizInfoService struct {
 	repo         *repositories.GBizInfoRepository
 	companyRepo  *repositories.CompanyRepository
 	relationRepo *repositories.CompanyRelationRepository
+}
+
+type GBizSearchResult struct {
+	CorporateNumber string `json:"corporate_number"`
+	Name            string `json:"name"`
+	Location        string `json:"location"`
+	CompanyURL      string `json:"company_url"`
+	EmployeeNumber  int    `json:"employee_number"`
+}
+
+func (s *GBizInfoService) SearchByName(ctx context.Context, name string) ([]GBizSearchResult, error) {
+	if s == nil || s.baseURL == "" || s.token == "" {
+		return nil, errors.New("gbizinfo service is not configured")
+	}
+	var resp gbizProfileResponse
+	path := "/v1/hojin?name=" + url.QueryEscape(name) + "&limit=10"
+	if err := s.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	results := make([]GBizSearchResult, 0, len(resp.HojinInfos))
+	for _, info := range resp.HojinInfos {
+		results = append(results, GBizSearchResult{
+			CorporateNumber: info.CorporateNumber,
+			Name:            info.Name,
+			Location:        info.Location,
+			CompanyURL:      info.CompanyURL,
+			EmployeeNumber:  info.EmployeeNumber,
+		})
+	}
+	return results, nil
 }
 
 type GBizSyncResult struct {

@@ -20,6 +20,8 @@ type User struct {
 	EmailVerifiedAt          *time.Time `gorm:"column:email_verified_at"`                    // メール認証日時
 	EmailVerificationToken   string     `gorm:"size:255;column:email_verification_token"`    // メール認証トークン
 	LastLoginAt              *time.Time `gorm:"column:last_login_at"`                        // 最終ログイン日時
+	PasswordResetToken       string     `gorm:"size:255;column:password_reset_token"`        // パスワードリセットトークン
+	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`            // パスワードリセットトークン有効期限
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 }

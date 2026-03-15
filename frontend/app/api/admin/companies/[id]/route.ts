@@ -5,11 +5,13 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 export const dynamic = 'force-dynamic'
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`)
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+  })
   const raw = await response.text()
   let data: any = {}
   if (raw) {
@@ -30,7 +32,7 @@ export async function PUT(
   const body = await request.text()
   const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
     body,
   })
   const raw = await response.text()

@@ -66,6 +66,15 @@ export const authService = {
     return res.json()
   },
 
+  async verifyRegistration(token: string): Promise<{ email: string; token: string }> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/verify-registration?token=${encodeURIComponent(token)}`)
+    if (!res.ok) {
+      const error = await res.text()
+      throw new Error(error || '無効または期限切れのトークンです')
+    }
+    return res.json()
+  },
+
   async requestRegistration(email: string): Promise<void> {
     const res = await fetch(`${BACKEND_URL}/api/auth/request-registration`, {
       method: 'POST',
@@ -146,6 +155,30 @@ export const authService = {
       throw new Error(error || 'Failed to update profile')
     }
     return res.json()
+  },
+
+  async requestPasswordReset(email: string): Promise<void> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    if (!res.ok) {
+      const error = await res.text()
+      throw new Error(error || 'Failed to send password reset email')
+    }
+  },
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    })
+    if (!res.ok) {
+      const error = await res.text()
+      throw new Error(error || 'Failed to reset password')
+    }
   },
 
   async getGoogleAuthUrl(): Promise<{ auth_url: string; state: string }> {

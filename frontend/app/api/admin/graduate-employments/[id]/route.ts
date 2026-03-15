@@ -4,8 +4,11 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${params.id}`)
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${id}`, {
+    headers: { 'X-Admin-Email': req.headers.get('x-admin-email') || '' },
+  })
   const raw = await response.text()
   let data: any = {}
   if (raw) {
@@ -14,9 +17,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json(data, { status: response.status })
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${params.id}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${id}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',

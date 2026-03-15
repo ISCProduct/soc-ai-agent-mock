@@ -4,8 +4,9 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${params.id}/reject`, {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/reject`, {
     method: 'PATCH',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',

@@ -28,10 +28,12 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     const loadCounts = async () => {
+      const admin = authService.getStoredUser()
+      const headers = { 'X-Admin-Email': admin?.email || '' }
       try {
         const [companiesRes, crawlRes] = await Promise.all([
-          fetch('/api/admin/companies'),
-          fetch('/api/admin/crawl-sources'),
+          fetch('/api/admin/companies', { headers }),
+          fetch('/api/admin/crawl-sources', { headers }),
         ])
         const companiesData = await companiesRes.json()
         const crawlData = await crawlRes.json()
