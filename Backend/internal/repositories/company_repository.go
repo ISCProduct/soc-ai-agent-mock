@@ -54,6 +54,16 @@ func (r *CompanyRepository) FindByName(name string) (*models.Company, error) {
 	return &company, nil
 }
 
+// FindByCorporateNumber 法人番号で企業を取得
+func (r *CompanyRepository) FindByCorporateNumber(corporateNumber string) (*models.Company, error) {
+	var company models.Company
+	err := r.db.Where("corporate_number = ?", corporateNumber).First(&company).Error
+	if err != nil {
+		return nil, err
+	}
+	return &company, nil
+}
+
 // GetWeightProfile 企業の重視度プロファイルを取得
 func (r *CompanyRepository) GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error) {
 	var profile models.CompanyWeightProfile

@@ -132,7 +132,7 @@ func main() {
 		GBiz:       scraper.NewGBizClient(cfg.GBizInfoBaseURL, cfg.GBizInfoToken),
 		Threshold:  0.75,
 	}
-	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, auditLogService)
+	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)
 	interviewController := controllers.NewInterviewController(interviewService)
 	realtimeController := controllers.NewRealtimeController(interviewService)

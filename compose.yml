@@ -74,10 +74,27 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}
+      - COMPANY_GRAPH_URL=${COMPANY_GRAPH_URL:-http://company-graph:9100}
       - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
     depends_on:
       app:
         condition: service_started
+    networks:
+      - soc-ai-network
+
+  # Company graph pipeline (マルチソース新卒採用データ × gBizINFO) - Go実装
+  company-graph:
+    build:
+      context: ./tools/company-graph
+      dockerfile: Dockerfile
+    container_name: soc-ai-company-graph
+    profiles:
+      - company-graph
+    ports:
+      - "${COMPANY_GRAPH_PORT:-9100}:9100"
+    environment:
+      - GBIZINFO_API_KEY=${GBIZINFO_API_KEY:-}
+      - GBIZINFO_BASE_URL=${GBIZINFO_BASE_URL:-}
     networks:
       - soc-ai-network
 
