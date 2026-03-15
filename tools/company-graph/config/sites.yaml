@@ -1,0 +1,74 @@
+# 媒体別スクレイピング設定
+# robots.txt を事前確認すること。取得禁止パスは使用しないこと。
+
+sites:
+  mynavi:
+    name: マイナビ2027
+    base_url: https://job.mynavi.jp/27/
+    search_url: https://job.mynavi.jp/27/pc/search/corp-----/index.html
+    rate_limit_sec: 3.0
+    user_agent: "Mozilla/5.0 (compatible; CompanyGraphBot/1.0; +https://example.com/bot)"
+    selectors:
+      company_list: "ul.companyList > li"
+      company_link: "a.companyName"
+      detail:
+        company_name: "h1.companyName, .basicInfo th:contains('会社名') + td"
+        address: ".basicInfo th:contains('本社所在地') + td"
+        website: ".basicInfo th:contains('URL') + td a"
+        capital: ".basicInfo th:contains('資本金') + td"
+        employees: ".basicInfo th:contains('従業員数') + td"
+        related_companies: ".basicInfo th:contains('関連会社') + td, .basicInfo th:contains('グループ会社') + td"
+        business_partners: ".basicInfo th:contains('主要取引先') + td, .basicInfo th:contains('取引先') + td"
+        business_description: ".basicInfo th:contains('事業内容') + td, .companyPR"
+
+  rikunabi:
+    name: リクナビ2027
+    base_url: https://job.rikunabi.com/2027/
+    search_url: https://job.rikunabi.com/2027/search/
+    rate_limit_sec: 3.0
+    user_agent: "Mozilla/5.0 (compatible; CompanyGraphBot/1.0; +https://example.com/bot)"
+    selectors:
+      company_list: ".rnn-companyCard"
+      company_link: ".rnn-companyCard__name a"
+      detail:
+        company_name: "h1.rnn-companyName, [data-label='会社名']"
+        address: "[data-label='本社所在地'], [data-label='所在地']"
+        website: "[data-label='URL'] a, [data-label='ホームページ'] a"
+        capital: "[data-label='資本金']"
+        employees: "[data-label='従業員数']"
+        related_companies: "[data-label='関連会社'], [data-label='グループ会社']"
+        business_partners: "[data-label='主要取引先'], [data-label='取引先']"
+        business_description: "[data-label='事業内容'], .rnn-companyPR"
+
+  career_tasu:
+    name: キャリタス就活2027
+    base_url: https://job.career-tasu.jp/2027/
+    search_url: https://job.career-tasu.jp/2027/search/company/
+    rate_limit_sec: 3.0
+    user_agent: "Mozilla/5.0 (compatible; CompanyGraphBot/1.0; +https://example.com/bot)"
+    selectors:
+      company_list: ".company-list__item"
+      company_link: ".company-list__item a.company-name"
+      detail:
+        company_name: "h1.company-name, .company-info td.company-name"
+        address: ".company-info tr:contains('所在地') td"
+        website: ".company-info tr:contains('URL') td a"
+        capital: ".company-info tr:contains('資本金') td"
+        employees: ".company-info tr:contains('従業員') td"
+        related_companies: ".company-info tr:contains('関連会社') td, .company-info tr:contains('グループ') td"
+        business_partners: ".company-info tr:contains('取引先') td"
+        business_description: ".company-info tr:contains('事業内容') td, .company-pr"
+
+# gBizINFO API 設定
+gbizinfo:
+  base_url: https://info.gbiz.go.jp/hojin/v1/hojin
+  rate_limit_sec: 1.0
+  # API キーは環境変数 GBIZINFO_API_KEY で指定
+  match_threshold: 0.75   # 名寄せの最低一致スコア
+
+# グラフ出力設定
+graph:
+  output_dir: ./output
+  formats:
+    - json
+    - graphml
