@@ -19,14 +19,14 @@ import (
 type InterviewController struct {
 	interviewService *services.InterviewService
 	videoRepo        *repositories.InterviewVideoRepository
-	driveService     *services.GoogleDriveService
+	s3Service        *services.S3UploadService
 }
 
-func NewInterviewController(interviewService *services.InterviewService, videoRepo *repositories.InterviewVideoRepository, driveService *services.GoogleDriveService) *InterviewController {
+func NewInterviewController(interviewService *services.InterviewService, videoRepo *repositories.InterviewVideoRepository, s3Service *services.S3UploadService) *InterviewController {
 	return &InterviewController{
 		interviewService: interviewService,
 		videoRepo:        videoRepo,
-		driveService:     driveService,
+		s3Service:        s3Service,
 	}
 }
 
@@ -161,12 +161,13 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 	}
 
 	// Persist record first
-	if c.videoRepo == nil || c.driveService == nil {
+	if c.videoRepo == nil || c.s3Service == nil {
 		http.Error(w, "video upload service not configured", http.StatusServiceUnavailable)
 		return
 	}
 
 	now := time.Now()
+	s3Key := fmt.Sprintf("interview-videos/%d/%d_%s.webm", sessionID, userID, now.Format("20060102_150405"))
 	fileName := fmt.Sprintf("interview_%d_%d_%s.webm", sessionID, userID, now.Format("20060102_150405"))
 
 	videoRecord := &models.InterviewVideo{
@@ -182,17 +183,17 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Upload to Drive asynchronously
-	go func(vid *models.InterviewVideo, fileData []byte) {
+	// Upload to S3 asynchronously
+	go func(vid *models.InterviewVideo, fileData []byte, key string) {
 		ctx := context.Background()
-		fileID, webViewLink, uploadErr := c.driveService.UploadFile(ctx, vid.FileName, vid.MimeType, fileData)
+		fileID, s3URL, uploadErr := c.s3Service.UploadFile(ctx, key, vid.MimeType, fileData)
 		uploadedAt := time.Now()
 		if uploadErr != nil {
 			c.videoRepo.UpdateStatus(ctx, vid.ID, "error", uploadErr.Error(), "", "", nil)
 			return
 		}
-		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, webViewLink, &uploadedAt)
-	}(videoRecord, data)
+		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
+	}(videoRecord, data, s3Key)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

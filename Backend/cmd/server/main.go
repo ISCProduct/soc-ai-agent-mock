@@ -135,14 +135,14 @@ func main() {
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)
 
-	// Google Drive service (optional — skipped if env vars are not set)
-	driveService, driveErr := services.NewGoogleDriveService()
-	if driveErr != nil {
-		log.Printf("Google Drive service not available: %v", driveErr)
-		driveService = nil
+	// S3 upload service for interview videos (optional — skipped if env vars are not set)
+	s3UploadService, s3Err := services.NewS3UploadService()
+	if s3Err != nil {
+		log.Printf("S3 upload service not available: %v", s3Err)
+		s3UploadService = nil
 	}
 	videoRepo := repositories.NewInterviewVideoRepository(db)
-	interviewController := controllers.NewInterviewController(interviewService, videoRepo, driveService)
+	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 
