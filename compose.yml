@@ -26,7 +26,6 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - ANNOTATION_FONT_PATH=${ANNOTATION_FONT_PATH:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
       - RAG_REVIEW_URL=${RAG_REVIEW_URL:-http://rag-review:9000}
-      - CHROMEDP_URL=${CHROMEDP_URL:-ws://chromedp:9222}
 
   # MySQL Database
   db:
@@ -79,17 +78,6 @@ services:
     depends_on:
       app:
         condition: service_started
-    networks:
-      - soc-ai-network
-
-  # Headless Chrome for Mynavi JS rendering (chromedp)
-  chromedp:
-    image: chromedp/headless-shell:latest
-    container_name: soc-ai-chromedp
-    profiles:
-      - company-graph
-    ports:
-      - "9222:9222"
     networks:
       - soc-ai-network
 

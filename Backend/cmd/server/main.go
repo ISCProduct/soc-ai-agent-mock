@@ -126,7 +126,7 @@ func main() {
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
 	companyGraphPipeline := &scraper.Pipeline{
-		Mynavi:     scraper.NewMynaviScraper(cfg.ChromedpURL),
+		Mynavi:     scraper.NewMynaviScraper(""),
 		Rikunabi:   scraper.NewRikunabiScraper(),
 		CareerTasu: scraper.NewCareerTasuScraper(),
 		GBiz:       scraper.NewGBizClient(cfg.GBizInfoBaseURL, cfg.GBizInfoToken),

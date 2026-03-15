@@ -14,8 +14,9 @@ import (
 // MynaviScraper scrapes マイナビ using chromedp (headless Chrome).
 // Mynavi renders company search results with JavaScript, so a real browser is required.
 //
-// RemoteURL should be a Chrome DevTools WebSocket URL, e.g. "ws://chromedp:9222".
-// When RemoteURL is empty the scraper is disabled and Search always returns nil.
+// RemoteURL, if set, is a Chrome DevTools WebSocket URL (e.g. "ws://chromedp:9222") and
+// causes the scraper to connect to an external Chrome instance.
+// When RemoteURL is empty, a local Chromium binary is launched via chromedp.NewExecAllocator.
 type MynaviScraper struct {
 	RemoteURL string
 	UserAgent string
@@ -30,20 +31,28 @@ func NewMynaviScraper(remoteURL string) *MynaviScraper {
 	}
 }
 
-// Enabled returns true when a remote Chrome URL is configured.
-func (s *MynaviScraper) Enabled() bool {
-	return s.RemoteURL != ""
+// newAllocator returns an allocator context that targets either a remote Chrome
+// (when RemoteURL is set) or a locally installed Chromium binary.
+func (s *MynaviScraper) newAllocator(parent context.Context) (context.Context, context.CancelFunc) {
+	if s.RemoteURL != "" {
+		return chromedp.NewRemoteAllocator(parent, s.RemoteURL)
+	}
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.UserAgent(s.UserAgent),
+	)
+	return chromedp.NewExecAllocator(parent, opts...)
 }
 
 // Search navigates to the マイナビ company search and collects detail page URLs.
 // year2d is the 2-digit graduation year (e.g. 27 for 2027).
 func (s *MynaviScraper) Search(keyword string, year, maxPages int) ([]string, error) {
-	if !s.Enabled() {
-		return nil, nil
-	}
-
 	year2d := year % 100
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), s.RemoteURL)
+	allocCtx, allocCancel := s.newAllocator(context.Background())
 	defer allocCancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
@@ -107,11 +116,7 @@ func (s *MynaviScraper) Search(keyword string, year, maxPages int) ([]string, er
 
 // ParseDetail fetches a マイナビ company detail page via chromedp and extracts fields.
 func (s *MynaviScraper) ParseDetail(detailURL string) (*RawCompany, error) {
-	if !s.Enabled() {
-		return nil, nil
-	}
-
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), s.RemoteURL)
+	allocCtx, allocCancel := s.newAllocator(context.Background())
 	defer allocCancel()
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()

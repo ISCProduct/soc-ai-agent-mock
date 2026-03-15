@@ -30,8 +30,7 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 	for _, site := range req.Sites {
 		switch site {
 		case "mynavi":
-			if p.Mynavi == nil || !p.Mynavi.Enabled() {
-				log.Logf("[mynavi] スキップ: CHROMEDP_URL が設定されていません")
+			if p.Mynavi == nil {
 				continue
 			}
 			log.Logf("[mynavi] 検索開始 keyword=%q year=%d pages=%d", req.Query, year, req.MaxPages)

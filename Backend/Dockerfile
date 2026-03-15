@@ -57,6 +57,8 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    chromium \
+    chromium-driver \
  && rm -rf /var/lib/apt/lists/*
 
 #

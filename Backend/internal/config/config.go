@@ -17,7 +17,6 @@ type Config struct {
 	ServerPort      string
 	GBizInfoBaseURL string
 	GBizInfoToken   string
-	ChromedpURL     string // ws://chromedp:9222 — empty means Mynavi is skipped
 }
 
 func LoadConfig() (*Config, error) {
@@ -40,7 +39,6 @@ func LoadConfig() (*Config, error) {
 		ServerPort:      get("SERVER_PORT", "80"),
 		GBizInfoBaseURL: get("GBIZINFO_BASE_URL", ""),
 		GBizInfoToken:   get("GBIZINFO_API_TOKEN", ""),
-		ChromedpURL:     get("CHROMEDP_URL", ""),
 	}
 
 	// 必須値チェック
