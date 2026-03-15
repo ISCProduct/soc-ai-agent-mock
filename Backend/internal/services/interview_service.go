@@ -419,24 +419,28 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		transcriptBuilder.WriteString("\n")
 	}
 	transcript := transcriptBuilder.String()
-	systemPrompt := buildReportSystemPrompt(lang)
-	userPrompt := fmt.Sprintf(`Based on the following interview transcript, output JSON only.
+	systemPrompt := "あなたは就職面接の評価者です。面接ログを読んで、応募者の回答を客観的に評価し、JSONのみで返してください。"
+	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 
-Output format:
+## 評価基準（各スコアは0〜5の整数）
+- logic（論理性）: 回答が筋道立っているか、主張に一貫性があるか
+- specificity（具体性）: 具体的なエピソードや数値が含まれているか
+- ownership（主体性）: 「私が〜した」という自分起点の表現があるか
+
+## 出力フォーマット（このキーと型を厳守してください）
 {
-  "summary": ["point1", "point2", "point3"],
-  "scores": {"logic": 0, "specificity": 0, "ownership": 0},
-  "evidence": {"logic": "reason", "specificity": "reason", "ownership": "reason"}
+  "summary": ["評価コメント1", "評価コメント2", "評価コメント3"],
+  "scores": {"logic": 3, "specificity": 2, "ownership": 4},
+  "evidence": {"logic": "論理性の根拠となった発言", "specificity": "具体性の根拠となった発言", "ownership": "主体性の根拠となった発言"}
 }
 
-Scores are integers from 0 to 5. Up to 5 summary points, keep them concise.
-Write the summary and evidence in the same language as the interview (language code: %s).
+※ summaryは最大5件で日本語の簡潔な文章。scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
 
 Interview transcript:
 %s`, lang, transcript)
 
 	model := getEnv("INTERVIEW_REPORT_MODEL", "")
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 400, model)
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 1000, model)
 	if err != nil {
 		return err
 	}
@@ -445,8 +449,16 @@ Interview transcript:
 		Scores   map[string]int    `json:"scores"`
 		Evidence map[string]string `json:"evidence"`
 	}
+	// markdown コードブロック除去（モデルによっては ```json ... ``` で包まれることがある）
+	cleaned := strings.TrimSpace(raw)
+	if idx := strings.Index(cleaned, "{"); idx > 0 {
+		cleaned = cleaned[idx:]
+	}
+	if idx := strings.LastIndex(cleaned, "}"); idx >= 0 && idx < len(cleaned)-1 {
+		cleaned = cleaned[:idx+1]
+	}
 	var payload reportPayload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}
 	summaryText := strings.Join(payload.Summary, "\n")

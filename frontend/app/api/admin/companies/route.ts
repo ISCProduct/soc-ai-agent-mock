@@ -4,8 +4,11 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies`)
+export async function GET(request: NextRequest) {
+  const query = request.nextUrl.searchParams.toString()
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies${query ? `?${query}` : ''}`, {
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+  })
   const raw = await response.text()
   let data: any = {}
   if (raw) {

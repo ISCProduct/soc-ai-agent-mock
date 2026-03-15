@@ -7,8 +7,11 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   Divider,
+  FormControlLabel,
+  FormGroup,
   MenuItem,
   Stack,
   TextField,
@@ -50,6 +53,10 @@ const WEEKDAY_OPTIONS = [
   { value: 6, label: '土' },
 ]
 
+const SITE_OPTIONS = [
+  { key: 'career_tasu', label: 'キャリタス就活' },
+]
+
 export default function AdminCrawlingPage() {
   const [sources, setSources] = useState<CrawlSource[]>([])
   const [runs, setRuns] = useState<CrawlRun[]>([])
@@ -64,6 +71,36 @@ export default function AdminCrawlingPage() {
   const [scheduleDay, setScheduleDay] = useState(1)
   const [scheduleTime, setScheduleTime] = useState('09:00')
 
+  // マルチソースクロール（company-graph パイプライン）
+  const [graphSites, setGraphSites] = useState<string[]>(['career_tasu'])
+  const [graphQuery, setGraphQuery] = useState('IT')
+  const [graphPages, setGraphPages] = useState(2)
+  const [graphYear, setGraphYear] = useState<string>('')
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [graphResult, setGraphResult] = useState<{ ok: boolean; logs: string; error?: string } | null>(null)
+  const [autoYear, setAutoYear] = useState<number | null>(null)
+
+  // gBizINFO企業名検索
+  const [gbizSearchName, setGbizSearchName] = useState('')
+  const [gbizSearchLoading, setGbizSearchLoading] = useState(false)
+  const [gbizSearchError, setGbizSearchError] = useState('')
+  const [gbizSearchResults, setGbizSearchResults] = useState<{
+    corporate_number: string
+    name: string
+    location: string
+    company_url: string
+    employee_number: number
+  }[]>([])
+  const [gbizRegisterLoading, setGbizRegisterLoading] = useState<string | null>(null)
+  const [gbizRegisterMessage, setGbizRegisterMessage] = useState('')
+
+  useEffect(() => {
+    fetch('/api/admin/company-graph-crawl')
+      .then((r) => r.json())
+      .then((d) => setAutoYear(d.target_year))
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) {
@@ -73,7 +110,10 @@ export default function AdminCrawlingPage() {
 
   const loadSources = async () => {
     setError('')
-    const response = await fetch('/api/admin/crawl-sources')
+    const admin = authService.getStoredUser()
+    const response = await fetch('/api/admin/crawl-sources', {
+      headers: { 'X-Admin-Email': admin?.email || '' },
+    })
     const data = await response.json()
     if (!response.ok) {
       setError(data?.error || 'クローリング設定の取得に失敗しました')
@@ -83,7 +123,10 @@ export default function AdminCrawlingPage() {
   }
 
   const loadRuns = async () => {
-    const response = await fetch('/api/admin/crawl-runs')
+    const admin = authService.getStoredUser()
+    const response = await fetch('/api/admin/crawl-runs', {
+      headers: { 'X-Admin-Email': admin?.email || '' },
+    })
     const data = await response.json()
     if (response.ok) {
       setRuns(data?.runs || [])
@@ -159,6 +202,85 @@ export default function AdminCrawlingPage() {
       await loadSources()
       await loadRuns()
     }
+  }
+
+  const handleGraphCrawl = async () => {
+    setGraphLoading(true)
+    setGraphResult(null)
+    const admin = authService.getStoredUser()
+    const response = await fetch('/api/admin/company-graph-crawl', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Email': admin?.email || '',
+      },
+      body: JSON.stringify({
+        sites: graphSites,
+        query: graphQuery,
+        pages: graphPages,
+        year: graphYear ? Number(graphYear) : undefined,
+      }),
+    })
+    const data = await response.json()
+    setGraphResult(data)
+    setGraphLoading(false)
+  }
+
+  const handleGbizSearch = async () => {
+    if (!gbizSearchName.trim()) return
+    setGbizSearchLoading(true)
+    setGbizSearchError('')
+    setGbizSearchResults([])
+    setGbizRegisterMessage('')
+    const admin = authService.getStoredUser()
+    const response = await fetch(
+      `/api/admin/companies/search-gbiz?name=${encodeURIComponent(gbizSearchName)}`,
+      { headers: { 'X-Admin-Email': admin?.email || '' } },
+    )
+    const data = await response.json()
+    if (!response.ok) {
+      setGbizSearchError(data?.error || '検索に失敗しました')
+    } else {
+      setGbizSearchResults(data?.results || [])
+      if ((data?.results || []).length === 0) {
+        setGbizSearchError('該当する企業が見つかりませんでした')
+      }
+    }
+    setGbizSearchLoading(false)
+  }
+
+  const handleGbizRegister = async (result: { corporate_number: string; name: string; location: string; company_url: string; employee_number: number }) => {
+    setGbizRegisterLoading(result.corporate_number)
+    setGbizRegisterMessage('')
+    const admin = authService.getStoredUser()
+    const response = await fetch('/api/admin/companies', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Email': admin?.email || '',
+      },
+      body: JSON.stringify({
+        name: result.name,
+        location: result.location,
+        website_url: result.company_url,
+        corporate_number: result.corporate_number,
+        employee_count: result.employee_number,
+        source_type: 'gbizinfo',
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      setGbizRegisterMessage(`登録失敗: ${data?.error || 'エラーが発生しました'}`)
+    } else {
+      setGbizRegisterMessage(`「${result.name}」を登録しました（ID: ${data?.id}）`)
+    }
+    setGbizRegisterLoading(null)
+  }
+
+  const toggleGraphSite = (key: string) => {
+    setGraphSites((prev) =>
+      prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key],
+    )
   }
 
   const scheduleLabel = useMemo(() => {
@@ -343,7 +465,7 @@ export default function AdminCrawlingPage() {
                           : `毎月${source.schedule_day}日 ${source.schedule_time}`}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        次回: {source.next_run_at ? new Date(source.next_run_at).toLocaleString() : '未設定'} / 前回: {source.last_run_at ? new Date(source.last_run_at).toLocaleString() : '未実行'}
+                        次回: {source.next_run_at ? new Date(source.next_run_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '未設定'} / 前回: {source.last_run_at ? new Date(source.last_run_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '未実行'}
                       </Typography>
                       <Stack direction="row" spacing={1}>
                         <Button size="small" variant="outlined" onClick={() => handleRun(source)}>
@@ -380,8 +502,190 @@ export default function AdminCrawlingPage() {
                   #{run.id} / source {run.source_id}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {run.status} · {new Date(run.started_at).toLocaleString()}
+                  {run.status} · {new Date(run.started_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
                 </Typography>
+              </Box>
+            ))}
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {/* マルチソース企業グラフクロール */}
+      <Card sx={{ mt: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            マルチソース企業グラフクロール（gBizINFO連携）
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            キャリタス就活から一括取得し、gBizINFO APIで法人番号に名寄せして
+            企業関係グラフ（GraphML / JSON）を生成します。年度は自動計算されます（手動指定も可）。
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="body2" fontWeight="bold" sx={{ mb: 1 }}>
+                    対象サイト
+                  </Typography>
+                  <FormGroup row>
+                    {SITE_OPTIONS.map((s) => (
+                      <FormControlLabel
+                        key={s.key}
+                        control={
+                          <Checkbox
+                            checked={graphSites.includes(s.key)}
+                            onChange={() => toggleGraphSite(s.key)}
+                            size="small"
+                          />
+                        }
+                        label={s.label}
+                      />
+                    ))}
+                  </FormGroup>
+                </Box>
+                <TextField
+                  label="検索キーワード"
+                  value={graphQuery}
+                  onChange={(e) => setGraphQuery(e.target.value)}
+                  size="small"
+                  placeholder="例: IT, 製造, 金融"
+                />
+                <TextField
+                  label="最大ページ数（サイトごと）"
+                  type="number"
+                  value={graphPages}
+                  onChange={(e) => setGraphPages(Number(e.target.value))}
+                  size="small"
+                  inputProps={{ min: 1, max: 20 }}
+                />
+                <TextField
+                  label={`年度指定（省略時は自動: ${autoYear ?? '計算中'}年度）`}
+                  type="number"
+                  value={graphYear}
+                  onChange={(e) => setGraphYear(e.target.value)}
+                  size="small"
+                  placeholder={String(autoYear ?? '')}
+                  helperText="4月以降は当年+2、3月以前は当年+1を自動適用"
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleGraphCrawl}
+                  disabled={graphLoading || graphSites.length === 0}
+                >
+                  {graphLoading ? 'クロール実行中...' : 'クロール実行'}
+                </Button>
+              </Stack>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              {graphResult && (
+                <Box>
+                  {graphResult.ok ? (
+                    <Alert severity="success" sx={{ mb: 1 }}>
+                      完了しました。GraphML / JSON を出力しました。
+                    </Alert>
+                  ) : (
+                    <Alert severity="error" sx={{ mb: 1 }}>
+                      {graphResult.error || 'エラーが発生しました'}
+                    </Alert>
+                  )}
+                  <Box
+                    component="pre"
+                    sx={{
+                      fontSize: 11,
+                      bgcolor: '#f5f5f5',
+                      p: 1.5,
+                      borderRadius: 1,
+                      maxHeight: 300,
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {graphResult.logs}
+                  </Box>
+                </Box>
+              )}
+              {!graphResult && !graphLoading && (
+                <Box sx={{ color: 'text.secondary', fontSize: 14, pt: 1 }}>
+                  実行するとここにログが表示されます。
+                </Box>
+              )}
+              {graphLoading && (
+                <Box sx={{ color: 'text.secondary', fontSize: 14, pt: 1 }}>
+                  クロール中です。完了まで数分かかる場合があります...
+                </Box>
+              )}
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* gBizINFO企業名検索・登録 */}
+      <Card sx={{ mt: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            企業名で検索して登録（gBizINFO）
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            企業名を入力するとgBizINFO APIで法人情報を検索し、ホームページURLを含む企業データをDBに登録できます。
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <Stack spacing={2} sx={{ maxWidth: 600 }}>
+            <Stack direction="row" spacing={1}>
+              <TextField
+                label="企業名"
+                value={gbizSearchName}
+                onChange={(e) => setGbizSearchName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleGbizSearch() }}
+                size="small"
+                placeholder="例: 株式会社ほげ"
+                sx={{ flex: 1 }}
+              />
+              <Button
+                variant="contained"
+                onClick={handleGbizSearch}
+                disabled={gbizSearchLoading || !gbizSearchName.trim()}
+              >
+                {gbizSearchLoading ? '検索中...' : '検索'}
+              </Button>
+            </Stack>
+            {gbizSearchError && (
+              <Alert severity="warning">{gbizSearchError}</Alert>
+            )}
+            {gbizRegisterMessage && (
+              <Alert severity={gbizRegisterMessage.startsWith('登録失敗') ? 'error' : 'success'}>
+                {gbizRegisterMessage}
+              </Alert>
+            )}
+            {gbizSearchResults.map((r) => (
+              <Box key={r.corporate_number} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
+                <Stack spacing={0.5}>
+                  <Typography variant="subtitle1" fontWeight="bold">{r.name}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    法人番号: {r.corporate_number}
+                  </Typography>
+                  {r.location && (
+                    <Typography variant="body2" color="text.secondary">所在地: {r.location}</Typography>
+                  )}
+                  {r.company_url && (
+                    <Typography variant="body2">
+                      HP: <a href={r.company_url} target="_blank" rel="noopener noreferrer">{r.company_url}</a>
+                    </Typography>
+                  )}
+                  {r.employee_number > 0 && (
+                    <Typography variant="body2" color="text.secondary">従業員数: {r.employee_number}人</Typography>
+                  )}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handleGbizRegister(r)}
+                    disabled={gbizRegisterLoading === r.corporate_number}
+                    sx={{ alignSelf: 'flex-start', mt: 0.5 }}
+                  >
+                    {gbizRegisterLoading === r.corporate_number ? '登録中...' : 'DBに登録'}
+                  </Button>
+                </Stack>
               </Box>
             ))}
           </Stack>

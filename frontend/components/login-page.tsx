@@ -15,6 +15,7 @@ import {
 } from '@mui/material'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
+import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 
 interface LoginPageProps {
@@ -114,12 +115,6 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
             4万社から最適な企業を選定
           </Typography>
 
-          {verificationSent && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              確認メールを送信しました。メールのリンクをクリックしてアカウントを有効化してください。
-            </Alert>
-          )}
-
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -149,8 +144,13 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                sx={{ mb: 3 }}
+                sx={{ mb: 1 }}
               />
+              <Box sx={{ textAlign: 'right', mt: -1, mb: 2 }}>
+                <Link href="/forgot-password" style={{ fontSize: '0.875rem', color: '#1976D2' }}>
+                  パスワードをお忘れですか？
+                </Link>
+              </Box>
               <Button
                 type="submit"
                 fullWidth

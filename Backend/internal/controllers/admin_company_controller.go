@@ -40,6 +40,10 @@ func (c *AdminCompanyController) Detail(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "company id is required", http.StatusBadRequest)
 		return
 	}
+	if idStr == "search-gbiz" {
+		c.searchGBiz(w, r)
+		return
+	}
 	if strings.HasSuffix(idStr, "/gbiz-sync") {
 		c.syncGBiz(w, r, strings.TrimSuffix(idStr, "/gbiz-sync"))
 		return
@@ -126,14 +130,26 @@ func (c *AdminCompanyController) reject(w http.ResponseWriter, r *http.Request, 
 }
 
 func (c *AdminCompanyController) list(w http.ResponseWriter, r *http.Request) {
-	companies, err := c.repo.FindAllActive()
+	limit := 50
+	offset := 0
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	if v, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+	companies, err := c.repo.FindAllActive(limit, offset)
 	if err != nil {
 		http.Error(w, "failed to fetch companies", http.StatusInternalServerError)
 		return
 	}
+	total, _ := c.repo.CountActive()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"companies": companies,
+		"total":     total,
+		"limit":     limit,
+		"offset":    offset,
 	})
 }
 
@@ -196,6 +212,29 @@ func (c *AdminCompanyController) update(w http.ResponseWriter, r *http.Request, 
 	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(company)
+}
+
+func (c *AdminCompanyController) searchGBiz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if c.gbiz == nil {
+		http.Error(w, "gbizinfo service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	results, err := c.gbiz.SearchByName(r.Context(), name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
 }
 
 func (c *AdminCompanyController) syncGBiz(w http.ResponseWriter, r *http.Request, idStr string) {

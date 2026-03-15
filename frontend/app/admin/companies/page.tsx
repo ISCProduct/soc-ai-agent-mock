@@ -12,8 +12,11 @@ import {
   Divider,
   Stack,
   Typography,
+  Pagination,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+
+const PAGE_SIZE = 50
 
 type Company = {
   id: number
@@ -45,13 +48,16 @@ export default function AdminCompaniesPage() {
   }, [])
 
   const [companies, setCompanies] = useState<Company[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all')
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = async (p: number = page) => {
     setError('')
     const admin = authService.getStoredUser()
-    const res = await fetch('/api/admin/companies', {
+    const offset = (p - 1) * PAGE_SIZE
+    const res = await fetch(`/api/admin/companies?limit=${PAGE_SIZE}&offset=${offset}`, {
       headers: { 'X-Admin-Email': admin?.email || '' },
     })
     const data = await res.json()
@@ -60,11 +66,17 @@ export default function AdminCompaniesPage() {
       return
     }
     setCompanies(data?.companies || [])
+    setTotal(data?.total ?? 0)
   }
 
   useEffect(() => {
-    fetchCompanies()
+    fetchCompanies(1)
   }, [])
+
+  const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
+    setPage(value)
+    fetchCompanies(value)
+  }
 
   const handlePublish = async (companyId: number) => {
     const admin = authService.getStoredUser()
@@ -77,7 +89,7 @@ export default function AdminCompaniesPage() {
       setError(data?.error || '承認に失敗しました')
       return
     }
-    fetchCompanies()
+    fetchCompanies(page)
   }
 
   const handleReject = async (companyId: number) => {
@@ -91,13 +103,15 @@ export default function AdminCompaniesPage() {
       setError(data?.error || '却下に失敗しました')
       return
     }
-    fetchCompanies()
+    fetchCompanies(page)
   }
 
   const filteredCompanies = companies.filter((c) => {
     if (filterStatus === 'all') return true
     return c.data_status === filterStatus
   })
+
+  const pageCount = Math.ceil(total / PAGE_SIZE)
 
   return (
     <Box sx={{ p: 4, maxWidth: 1000, mx: 'auto' }}>
@@ -118,7 +132,7 @@ export default function AdminCompaniesPage() {
         </Stack>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        企業情報の公開ステータスを管理します。
+        企業情報の公開ステータスを管理します。（全 {total.toLocaleString()} 件）
       </Typography>
 
       {error && (
@@ -188,6 +202,17 @@ export default function AdminCompaniesPage() {
               </Box>
             ))}
           </Stack>
+
+          {pageCount > 1 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+              <Pagination
+                count={pageCount}
+                page={page}
+                onChange={handlePageChange}
+                color="primary"
+              />
+            </Box>
+          )}
         </CardContent>
       </Card>
     </Box>

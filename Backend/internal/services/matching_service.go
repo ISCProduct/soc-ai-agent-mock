@@ -50,7 +50,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	fmt.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
 
 	// 2. 全企業のプロファイルを取得
-	companies, err := s.companyRepo.FindAllActive()
+	companies, err := s.companyRepo.FindAllActive(10000, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get companies: %w", err)
 	}

@@ -385,6 +385,68 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 	}, nil
 }
 
+// RequestPasswordReset パスワードリセットメールを送信
+func (s *AuthService) RequestPasswordReset(email string) error {
+	user, err := s.userRepo.GetUserByEmail(email)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+	// ユーザーが存在しない・OAuthユーザー・ゲストの場合でも成功を返す（情報漏洩防止）
+	if user == nil || user.OAuthProvider != "" || user.IsGuest {
+		return nil
+	}
+
+	// 32バイトのランダムトークンを生成
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Errorf("failed to generate token: %w", err)
+	}
+	token := base64.URLEncoding.EncodeToString(b)
+
+	expiresAt := time.Now().Add(1 * time.Hour)
+	user.PasswordResetToken = token
+	user.PasswordResetExpiresAt = &expiresAt
+
+	if err := s.userRepo.UpdateUser(user); err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	return s.emailService.SendPasswordResetEmail(user.Email, token, appURL)
+}
+
+// ResetPassword トークンを検証して新パスワードをセット
+func (s *AuthService) ResetPassword(token, newPassword string) error {
+	if token == "" {
+		return errors.New("token is required")
+	}
+
+	user, err := s.userRepo.GetUserByPasswordResetToken(token)
+	if err != nil {
+		return fmt.Errorf("failed to find user: %w", err)
+	}
+	if user == nil {
+		return errors.New("invalid or expired token")
+	}
+	if user.PasswordResetExpiresAt == nil || time.Now().After(*user.PasswordResetExpiresAt) {
+		return errors.New("invalid or expired token")
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	user.Password = string(hashedPassword)
+	user.PasswordResetToken = ""
+	user.PasswordResetExpiresAt = nil
+
+	return s.userRepo.UpdateUser(user)
+}
+
 // VerifyEmail トークンを検証してメールを認証済みにする
 func (s *AuthService) VerifyEmail(token string) error {
 	if token == "" {

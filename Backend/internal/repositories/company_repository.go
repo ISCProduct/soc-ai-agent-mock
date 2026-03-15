@@ -18,10 +18,13 @@ func (r *CompanyRepository) DB() *gorm.DB {
 	return r.db
 }
 
-// FindAllActive アクティブな企業を全て取得
-func (r *CompanyRepository) FindAllActive() ([]models.Company, error) {
+// FindAllActive アクティブな企業をページネーション付きで取得
+func (r *CompanyRepository) FindAllActive(limit, offset int) ([]models.Company, error) {
 	var companies []models.Company
-	err := r.db.Where("is_active = ?", true).Find(&companies).Error
+	err := r.db.Where("is_active = ?", true).
+		Order("id desc").
+		Limit(limit).Offset(offset).
+		Find(&companies).Error
 	return companies, err
 }
 
@@ -48,6 +51,16 @@ func (r *CompanyRepository) FindByID(id uint) (*models.Company, error) {
 func (r *CompanyRepository) FindByName(name string) (*models.Company, error) {
 	var company models.Company
 	err := r.db.Where("name = ?", name).First(&company).Error
+	if err != nil {
+		return nil, err
+	}
+	return &company, nil
+}
+
+// FindByCorporateNumber 法人番号で企業を取得
+func (r *CompanyRepository) FindByCorporateNumber(corporateNumber string) (*models.Company, error) {
+	var company models.Company
+	err := r.db.Where("corporate_number = ?", corporateNumber).First(&company).Error
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,9 @@ export async function GET(request: NextRequest) {
     if (v !== null) params.set(key, v)
   }
   const url = `${BACKEND_URL}/api/admin/users?${params}`
-  const response = await fetch(url)
+  const response = await fetch(url, {
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+  })
   const raw = await response.text()
   let data: any = {}
   if (raw) {

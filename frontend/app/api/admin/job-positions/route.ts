@@ -6,7 +6,9 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.toString()
-  const response = await fetch(`${BACKEND_URL}/api/admin/job-positions${query ? `?${query}` : ''}`)
+  const response = await fetch(`${BACKEND_URL}/api/admin/job-positions${query ? `?${query}` : ''}`, {
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+  })
   const raw = await response.text()
   let data: any = {}
   if (raw) {

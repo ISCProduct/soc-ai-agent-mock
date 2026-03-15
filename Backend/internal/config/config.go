@@ -38,7 +38,7 @@ func LoadConfig() (*Config, error) {
 		DBName:          os.Getenv("DB_NAME"),
 		ServerPort:      get("SERVER_PORT", "80"),
 		GBizInfoBaseURL: get("GBIZINFO_BASE_URL", ""),
-		GBizInfoToken:   get("GBIZINFO_API_TOKEN", ""),
+		GBizInfoToken:   getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
 	}
 
 	// 必須値チェック
@@ -61,4 +61,14 @@ func get(key, def string) string {
 		return def
 	}
 	return value
+}
+
+// getFirst returns the first non-empty value among the given env var names.
+func getFirst(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }

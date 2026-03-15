@@ -115,8 +115,8 @@ export default function InterviewHistoryPage() {
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
                         {s.started_at
-                          ? new Date(s.started_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                          : new Date(s.created_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          ? new Date(s.started_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })
+                          : new Date(s.created_at).toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>
