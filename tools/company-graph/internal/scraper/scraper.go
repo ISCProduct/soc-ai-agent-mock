@@ -3,6 +3,7 @@
 package scraper
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -90,7 +91,7 @@ var defaultClient = &http.Client{Timeout: 30 * time.Second}
 
 // FetchHTML performs a rate-limited GET and returns the response body as a string.
 func FetchHTML(url, userAgent string, limiter *rate.Limiter) (string, error) {
-	if err := limiter.Wait(nil); err != nil { //nolint:staticcheck // context nil OK here
+	if err := limiter.Wait(context.Background()); err != nil {
 		return "", fmt.Errorf("rate limiter: %w", err)
 	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
