@@ -94,7 +94,7 @@ export default function InterviewPage() {
   const [emailSending, setEmailSending] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
   const [aiLevel, setAiLevel] = useState(0)
-  const [aiSpeaking, setAiSpeaking] = useState(false)
+  const [aiSpeaking, _setAiSpeaking] = useState(false)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
   const [interviewCompany, setInterviewCompany] = useState<InterviewCompany | null>(null)
   const [micEnabled, setMicEnabled] = useState(true)
@@ -108,8 +108,8 @@ export default function InterviewPage() {
   const [companySearch, setCompanySearch] = useState('')
   const [selectedPosition, setSelectedPosition] = useState<Position>(POSITIONS[0])
 
-  const [isRecording, setIsRecording] = useState(false)
-  const [turnPending, setTurnPending] = useState(false)
+  const [isRecording, _setIsRecording] = useState(false)
+  const [turnPending, _setTurnPending] = useState(false)
 
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -122,6 +122,11 @@ export default function InterviewPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sessionStartRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
+  // ハンズフリーVAD用
+  const [handsFreeMode, setHandsFreeMode] = useState(false)
+  const isRecordingRef = useRef(false)
+  const turnPendingRef = useRef(false)
+  const aiSpeakingRef = useRef(false)
 
   // Auth check
   useEffect(() => {
@@ -199,6 +204,43 @@ export default function InterviewPage() {
       sessionVideoRef.current.play().catch(() => undefined)
     }
   }, [status])
+
+  // ハンズフリーVAD: 音声検知で自動録音開始・停止
+  useEffect(() => {
+    if (!handsFreeMode || status !== 'connected' || !streamRef.current) return
+    const VAD_THRESHOLD = 0.015   // 発話検知の音量閾値 (RMS)
+    const SILENCE_MS = 1500       // この無音時間が続いたら自動送信
+    const audioCtx = new AudioContext()
+    const source = audioCtx.createMediaStreamSource(streamRef.current)
+    const analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    const buf = new Float32Array(analyser.fftSize)
+    let silenceStart: number | null = null
+    let rafId: number
+    const tick = () => {
+      rafId = requestAnimationFrame(tick)
+      analyser.getFloatTimeDomainData(buf)
+      const rms = Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length)
+      const speaking = rms > VAD_THRESHOLD
+      if (speaking) {
+        silenceStart = null
+        if (!isRecordingRef.current && !turnPendingRef.current && !aiSpeakingRef.current) {
+          startRecording()
+        }
+      } else if (isRecordingRef.current) {
+        if (silenceStart === null) {
+          silenceStart = Date.now()
+        } else if (Date.now() - silenceStart > SILENCE_MS) {
+          silenceStart = null
+          stopRecording()
+        }
+      }
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => { cancelAnimationFrame(rafId); audioCtx.close() }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handsFreeMode, status])
 
   const formatSeconds = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   const parseJsonSafe = (v?: string) => { try { return v ? JSON.parse(v) : null } catch { return null } }
@@ -371,6 +413,11 @@ export default function InterviewPage() {
       } catch { setReportStatus('error') }
     }, 3000)
   }
+
+  // ref と state を常に同期（VAD の stale closure 対策）
+  const setIsRecording = (v: boolean) => { isRecordingRef.current = v; _setIsRecording(v) }
+  const setTurnPending = (v: boolean) => { turnPendingRef.current = v; _setTurnPending(v) }
+  const setAiSpeaking = (v: boolean) => { aiSpeakingRef.current = v; _setAiSpeaking(v) }
 
   const startRecording = () => {
     if (!streamRef.current || isRecording || turnPending) return
@@ -1241,6 +1288,26 @@ export default function InterviewPage() {
             <IconButton onClick={() => setCaptionsVisible(p => !p)} sx={{ bgcolor: captionsVisible ? `${PRIMARY}30` : 'rgba(255,255,255,0.08)', width: 48, height: 48, '&:hover': { bgcolor: captionsVisible ? `${PRIMARY}40` : 'rgba(255,255,255,0.15)' } }}>
               <ClosedCaptionIcon sx={{ color: captionsVisible ? PRIMARY : '#9aa0a6' }} />
             </IconButton>
+          </Tooltip>
+
+          <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ（ボタン操作に戻す）' : 'ハンズフリーをオン（声を検知して自動送信）'}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+              <IconButton
+                onClick={() => setHandsFreeMode(p => !p)}
+                disabled={!isConnected}
+                sx={{
+                  bgcolor: handsFreeMode ? `${PRIMARY}30` : 'rgba(255,255,255,0.08)',
+                  width: 48, height: 48,
+                  '&:hover': { bgcolor: handsFreeMode ? `${PRIMARY}40` : 'rgba(255,255,255,0.15)' },
+                  '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
+                }}
+              >
+                <MicIcon sx={{ color: handsFreeMode ? PRIMARY : '#9aa0a6', fontSize: 20 }} />
+              </IconButton>
+              <Typography sx={{ fontSize: 9, color: handsFreeMode ? PRIMARY : '#9aa0a6', fontWeight: 600, letterSpacing: 0.3 }}>
+                {handsFreeMode ? 'AUTO' : 'ハンズフリー'}
+              </Typography>
+            </Box>
           </Tooltip>
 
           {/* End call / Join button */}
