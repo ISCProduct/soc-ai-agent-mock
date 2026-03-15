@@ -97,19 +97,19 @@ const reportEmailTemplate = `<!DOCTYPE html>
     <div class="scores-grid">
       <div class="score-card">
         <div class="score-label">職種分析</div>
-        <div class="score-value">{{.JobScore}}</div>
+        <div class="score-value">{{.JobScore}}%</div>
       </div>
       <div class="score-card">
         <div class="score-label">興味分析</div>
-        <div class="score-value">{{.InterestScore}}</div>
+        <div class="score-value">{{.InterestScore}}%</div>
       </div>
       <div class="score-card">
         <div class="score-label">適性分析</div>
-        <div class="score-value">{{.AptitudeScore}}</div>
+        <div class="score-value">{{.AptitudeScore}}%</div>
       </div>
       <div class="score-card">
         <div class="score-label">将来分析</div>
-        <div class="score-value">{{.FutureScore}}</div>
+        <div class="score-value">{{.FutureScore}}%</div>
       </div>
     </div>
   </div>
@@ -163,15 +163,16 @@ func (s *EmailService) SendAnalysisReport(user *models.User, summary *AnalysisSu
 	}
 
 	pct := func(v float64) string { return fmt.Sprintf("%.0f", v*100) }
+	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
 
 	data := emailReportData{
 		UserName:         user.Name,
 		SessionID:        sessionID,
-		SentAt:           time.Now().Format("2006年01月02日 15:04"),
-		JobScore:         fmt.Sprintf("%.0f", summary.Scores.JobScore),
-		InterestScore:    fmt.Sprintf("%.0f", summary.Scores.InterestScore),
-		AptitudeScore:    fmt.Sprintf("%.0f", summary.Scores.AptitudeScore),
-		FutureScore:      fmt.Sprintf("%.0f", summary.Scores.FutureScore),
+		SentAt:           time.Now().In(jst).Format("2006年01月02日 15:04"),
+		JobScore:         fmt.Sprintf("%.0f", summary.Scores.JobScore*100),
+		InterestScore:    fmt.Sprintf("%.0f", summary.Scores.InterestScore*100),
+		AptitudeScore:    fmt.Sprintf("%.0f", summary.Scores.AptitudeScore*100),
+		FutureScore:      fmt.Sprintf("%.0f", summary.Scores.FutureScore*100),
 		JobProgress:      pct(summary.Progress.Job),
 		InterestProgress: pct(summary.Progress.Interest),
 		AptitudeProgress: pct(summary.Progress.Aptitude),
@@ -339,7 +340,7 @@ const interviewReportEmailTemplate = `<!DOCTYPE html>
 
 // SendRegistrationEmail 仮登録確認メールを送信（メールアドレスのみ、Userオブジェクト不要）
 func (s *EmailService) SendRegistrationEmail(email, token string) error {
-	appURL := os.Getenv("NEXT_PUBLIC_BACKEND_URL")
+	appURL := os.Getenv("FRONTEND_URL")
 	if appURL == "" {
 		appURL = "http://localhost:3000"
 	}
@@ -370,9 +371,39 @@ func (s *EmailService) SendRegistrationEmail(email, token string) error {
 	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
 }
 
+// SendPasswordResetEmail パスワードリセットメールを送信
+func (s *EmailService) SendPasswordResetEmail(email, token, appURL string) error {
+	resetURL := appURL + "/reset-password?token=" + token
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>パスワードのリセット</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:500px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">パスワードのリセット</h2>
+<p>パスワードのリセットリクエストを受け付けました。</p>
+<p>以下のボタンをクリックして新しいパスワードを設定してください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">パスワードをリセットする</a>
+<p style="color:#888;font-size:12px;">このリンクは1時間有効です。身に覚えのない場合は無視してください。</p>
+</div>
+</body></html>`, resetURL)
+
+	if s.host == "" {
+		fmt.Printf("[EmailService] Password reset email for %s: %s\n", email, resetURL)
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: パスワードのリセット\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, email, body,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
+}
+
 // SendInterviewReport 面接練習レポートをメールで送信
 func (s *EmailService) SendInterviewReport(user *models.User, data InterviewReportEmailData) error {
-	data.SentAt = time.Now().Format("2006年01月02日 15:04")
+	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
+	data.SentAt = time.Now().In(jst).Format("2006年01月02日 15:04")
 	data.UserName = user.Name
 
 	tmpl, err := template.New("interview_report").Parse(interviewReportEmailTemplate)

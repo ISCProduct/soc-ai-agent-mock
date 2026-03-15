@@ -114,12 +114,6 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
             4万社から最適な企業を選定
           </Typography>
 
-          {verificationSent && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              確認メールを送信しました。メールのリンクをクリックしてアカウントを有効化してください。
-            </Alert>
-          )}
-
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
