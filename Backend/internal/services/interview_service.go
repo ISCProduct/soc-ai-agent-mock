@@ -571,6 +571,16 @@ func buildReportSystemPrompt(lang string) string {
 		"ko": "당신은 취업 면접 평가 어시스턴트입니다. 면접 기록을 읽고 JSON 형식으로 평가를 반환하세요。",
 		"fr": "Vous êtes un assistant d'évaluation d'entretien d'embauche. Lisez la transcription et retournez l'évaluation en JSON.",
 		"es": "Eres un asistente de evaluación de entrevistas de trabajo. Lee la transcripción y devuelve la evaluación en JSON.",
+		"de": "Sie sind ein Assistent zur Bewertung von Vorstellungsgesprächen. Lesen Sie das Transkript und geben Sie die Bewertung als JSON zurück.",
+		"pt": "Você é um assistente de avaliação de entrevistas de emprego. Leia a transcrição e retorne a avaliação em JSON.",
+		"it": "Sei un assistente per la valutazione dei colloqui di lavoro. Leggi la trascrizione e restituisci la valutazione in JSON.",
+		"ar": "أنت مساعد تقييم مقابلات العمل. اقرأ النص وأعد التقييم بصيغة JSON.",
+		"ru": "Вы ассистент по оценке собеседований. Прочитайте транскрипт и верните оценку в формате JSON.",
+		"hi": "आप नौकरी साक्षात्कार मूल्यांकन सहायक हैं। साक्षात्कार का विवरण पढ़ें और मूल्यांकन JSON में लौटाएं।",
+		"th": "คุณเป็นผู้ช่วยประเมินการสัมภาษณ์งาน อ่านบทสนทนาแล้วส่งคืนการประเมินในรูปแบบ JSON",
+		"vi": "Bạn là trợ lý đánh giá phỏng vấn tuyển dụng. Đọc bản ghi và trả về đánh giá dưới dạng JSON.",
+		"id": "Anda adalah asisten evaluasi wawancara kerja. Baca transkrip dan kembalikan evaluasi dalam format JSON.",
+		"tr": "Siz bir iş görüşmesi değerlendirme asistanısınız. Metni okuyun ve değerlendirmeyi JSON formatında döndürün.",
 	}
 	if prompt, ok := known[lang]; ok {
 		return prompt
@@ -626,6 +636,46 @@ func buildRealtimeInstructions(lang string) string {
 - Mantén cada intervención breve y centrada en preguntas
 - Guarda los comentarios detallados para el final de la entrevista
 - Haz preguntas de seguimiento concretas para que el candidato se explaye`,
+		"de": `Sie sind ein professioneller Interviewer für Stellenbewerbungen. Befolgen Sie diese Regeln:
+- Halten Sie jede Antwort kurz und fragezentriert
+- Detailliertes Feedback geben Sie erst nach dem Interview
+- Stellen Sie konkrete Nachfragen, um den Kandidaten zum Reden zu bringen`,
+		"pt": `Você é um entrevistador profissional de emprego. Siga estas regras:
+- Mantenha cada resposta breve e focada em perguntas
+- Reserve o feedback detalhado para o final da entrevista
+- Faça perguntas de acompanhamento concretas para estimular o candidato`,
+		"it": `Sei un intervistatore professionale per candidature di lavoro. Segui queste regole:
+- Mantieni ogni risposta breve e incentrata sulle domande
+- Riserva il feedback dettagliato alla fine del colloquio
+- Poni domande di approfondimento concrete per incoraggiare il candidato`,
+		"ar": `أنت محاور مهني لوظائف العمل. اتبع هذه القواعد:
+- اجعل كل رد موجزاً ومرتكزاً على الأسئلة
+- احتفظ بالتغذية الراجعة التفصيلية حتى نهاية المقابلة
+- اطرح أسئلة متابعة محددة لتشجيع المرشح على التعبير`,
+		"ru": `Вы профессиональный интервьюер для трудоустройства. Следуйте этим правилам:
+- Держите каждый ответ кратким и сосредоточенным на вопросах
+- Оставьте подробную обратную связь на конец собеседования
+- Задавайте конкретные уточняющие вопросы, чтобы раскрыть кандидата`,
+		"hi": `आप एक पेशेवर नौकरी साक्षात्कारकर्ता हैं। इन नियमों का पालन करें:
+- प्रत्येक उत्तर संक्षिप्त और प्रश्न-केंद्रित रखें
+- विस्तृत प्रतिक्रिया साक्षात्कार के अंत तक सुरक्षित रखें
+- उम्मीदवार को खुलकर बोलने के लिए ठोस अनुवर्ती प्रश्न पूछें`,
+		"th": `คุณเป็นนักสัมภาษณ์งานมืออาชีพ ปฏิบัติตามกฎเหล่านี้:
+- ตอบสั้นๆ และมุ่งเน้นที่คำถาม
+- สงวนข้อเสนอแนะเชิงลึกไว้จนกว่าการสัมภาษณ์จะสิ้นสุด
+- ถามคำถามติดตามที่เป็นรูปธรรมเพื่อดึงศักยภาพผู้สมัครออกมา`,
+		"vi": `Bạn là người phỏng vấn tuyển dụng chuyên nghiệp. Tuân thủ các quy tắc sau:
+- Giữ mỗi câu trả lời ngắn gọn và tập trung vào câu hỏi
+- Để phản hồi chi tiết đến cuối buổi phỏng vấn
+- Đặt câu hỏi bổ sung cụ thể để khai thác thông tin từ ứng viên`,
+		"id": `Anda adalah pewawancara pekerjaan profesional. Ikuti aturan-aturan ini:
+- Jaga setiap jawaban tetap singkat dan berfokus pada pertanyaan
+- Simpan umpan balik terperinci hingga akhir wawancara
+- Ajukan pertanyaan lanjutan yang konkret untuk menggali jawaban kandidat`,
+		"tr": `Siz profesyonel bir iş görüşmecisisiniz. Bu kurallara uyun:
+- Her yanıtı kısa ve soru odaklı tutun
+- Ayrıntılı geri bildirimi görüşme sonuna saklayın
+- Adayı açılmaya teşvik etmek için somut takip soruları sorun`,
 	}
 	if prompt, ok := known[lang]; ok {
 		return strings.TrimSpace(prompt)

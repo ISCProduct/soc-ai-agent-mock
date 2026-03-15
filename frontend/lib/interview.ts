@@ -20,6 +20,16 @@ export const INTERVIEW_LANGUAGES = [
   { code: 'ko', label: '한국어' },
   { code: 'fr', label: 'Français' },
   { code: 'es', label: 'Español' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'pt', label: 'Português' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'ru', label: 'Русский' },
+  { code: 'hi', label: 'हिन्दी' },
+  { code: 'th', label: 'ภาษาไทย' },
+  { code: 'vi', label: 'Tiếng Việt' },
+  { code: 'id', label: 'Bahasa Indonesia' },
+  { code: 'tr', label: 'Türkçe' },
 ] as const
 
 export type InterviewLanguageCode = (typeof INTERVIEW_LANGUAGES)[number]['code'] | string
