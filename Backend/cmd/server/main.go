@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
+	"Backend/internal/scraper"
 	"Backend/internal/services"
 	"log"
 	"net/http"
@@ -124,6 +125,14 @@ func main() {
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
+	companyGraphPipeline := &scraper.Pipeline{
+		Mynavi:     scraper.NewMynaviScraper(cfg.ChromedpURL),
+		Rikunabi:   scraper.NewRikunabiScraper(),
+		CareerTasu: scraper.NewCareerTasuScraper(),
+		GBiz:       scraper.NewGBizClient(cfg.GBizInfoBaseURL, cfg.GBizInfoToken),
+		Threshold:  0.75,
+	}
+	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)
 	interviewController := controllers.NewInterviewController(interviewService)
 	realtimeController := controllers.NewRealtimeController(interviewService)
@@ -133,7 +142,7 @@ func main() {
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, userRepo)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, userRepo)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)

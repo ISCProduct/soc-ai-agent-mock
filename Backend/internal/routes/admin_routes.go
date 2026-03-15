@@ -13,6 +13,7 @@ func SetupAdminRoutes(
 	adminJobController *controllers.AdminJobController,
 	adminUserController *controllers.AdminUserController,
 	adminAuditController *controllers.AdminAuditController,
+	adminCompanyGraphController *controllers.AdminCompanyGraphController,
 	userRepo *repositories.UserRepository,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
@@ -32,4 +33,8 @@ func SetupAdminRoutes(
 	http.HandleFunc("/api/admin/users", auth(adminUserController.List))
 	http.HandleFunc("/api/admin/users/", auth(adminUserController.Update))
 	http.HandleFunc("/api/admin/audit-logs", auth(adminAuditController.List))
+
+	// Company graph (scraping pipeline)
+	http.HandleFunc("/api/admin/company-graph/target-year", adminCompanyGraphController.TargetYear)
+	http.HandleFunc("/api/admin/company-graph/crawl", auth(adminCompanyGraphController.Crawl))
 }

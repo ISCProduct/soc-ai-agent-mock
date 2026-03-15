@@ -26,6 +26,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - ANNOTATION_FONT_PATH=${ANNOTATION_FONT_PATH:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
       - RAG_REVIEW_URL=${RAG_REVIEW_URL:-http://rag-review:9000}
+      - CHROMEDP_URL=${CHROMEDP_URL:-ws://chromedp:9222}
 
   # MySQL Database
   db:
@@ -74,7 +75,6 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}
-      - COMPANY_GRAPH_URL=${COMPANY_GRAPH_URL:-http://company-graph:9100}
       - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
     depends_on:
       app:
@@ -82,21 +82,14 @@ services:
     networks:
       - soc-ai-network
 
-  # Company graph pipeline (マルチソース新卒採用データ × gBizINFO)
-  company-graph:
-    build:
-      context: ./tools/company-graph
-      dockerfile: Dockerfile
-    container_name: soc-ai-company-graph
+  # Headless Chrome for Mynavi JS rendering (chromedp)
+  chromedp:
+    image: chromedp/headless-shell:latest
+    container_name: soc-ai-chromedp
     profiles:
       - company-graph
     ports:
-      - "${COMPANY_GRAPH_PORT:-9100}:9100"
-    environment:
-      - GBIZINFO_API_KEY=${GBIZINFO_API_KEY:-}
-      - OUTPUT_DIR=/app/output
-    volumes:
-      - company_graph_output:/app/output
+      - "9222:9222"
     networks:
       - soc-ai-network
 
@@ -124,8 +117,6 @@ volumes:
   mysql_data:
     driver: local
   rag_data:
-    driver: local
-  company_graph_output:
     driver: local
 
 networks:
