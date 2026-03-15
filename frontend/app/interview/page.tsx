@@ -35,7 +35,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ApartmentIcon from '@mui/icons-material/Apartment'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { authService, User } from '@/lib/auth'
-import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
+import { interviewApi, interviewLimits, InterviewReport, InterviewSession, INTERVIEW_LANGUAGES } from '@/lib/interview'
 import ThreeAvatar from './components/ThreeAvatar'
 
 const PRIMARY = '#ec5b13'
@@ -107,6 +107,7 @@ export default function InterviewPage() {
   const [companiesLoading, setCompaniesLoading] = useState(false)
   const [companySearch, setCompanySearch] = useState('')
   const [selectedPosition, setSelectedPosition] = useState<Position>(POSITIONS[0])
+  const [selectedLanguage, setSelectedLanguage] = useState('ja')
 
   const [isRecording, setIsRecording] = useState(false)
   const [turnPending, setTurnPending] = useState(false)
@@ -335,7 +336,7 @@ export default function InterviewPage() {
         streamRef.current = stream
       }
 
-      const created = await interviewApi.createSession(user.user_id)
+      const created = await interviewApi.createSession(user.user_id, selectedLanguage)
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)
       setStatus('connected')
@@ -664,6 +665,27 @@ export default function InterviewPage() {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography sx={{ fontSize: 14 }}>❓</Typography>
                         <Typography sx={{ fontSize: 13, color: '#475569' }}>{selectedPosition.questions}問 技術・行動面接</Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ pt: 2, borderTop: `1px solid ${PRIMARY}15` }}>
+                      <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, mb: 1 }}>面接言語</Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                        {INTERVIEW_LANGUAGES.map(lang => (
+                          <Button
+                            key={lang.code}
+                            size="small"
+                            onClick={() => setSelectedLanguage(lang.code)}
+                            sx={{
+                              px: 1.5, py: 0.5, borderRadius: 1.5, fontWeight: 600, fontSize: 12,
+                              textTransform: 'none', minWidth: 0,
+                              bgcolor: selectedLanguage === lang.code ? PRIMARY : '#f1f5f9',
+                              color: selectedLanguage === lang.code ? '#fff' : '#475569',
+                              '&:hover': { bgcolor: selectedLanguage === lang.code ? `${PRIMARY}e0` : '#e2e8f0' },
+                            }}
+                          >
+                            {lang.label}
+                          </Button>
+                        ))}
                       </Box>
                     </Box>
                   </Stack>

@@ -4,6 +4,7 @@ export type InterviewSession = {
   id: number
   user_id: number
   status: string
+  language: string
   started_at?: string
   ended_at?: string
   estimated_cost_usd: number
@@ -11,6 +12,17 @@ export type InterviewSession = {
   created_at: string
   updated_at: string
 }
+
+export const INTERVIEW_LANGUAGES = [
+  { code: 'ja', label: '日本語' },
+  { code: 'en', label: 'English' },
+  { code: 'zh', label: '中文（简体）' },
+  { code: 'ko', label: '한국어' },
+  { code: 'fr', label: 'Français' },
+  { code: 'es', label: 'Español' },
+] as const
+
+export type InterviewLanguageCode = (typeof INTERVIEW_LANGUAGES)[number]['code'] | string
 
 export type InterviewUtterance = {
   id: number
@@ -36,11 +48,11 @@ export type InterviewDetail = {
 }
 
 export const interviewApi = {
-  async createSession(userId: number): Promise<InterviewSession> {
+  async createSession(userId: number, language = 'ja'): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify({ user_id: userId, language }),
     })
     if (!res.ok) throw new Error(await res.text())
     return res.json()

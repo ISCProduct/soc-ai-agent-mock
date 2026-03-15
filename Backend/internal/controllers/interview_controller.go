@@ -20,7 +20,8 @@ func NewInterviewController(interviewService *services.InterviewService) *Interv
 }
 
 type interviewCreateRequest struct {
-	UserID uint `json:"user_id"`
+	UserID   uint   `json:"user_id"`
+	Language string `json:"language"`
 }
 
 type interviewActionRequest struct {
@@ -218,7 +219,7 @@ func (c *InterviewController) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "user_id is required", http.StatusBadRequest)
 		return
 	}
-	resp, err := c.interviewService.CreateSession(req.UserID)
+	resp, err := c.interviewService.CreateSession(req.UserID, req.Language)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

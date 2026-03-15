@@ -67,6 +67,7 @@ type InterviewSessionResponse struct {
 	ID               uint       `json:"id"`
 	UserID           uint       `json:"user_id"`
 	Status           string     `json:"status"`
+	Language         string     `json:"language"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	EndedAt          *time.Time `json:"ended_at,omitempty"`
 	EstimatedCostUSD float64    `json:"estimated_cost_usd"`
@@ -81,14 +82,18 @@ type InterviewDetailResponse struct {
 	Report     *models.InterviewReport     `json:"report,omitempty"`
 }
 
-func (s *InterviewService) CreateSession(userID uint) (*InterviewSessionResponse, error) {
+func (s *InterviewService) CreateSession(userID uint, language string) (*InterviewSessionResponse, error) {
 	user, err := s.userRepo.GetUserByID(userID)
 	if err != nil || user == nil {
 		return nil, errors.New("user not found")
 	}
+	if language == "" {
+		language = "ja"
+	}
 	session := &models.InterviewSession{
 		UserID:          userID,
 		Status:          "ready",
+		Language:        language,
 		TemplateVersion: getEnv("INTERVIEW_TEMPLATE_VERSION", "v1"),
 	}
 	if err := s.sessionRepo.Create(session); err != nil {
@@ -229,15 +234,19 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	if session.Status == "finished" {
 		return "", errors.New("session already finished")
 	}
+	lang := session.Language
+	if lang == "" {
+		lang = "ja"
+	}
 	model := getEnv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
-	voice := getEnv("OPENAI_REALTIME_VOICE", "alloy")
+	voice := realtimeVoiceForLang(lang)
 	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 	maxTokens := getIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
 	req := openai.RealtimeSessionRequest{
 		Model:        model,
 		Modalities:   []string{"audio"},
 		Voice:        voice,
-		Instructions: buildRealtimeInstructions(),
+		Instructions: buildRealtimeInstructions(lang),
 		InputAudioTranscription: map[string]interface{}{
 			"model": transcribeModel,
 		},
@@ -375,6 +384,15 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 }
 
 func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) error {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return err
+	}
+	lang := session.Language
+	if lang == "" {
+		lang = "ja"
+	}
+
 	utterances, err := s.utterRepo.FindBySessionID(sessionID)
 	if err != nil {
 		return err
@@ -391,9 +409,9 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	}
 	var transcriptBuilder strings.Builder
 	for _, u := range utterances {
-		role := "ユーザー"
+		role := "User"
 		if u.Role == "ai" {
-			role = "面接官"
+			role = "Interviewer"
 		}
 		transcriptBuilder.WriteString(role)
 		transcriptBuilder.WriteString(": ")
@@ -401,20 +419,21 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		transcriptBuilder.WriteString("\n")
 	}
 	transcript := transcriptBuilder.String()
-	systemPrompt := "あなたは就活面接のアシスタントです。面接ログを読み、短い日本語で要約・評価をJSONで返してください。"
-	userPrompt := fmt.Sprintf(`以下の面接ログに基づき、JSONのみで出力してください。
+	systemPrompt := buildReportSystemPrompt(lang)
+	userPrompt := fmt.Sprintf(`Based on the following interview transcript, output JSON only.
 
-出力フォーマット:
+Output format:
 {
-  "summary": ["箇条書き1", "箇条書き2", "箇条書き3"],
+  "summary": ["point1", "point2", "point3"],
   "scores": {"logic": 0, "specificity": 0, "ownership": 0},
-  "evidence": {"logic": "根拠", "specificity": "根拠", "ownership": "根拠"}
+  "evidence": {"logic": "reason", "specificity": "reason", "ownership": "reason"}
 }
 
-スコアは0〜5の整数。summaryは最大5件で簡潔に。
+Scores are integers from 0 to 5. Up to 5 summary points, keep them concise.
+Write the summary and evidence in the same language as the interview (language code: %s).
 
-面接ログ:
-%s`, transcript)
+Interview transcript:
+%s`, lang, transcript)
 
 	model := getEnv("INTERVIEW_REPORT_MODEL", "")
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 400, model)
@@ -485,10 +504,15 @@ func (s *InterviewService) SendReportEmail(userID, sessionID uint) error {
 }
 
 func toSessionResponse(session *models.InterviewSession) *InterviewSessionResponse {
+	lang := session.Language
+	if lang == "" {
+		lang = "ja"
+	}
 	return &InterviewSessionResponse{
 		ID:               session.ID,
 		UserID:           session.UserID,
 		Status:           session.Status,
+		Language:         lang,
 		StartedAt:        session.StartedAt,
 		EndedAt:          session.EndedAt,
 		EstimatedCostUSD: session.EstimatedCostUSD,
@@ -538,10 +562,77 @@ func getFloatEnv(key string, def float64) float64 {
 	return n
 }
 
-func buildRealtimeInstructions() string {
-	return strings.TrimSpace(`あなたは就活面接官です。以下を守ってください。
+// buildReportSystemPrompt 言語コードに応じたレポート生成用システムプロンプトを返す。
+func buildReportSystemPrompt(lang string) string {
+	known := map[string]string{
+		"ja": "あなたは就活面接のアシスタントです。面接ログを読み、要約・評価をJSONで返してください。",
+		"en": "You are a job interview assessment assistant. Read the interview transcript and return evaluation as JSON.",
+		"zh": "你是一位求职面试评估助手。请阅读面试记录并以JSON格式返回评估结果。",
+		"ko": "당신은 취업 면접 평가 어시스턴트입니다. 면접 기록을 읽고 JSON 형식으로 평가를 반환하세요。",
+		"fr": "Vous êtes un assistant d'évaluation d'entretien d'embauche. Lisez la transcription et retournez l'évaluation en JSON.",
+		"es": "Eres un asistente de evaluación de entrevistas de trabajo. Lee la transcripción y devuelve la evaluación en JSON.",
+	}
+	if prompt, ok := known[lang]; ok {
+		return prompt
+	}
+	return fmt.Sprintf("You are a job interview assessment assistant. Read the interview transcript and return evaluation as JSON. Use language code \"%s\" for the summary and evidence fields.", lang)
+}
+
+// realtimeVoiceForLang 言語コードに応じた推奨ボイスを返す。
+// 環境変数 OPENAI_REALTIME_VOICE が設定されている場合はそちらを優先する。
+func realtimeVoiceForLang(lang string) string {
+	if v := getEnv("OPENAI_REALTIME_VOICE", ""); v != "" {
+		return v
+	}
+	switch lang {
+	case "ja":
+		return "alloy"
+	case "en":
+		return "shimmer"
+	case "zh":
+		return "nova"
+	case "ko":
+		return "alloy"
+	default:
+		return "alloy"
+	}
+}
+
+// buildRealtimeInstructions 言語コードに応じたシステムプロンプトを返す。
+// 既知の言語には専用プロンプトを、未知の言語にはフォールバックプロンプトを返す。
+func buildRealtimeInstructions(lang string) string {
+	known := map[string]string{
+		"ja": `あなたは就活面接官です。以下を守ってください。
 - 1回の発話は短く、質問中心にする
 - 長い講評は面接終了後に行う
-- ユーザーが話しやすいように具体的に深掘りする
-`)
+- ユーザーが話しやすいように具体的に深掘りする`,
+		"en": `You are a professional job interview coach. Follow these rules:
+- Keep each response brief and question-focused
+- Save detailed feedback until the interview ends
+- Ask concrete follow-up questions to draw out the candidate`,
+		"zh": `你是一位专业的求职面试官。请遵守以下规则：
+- 每次发言简短，以提问为主
+- 详细评价留到面试结束后再给出
+- 通过具体的追问引导候选人展开作答`,
+		"ko": `당신은 전문 취업 면접관입니다. 다음 규칙을 준수하세요:
+- 각 발화는 짧게, 질문 중심으로 진행하세요
+- 상세한 평가는 면접 종료 후에 해주세요
+- 구체적인 추가 질문으로 지원자의 답변을 이끌어내세요`,
+		"fr": `Vous êtes un interviewer professionnel pour les candidatures à l'emploi. Suivez ces règles :
+- Gardez chaque réponse brève et axée sur les questions
+- Réservez les retours détaillés à la fin de l'entretien
+- Posez des questions de suivi concrètes pour aider le candidat à développer ses réponses`,
+		"es": `Eres un entrevistador profesional de empleo. Sigue estas reglas:
+- Mantén cada intervención breve y centrada en preguntas
+- Guarda los comentarios detallados para el final de la entrevista
+- Haz preguntas de seguimiento concretas para que el candidato se explaye`,
+	}
+	if prompt, ok := known[lang]; ok {
+		return strings.TrimSpace(prompt)
+	}
+	// フォールバック: 未知の言語コードはAIに言語指定のみ行う
+	return strings.TrimSpace(fmt.Sprintf(
+		"You are a professional job interview coach. Conduct this entire interview in the language with BCP 47 code \"%s\". Keep each response brief and question-focused. Save detailed feedback until the interview ends.",
+		lang,
+	))
 }
