@@ -111,11 +111,15 @@ export default function InterviewPage() {
   const [isRecording, _setIsRecording] = useState(false)
   const [turnPending, _setTurnPending] = useState(false)
 
+  const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
   const sessionVideoRef = useRef<HTMLVideoElement | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const videoRecorderRef = useRef<MediaRecorder | null>(null)
+  const videoChunksRef = useRef<Blob[]>([])
   const historyRef = useRef<{ role: string; content: string }[]>([])
   const aiAudioRef = useRef<HTMLAudioElement | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -381,6 +385,19 @@ export default function InterviewPage() {
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)
       setStatus('connected')
+
+      // Start video recording
+      if (stream) {
+        try {
+          const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'
+          videoChunksRef.current = []
+          const vr = new MediaRecorder(stream, { mimeType })
+          vr.ondataavailable = (e) => { if (e.data.size > 0) videoChunksRef.current.push(e.data) }
+          vr.start(1000)
+          videoRecorderRef.current = vr
+        } catch { /* camera unavailable — skip recording */ }
+      }
+
       startTimer()
       await doStartTurn(created.id, user.user_id)
     } catch (error: any) {
@@ -391,14 +408,41 @@ export default function InterviewPage() {
   }
 
   const handleStop = async (forced = false) => {
+    // Stop video recorder and collect blob before cleanup
+    const vr = videoRecorderRef.current
+    let videoBlob: Blob | null = null
+    if (vr && vr.state !== 'inactive') {
+      await new Promise<void>((resolve) => {
+        vr.onstop = () => resolve()
+        vr.stop()
+      })
+      if (videoChunksRef.current.length > 0) {
+        videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' })
+      }
+      videoRecorderRef.current = null
+      videoChunksRef.current = []
+    }
+
     cleanupConnection()
-    if (user && session) {
-      try { await interviewApi.finishSession(session.id, user.user_id) } catch { /* ignore */ }
+    const currentSession = session
+    const currentUser = user
+    if (currentUser && currentSession) {
+      try { await interviewApi.finishSession(currentSession.id, currentUser.user_id) } catch { /* ignore */ }
     }
     setStatus('finished')
     setReportStatus('pending')
     if (forced) setErrorMessage('時間上限に達したため面接を終了しました。')
-    if (session && user) startReportPolling(session.id, user.user_id)
+    if (currentSession && currentUser) {
+      startReportPolling(currentSession.id, currentUser.user_id)
+
+      // Upload video asynchronously
+      if (videoBlob) {
+        setVideoUploadStatus('uploading')
+        interviewApi.uploadVideo(currentSession.id, currentUser.user_id, videoBlob)
+          .then(() => setVideoUploadStatus('done'))
+          .catch(() => setVideoUploadStatus('error'))
+      }
+    }
   }
 
   const startReportPolling = (sessionId: number, userId: number) => {
@@ -979,6 +1023,17 @@ export default function InterviewPage() {
           {reportStatus === 'error' && (
             <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
               <Typography variant="body2" sx={{ color: '#f28b82' }}>レポート生成に失敗しました。</Typography>
+            </Paper>
+          )}
+
+          {/* Video upload status */}
+          {videoUploadStatus !== 'idle' && (
+            <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
+              <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6' }}>
+                {videoUploadStatus === 'uploading' && '動画をGoogle Driveにアップロード中...'}
+                {videoUploadStatus === 'done' && '✓ 動画のアップロードが完了しました'}
+                {videoUploadStatus === 'error' && '動画のアップロードに失敗しました'}
+              </Typography>
             </Paper>
           )}
         </Box>

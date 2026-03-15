@@ -1,22 +1,33 @@
 package controllers
 
 import (
+	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type InterviewController struct {
 	interviewService *services.InterviewService
+	videoRepo        *repositories.InterviewVideoRepository
+	s3Service        *services.S3UploadService
 }
 
-func NewInterviewController(interviewService *services.InterviewService) *InterviewController {
-	return &InterviewController{interviewService: interviewService}
+func NewInterviewController(interviewService *services.InterviewService, videoRepo *repositories.InterviewVideoRepository, s3Service *services.S3UploadService) *InterviewController {
+	return &InterviewController{
+		interviewService: interviewService,
+		videoRepo:        videoRepo,
+		s3Service:        s3Service,
+	}
 }
 
 type interviewCreateRequest struct {
@@ -71,6 +82,10 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.SendReport(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/upload-video") {
+		c.UploadVideo(w, r)
+		return
+	}
 	c.Get(w, r)
 }
 
@@ -104,6 +119,89 @@ func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "レポートをメールで送信しました"})
+}
+
+func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/upload-video")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+
+	// 32 MB limit
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.FormValue("user_id")
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil || userID == 0 {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("video")
+	if err != nil {
+		http.Error(w, "video file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read video", http.StatusInternalServerError)
+		return
+	}
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "video/webm"
+	}
+
+	// Persist record first
+	if c.videoRepo == nil || c.s3Service == nil {
+		http.Error(w, "video upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	now := time.Now()
+	s3Key := fmt.Sprintf("interview-videos/%d/%d_%s.webm", sessionID, userID, now.Format("20060102_150405"))
+	fileName := fmt.Sprintf("interview_%d_%d_%s.webm", sessionID, userID, now.Format("20060102_150405"))
+
+	videoRecord := &models.InterviewVideo{
+		SessionID:     sessionID,
+		UserID:        uint(userID),
+		FileName:      fileName,
+		FileSizeBytes: int64(len(data)),
+		MimeType:      mimeType,
+		Status:        "uploading",
+	}
+	if err := c.videoRepo.Create(r.Context(), videoRecord); err != nil {
+		http.Error(w, "Failed to create video record", http.StatusInternalServerError)
+		return
+	}
+
+	// Upload to S3 asynchronously
+	go func(vid *models.InterviewVideo, fileData []byte, key string) {
+		ctx := context.Background()
+		fileID, s3URL, uploadErr := c.s3Service.UploadFile(ctx, key, vid.MimeType, fileData)
+		uploadedAt := time.Now()
+		if uploadErr != nil {
+			c.videoRepo.UpdateStatus(ctx, vid.ID, "error", uploadErr.Error(), "", "", nil)
+			return
+		}
+		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
+	}(videoRecord, data, s3Key)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"video_id": videoRecord.ID,
+		"status":   "uploading",
+		"message":  "動画のアップロードを開始しました",
+	})
 }
 
 func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {

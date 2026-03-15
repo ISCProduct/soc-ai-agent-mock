@@ -129,6 +129,18 @@ export const interviewApi = {
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
+
+  async uploadVideo(sessionId: number, userId: number, blob: Blob): Promise<{ video_id: number; status: string }> {
+    const form = new FormData()
+    form.append('user_id', String(userId))
+    form.append('video', blob, `interview_${sessionId}.webm`)
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/upload-video`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
 }
 
 export const interviewLimits = {

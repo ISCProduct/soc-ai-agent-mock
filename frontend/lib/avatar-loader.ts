@@ -65,19 +65,27 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
     validateAvatarMorphTargets(gltf)
     return gltf
   } catch (localError) {
-    console.warn(`[AvatarLoader] Local avatar not found. Using fallback SVG avatar.`)
-    console.info(
-      `[AvatarLoader] To use 3D avatars, add GLB files to frontend/public/avatars/\n` +
-      `See frontend/public/avatars/README.md for instructions.`
-    )
+    console.warn(`[AvatarLoader] Local avatar not found (${localPath}). Trying Ready Player Me fallback...`)
 
-    // Skip Ready Player Me fallback for now (URLs need to be configured)
-    // If you want to use Ready Player Me, create your own avatars and update READY_PLAYER_ME_FALLBACK URLs
-
-    throw new Error(
-      `Avatar file not found: ${localPath}. ` +
-      `Add ${gender}-avatar.glb to frontend/public/avatars/ or see README.md for setup instructions.`
-    )
+    // Try Ready Player Me CDN as fallback
+    const fallbackUrl = READY_PLAYER_ME_FALLBACK[gender]
+    try {
+      console.log(`[AvatarLoader] Loading RPM fallback: ${fallbackUrl}`)
+      const gltf = await loadWithTimeout(loader, fallbackUrl, 15000)
+      console.log(`[AvatarLoader] Successfully loaded RPM fallback avatar`)
+      validateAvatarMorphTargets(gltf)
+      return gltf
+    } catch (fallbackError) {
+      console.warn(`[AvatarLoader] RPM fallback also failed. Falling back to SVG avatar.`)
+      console.info(
+        `[AvatarLoader] To use local 3D avatars, add GLB files to frontend/public/avatars/\n` +
+        `See frontend/public/avatars/README.md for instructions.`
+      )
+      throw new Error(
+        `Avatar loading failed for "${gender}". ` +
+        `Add ${gender}-avatar.glb to frontend/public/avatars/ or check your network connection.`
+      )
+    }
   }
 }
 
