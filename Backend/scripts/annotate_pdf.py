@@ -32,54 +32,6 @@ def resolve_japanese_font():
     return None
 
 
-def resolve_note_rect(page_rect, target_rect):
-    margin = 6
-    note_height = 60
-    note_width = 220
-
-    center_y = (target_rect.y0 + target_rect.y1) / 2
-    top = max(page_rect.y0 + margin, center_y - note_height / 2)
-    bottom = min(page_rect.y1 - margin, top + note_height)
-    top = bottom - note_height
-
-    right_space = page_rect.x1 - target_rect.x1 - margin
-    left_space = target_rect.x0 - page_rect.x0 - margin
-
-    if right_space >= note_width:
-        left = target_rect.x1 + margin
-        right = left + note_width
-    elif left_space >= note_width:
-        right = target_rect.x0 - margin
-        left = right - note_width
-    else:
-        left = max(page_rect.x0 + margin, target_rect.x0)
-        right = min(page_rect.x1 - margin, left + note_width)
-        left = right - note_width
-
-    note_rect = fitz.Rect(left, top, right, bottom)
-    if note_rect.y0 < page_rect.y0 + margin:
-        note_rect.y1 = note_rect.y1 + (page_rect.y0 + margin - note_rect.y0)
-        note_rect.y0 = page_rect.y0 + margin
-    if note_rect.y1 > page_rect.y1 - margin:
-        note_rect.y0 = note_rect.y0 - (note_rect.y1 - (page_rect.y1 - margin))
-        note_rect.y1 = page_rect.y1 - margin
-
-    return note_rect
-
-
-def draw_callout(page, target_rect, note_rect, border_color):
-    target_x = (target_rect.x0 + target_rect.x1) / 2
-    if note_rect.y1 <= target_rect.y0:
-        base_y = note_rect.y1
-        target_y = target_rect.y0
-    else:
-        base_y = note_rect.y0
-        target_y = target_rect.y1
-
-    base_x = min(max(target_x, note_rect.x0 + 10), note_rect.x1 - 10)
-    page.draw_line((base_x, base_y), (target_x, target_y), color=border_color, width=1)
-
-
 def wrap_text(draw, text, font, max_width):
     lines = []
     for raw_line in text.split("\n"):
@@ -106,29 +58,92 @@ def wrap_text(draw, text, font, max_width):
     return lines
 
 
-def render_note_image(text, width_pt, height_pt, font_path):
+SEVERITY_CONFIG = {
+    "critical": ("重大", (211, 47, 47)),
+    "warning": ("注意", (237, 108, 2)),
+    "info": ("情報", (2, 136, 209)),
+}
+
+
+def render_review_page(items, page_width_pt, page_height_pt, font_path):
     scale = 2
-    width_px = max(1, int(width_pt * scale))
-    height_px = max(1, int(height_pt * scale))
-    margin = 6 * scale
-    font_size = 8 * scale
-    if font_path.lower().endswith(".ttc"):
-        font = ImageFont.truetype(font_path, font_size, index=0)
-    else:
-        font = ImageFont.truetype(font_path, font_size)
+    w = int(page_width_pt * scale)
+    h = int(page_height_pt * scale)
+    margin = int(30 * scale)
 
-    image = Image.new("RGB", (width_px, height_px), (255, 250, 230))
+    image = Image.new("RGB", (w, h), (255, 255, 255))
     draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, width_px - 1, height_px - 1], outline=(150, 110, 40), width=2)
 
-    max_width = width_px - margin * 2
-    lines = wrap_text(draw, text, font, max_width)
+    title_font_size = int(16 * scale)
+    body_font_size = int(9 * scale)
+    small_font_size = int(8 * scale)
+
+    def load_font(size):
+        if font_path.lower().endswith(".ttc"):
+            return ImageFont.truetype(font_path, size, index=0)
+        return ImageFont.truetype(font_path, size)
+
+    title_font = load_font(title_font_size)
+    body_font = load_font(body_font_size)
+    small_font = load_font(small_font_size)
+
     y = margin
-    for line in lines:
-        if y + font_size > height_px - margin:
+
+    # Title
+    draw.text((margin, y), "指摘事項", font=title_font, fill=(20, 20, 20))
+    y += int(title_font_size * 1.6)
+    draw.line([(margin, y), (w - margin, y)], fill=(180, 180, 180), width=2 * scale // 2)
+    y += int(12 * scale // 2)
+
+    for item in items:
+        if y > h - margin * 2:
             break
-        draw.text((margin, y), line, font=font, fill=(40, 30, 20))
-        y += int(font_size * 1.2)
+
+        severity = item.get("severity", "info")
+        label, chip_color = SEVERITY_CONFIG.get(severity, ("情報", (2, 136, 209)))
+        page_num = item.get("page_number", 1)
+        message = item.get("message", "")
+        suggestion = item.get("suggestion", "")
+
+        # Severity chip
+        chip_pad_x = int(8 * scale // 2)
+        chip_pad_y = int(4 * scale // 2)
+        chip_text_bbox = draw.textbbox((0, 0), label, font=small_font)
+        chip_w = chip_text_bbox[2] - chip_text_bbox[0] + chip_pad_x * 2
+        chip_h = chip_text_bbox[3] - chip_text_bbox[1] + chip_pad_y * 2
+        draw.rounded_rectangle(
+            [margin, y, margin + chip_w, y + chip_h],
+            radius=int(3 * scale // 2),
+            fill=chip_color,
+        )
+        draw.text((margin + chip_pad_x, y + chip_pad_y), label, font=small_font, fill=(255, 255, 255))
+
+        # Page number
+        page_text = f"ページ {page_num}"
+        draw.text((margin + chip_w + int(8 * scale // 2), y + chip_pad_y), page_text, font=small_font, fill=(120, 120, 120))
+        y += chip_h + int(6 * scale // 2)
+
+        # Message
+        msg_lines = wrap_text(draw, message, body_font, w - margin * 2)
+        for line in msg_lines:
+            if y > h - margin:
+                break
+            draw.text((margin, y), line, font=body_font, fill=(20, 20, 20))
+            y += int(body_font_size * 1.35)
+
+        # Suggestion
+        if suggestion:
+            sug_prefix = "改善案: "
+            sug_lines = wrap_text(draw, sug_prefix + suggestion, small_font, w - margin * 2 - int(16 * scale // 2))
+            for i, line in enumerate(sug_lines):
+                if y > h - margin:
+                    break
+                draw.text((margin + int(16 * scale // 2), y), line, font=small_font, fill=(80, 80, 80))
+                y += int(small_font_size * 1.35)
+
+        y += int(10 * scale // 2)
+        draw.line([(margin, y), (w - margin, y)], fill=(220, 220, 220), width=1)
+        y += int(10 * scale // 2)
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -154,13 +169,13 @@ def main():
     font_path = resolve_japanese_font()
     if not font_path:
         raise SystemExit("Japanese font not found. Set ANNOTATION_FONT_PATH.")
+
+    # Highlight referenced text blocks on each page (no callout)
     for item in items:
         page_number = item.get("page_number", 1)
         bbox = item.get("bbox", [20, 20, 200, 60])
         page_width = item.get("page_width")
         page_height = item.get("page_height")
-        message = item.get("message", "")
-        suggestion = item.get("suggestion", "")
 
         page_index = max(0, page_number - 1)
         if page_index >= len(doc):
@@ -187,17 +202,28 @@ def main():
                     rect.x1 * page_rect.width,
                     rect.y1 * page_rect.height,
                 )
-        page.draw_rect(rect, color=(1, 0.2, 0.2), width=1.5)
-        page.draw_rect(rect, color=(1, 0.9, 0.6), fill=(1, 0.9, 0.6), width=0)
 
-        note = message
-        if suggestion:
-            note = f"{message}\n改善案: {suggestion}"
-        if note:
-            note_rect = resolve_note_rect(page_rect, rect)
-            draw_callout(page, rect, note_rect, (0.6, 0.4, 0.1))
-            note_image = render_note_image(note, note_rect.width, note_rect.height, font_path)
-            page.insert_image(note_rect, stream=note_image, keep_proportion=False, overlay=True)
+        severity = item.get("severity", "info")
+        _, chip_color = SEVERITY_CONFIG.get(severity, ("情報", (2, 136, 209)))
+        border_color = tuple(c / 255.0 for c in chip_color)
+        fill_color = tuple(c / 255.0 * 0.15 + 0.85 for c in chip_color)
+
+        page.draw_rect(rect, color=border_color, fill=fill_color, width=1.5)
+
+    # Add review summary page at the end
+    if items:
+        # Use same width as first page, A4 height
+        first_page = doc[0]
+        page_w = first_page.rect.width
+        page_h = first_page.rect.height
+        new_page = doc.new_page(-1, width=page_w, height=page_h)
+        review_image = render_review_page(items, page_w, page_h, font_path)
+        new_page.insert_image(
+            fitz.Rect(0, 0, page_w, page_h),
+            stream=review_image,
+            keep_proportion=False,
+            overlay=True,
+        )
 
     doc.save(args.output, garbage=4, deflate=True)
     doc.close()

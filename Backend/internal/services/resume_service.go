@@ -357,6 +357,7 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 			"bbox":        bboxInfo.BBox,
 			"page_width":  bboxInfo.PageWidth,
 			"page_height": bboxInfo.PageHeight,
+			"severity":    item.Severity,
 			"message":     item.Message,
 			"suggestion":  item.Suggestion,
 		})
