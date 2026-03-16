@@ -12,6 +12,8 @@ import {
   LinearProgress,
   Alert,
   Divider,
+  Card,
+  CardContent,
   List,
   ListItem,
   ListItemText,
@@ -34,6 +36,12 @@ type ReviewResult = {
     summary: string
   }
   items: ReviewItem[]
+}
+
+const severityConfig: Record<string, { color: 'error' | 'warning' | 'info'; label: string; borderColor: string }> = {
+  critical: { color: 'error', label: '重大', borderColor: '#d32f2f' },
+  warning: { color: 'warning', label: '注意', borderColor: '#ed6c02' },
+  info: { color: 'info', label: '情報', borderColor: '#0288d1' },
 }
 
 export default function ResumePage() {
@@ -290,6 +298,67 @@ export default function ResumePage() {
             <Alert severity="error">{reviewError}</Alert>
           )}
           {review && (
+            <Alert severity="success">レビューが完了しました。下の指摘事項ページをご確認ください。</Alert>
+          )}
+        </Stack>
+      </Paper>
+
+      {error && (
+        <Alert severity="error" sx={{ mt: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {review && (
+        <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            指摘事項
+          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              総合スコア: {review.review.score} / 100
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              {review.review.summary}
+            </Typography>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+          <Stack spacing={2}>
+            {review.items.map((item) => {
+              const config = severityConfig[item.severity] ?? { color: 'default' as const, label: item.severity, borderColor: '#9e9e9e' }
+              return (
+                <Card
+                  key={item.id}
+                  variant="outlined"
+                  sx={{ borderLeft: 4, borderLeftColor: config.borderColor }}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Chip label={config.label} color={config.color} size="small" />
+                      <Typography variant="caption" color="text.secondary">
+                        ページ {item.page_number}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body1" fontWeight="medium">
+                      {item.message}
+                    </Typography>
+                    {item.suggestion && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        改善案: {item.suggestion}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </Stack>
+          <Box sx={{ mt: 3 }}>
+            <Button variant="outlined" onClick={handleDownload}>
+              注釈PDFをダウンロード
+            </Button>
+          </Box>
+        </Paper>
+      )}
             <>
               <Divider />
               <Typography variant="subtitle1">スコア: {review.review.score}</Typography>

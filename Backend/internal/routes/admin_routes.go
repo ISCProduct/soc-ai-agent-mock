@@ -21,6 +21,7 @@ func SetupAdminRoutes(
 	}
 
 	http.HandleFunc("/api/admin/companies", auth(adminCompanyController.ListOrCreate))
+	// http.HandleFunc("/api/admin/companies/search-gbiz", auth(adminCompanyController.SearchGBizRoute)) // gBizINFO停止中
 	http.HandleFunc("/api/admin/companies/", auth(adminCompanyController.Detail))
 	http.HandleFunc("/api/admin/crawl-sources", auth(adminCrawlController.Sources))
 	http.HandleFunc("/api/admin/crawl-sources/", auth(adminCrawlController.SourceDetail))

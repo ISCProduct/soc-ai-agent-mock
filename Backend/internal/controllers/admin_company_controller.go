@@ -214,6 +214,11 @@ func (c *AdminCompanyController) update(w http.ResponseWriter, r *http.Request, 
 	json.NewEncoder(w).Encode(company)
 }
 
+// SearchGBizRoute は専用ルート /api/admin/companies/search-gbiz 用のパブリックハンドラ
+func (c *AdminCompanyController) SearchGBizRoute(w http.ResponseWriter, r *http.Request) {
+	c.searchGBiz(w, r)
+}
+
 func (c *AdminCompanyController) searchGBiz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
