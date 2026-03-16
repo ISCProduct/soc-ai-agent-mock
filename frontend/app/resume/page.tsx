@@ -14,6 +14,9 @@ import {
   Divider,
   Card,
   CardContent,
+  List,
+  ListItem,
+  ListItemText,
   Chip,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
@@ -278,6 +281,92 @@ export default function ResumePage() {
           )}
           {review && (
             <Alert severity="success">レビューが完了しました。下の指摘事項ページをご確認ください。</Alert>
+          )}
+        </Stack>
+      </Paper>
+
+      {error && (
+        <Alert severity="error" sx={{ mt: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {review && (
+        <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            指摘事項
+          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              総合スコア: {review.review.score} / 100
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              {review.review.summary}
+            </Typography>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+          <Stack spacing={2}>
+            {review.items.map((item) => {
+              const config = severityConfig[item.severity] ?? { color: 'default' as const, label: item.severity, borderColor: '#9e9e9e' }
+              return (
+                <Card
+                  key={item.id}
+                  variant="outlined"
+                  sx={{ borderLeft: 4, borderLeftColor: config.borderColor }}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Chip label={config.label} color={config.color} size="small" />
+                      <Typography variant="caption" color="text.secondary">
+                        ページ {item.page_number}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body1" fontWeight="medium">
+                      {item.message}
+                    </Typography>
+                    {item.suggestion && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        改善案: {item.suggestion}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </Stack>
+          <Box sx={{ mt: 3 }}>
+            <Button variant="outlined" onClick={handleDownload}>
+              注釈PDFをダウンロード
+            </Button>
+          </Box>
+        </Paper>
+      )}
+            <>
+              <Divider />
+              <Typography variant="subtitle1">スコア: {review.review.score}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {review.review.summary}
+              </Typography>
+              <List dense>
+                {review.items.map((item) => (
+                  <ListItem key={item.id} alignItems="flex-start" sx={{ gap: 1 }}>
+                    <Chip
+                      label={severityLabel(item.severity)}
+                      color={severityColor(item.severity)}
+                      size="small"
+                      sx={{ mt: 0.5, flexShrink: 0 }}
+                    />
+                    <ListItemText
+                      primary={`P${item.page_number} - ${item.message}`}
+                      secondary={item.suggestion ? `改善案: ${item.suggestion}` : undefined}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+              <Button variant="outlined" onClick={handleDownload}>
+                注釈PDFをダウンロード
+              </Button>
+            </>
           )}
         </Stack>
       </Paper>
