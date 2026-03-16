@@ -40,7 +40,7 @@ func (s *GBizInfoService) SearchByName(ctx context.Context, name string) ([]GBiz
 		return nil, errors.New("gbizinfo service is not configured")
 	}
 	var resp gbizProfileResponse
-	path := "/v1/hojin?name=" + url.QueryEscape(name) + "&limit=10"
+	path := "/v2/hojin?name=" + url.QueryEscape(name) + "&limit=10"
 	if err := s.get(ctx, path, &resp); err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func (s *GBizInfoService) syncFailed(company *models.Company, message string) (*
 
 func (s *GBizInfoService) fetchProfile(ctx context.Context, corporateNumber string) (*models.GBizCompanyProfile, error) {
 	var resp gbizProfileResponse
-	if err := s.get(ctx, "/v1/hojin/"+corporateNumber, &resp); err != nil {
+	if err := s.get(ctx, "/v2/hojin/"+corporateNumber, &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -206,7 +206,7 @@ func (s *GBizInfoService) fetchProfile(ctx context.Context, corporateNumber stri
 
 func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizProcurement, error) {
 	var resp gbizProcurementResponse
-	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/procurement", &resp); err != nil {
+	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/procurement", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -215,7 +215,6 @@ func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber
 	info := resp.HojinInfos[0]
 	rows := make([]models.GBizProcurement, 0, len(info.Procurement))
 	for _, item := range info.Procurement {
-		joint, _ := json.Marshal(item.JointSignatures)
 		rows = append(rows, models.GBizProcurement{
 			CompanyID:             companyID,
 			CorporateNumber:       corporateNumber,
@@ -223,7 +222,6 @@ func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber
 			DateOfOrder:           item.DateOfOrder,
 			Amount:                item.Amount,
 			GovernmentDepartments: strings.TrimSpace(item.GovernmentDepartments),
-			JointSignatures:       string(joint),
 		})
 	}
 	return rows, nil
@@ -231,7 +229,7 @@ func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber
 
 func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizSubsidy, error) {
 	var resp gbizSubsidyResponse
-	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/subsidy", &resp); err != nil {
+	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/subsidy", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -240,7 +238,6 @@ func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber st
 	info := resp.HojinInfos[0]
 	rows := make([]models.GBizSubsidy, 0, len(info.Subsidy))
 	for _, item := range info.Subsidy {
-		joint, _ := json.Marshal(item.JointSignatures)
 		rows = append(rows, models.GBizSubsidy{
 			CompanyID:             companyID,
 			CorporateNumber:       corporateNumber,
@@ -250,8 +247,6 @@ func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber st
 			GovernmentDepartments: strings.TrimSpace(item.GovernmentDepartments),
 			Target:                strings.TrimSpace(item.Target),
 			Note:                  strings.TrimSpace(item.Note),
-			SubsidyResource:       strings.TrimSpace(item.SubsidyResource),
-			JointSignatures:       string(joint),
 		})
 	}
 	return rows, nil
@@ -259,7 +254,7 @@ func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber st
 
 func (s *GBizInfoService) fetchFinances(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizFinance, error) {
 	var resp gbizFinanceResponse
-	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/finance", &resp); err != nil {
+	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/finance", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -285,7 +280,7 @@ func (s *GBizInfoService) fetchFinances(ctx context.Context, corporateNumber str
 
 func (s *GBizInfoService) fetchWorkplace(ctx context.Context, corporateNumber string, companyID uint) (*models.GBizWorkplace, error) {
 	var resp gbizWorkplaceResponse
-	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/workplace", &resp); err != nil {
+	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/workplace", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -436,11 +431,10 @@ type gbizProfileResponse struct {
 type gbizProcurementResponse struct {
 	HojinInfos []struct {
 		Procurement []struct {
-			Amount                int64    `json:"amount"`
-			DateOfOrder           string   `json:"date_of_order"`
-			GovernmentDepartments string   `json:"government_departments"`
-			JointSignatures       []string `json:"joint_signatures"`
-			Title                 string   `json:"title"`
+			Amount                int64  `json:"amount"`
+			DateOfOrder           string `json:"date_of_order"`
+			GovernmentDepartments string `json:"government_departments"`
+			Title                 string `json:"title"`
 		} `json:"procurement"`
 	} `json:"hojin-infos"`
 }
@@ -448,14 +442,12 @@ type gbizProcurementResponse struct {
 type gbizSubsidyResponse struct {
 	HojinInfos []struct {
 		Subsidy []struct {
-			Amount                string   `json:"amount"`
-			DateOfApproval        string   `json:"date_of_approval"`
-			GovernmentDepartments string   `json:"government_departments"`
-			JointSignatures       []string `json:"joint_signatures"`
-			Note                  string   `json:"note"`
-			SubsidyResource       string   `json:"subsidy_resource"`
-			Target                string   `json:"target"`
-			Title                 string   `json:"title"`
+			Amount                string `json:"amount"`
+			DateOfApproval        string `json:"date_of_approval"`
+			GovernmentDepartments string `json:"government_departments"`
+			Note                  string `json:"note"`
+			Target                string `json:"target"`
+			Title                 string `json:"title"`
 		} `json:"subsidy"`
 	} `json:"hojin-infos"`
 }

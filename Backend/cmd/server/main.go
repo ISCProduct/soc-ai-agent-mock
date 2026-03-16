@@ -75,11 +75,9 @@ func main() {
 	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
 	conversationContextRepo := repositories.NewConversationContextRepository(db)
 	companyRepo := repositories.NewCompanyRepository(db)
-	gbizRepo := repositories.NewGBizInfoRepository(db)
 	crawlRepo := repositories.NewCrawlRepository(db)
 	popularityRepo := repositories.NewCompanyPopularityRepository(db)
 	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
-	relationRepo := repositories.NewCompanyRelationRepository(db)
 	auditLogRepo := repositories.NewAuditLogRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 	resumeRepo := repositories.NewResumeRepository(db)
@@ -100,7 +98,6 @@ func main() {
 	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	auditLogService := services.NewAuditLogService(auditLogRepo)
-	gbizService := services.NewGBizInfoService(cfg, gbizRepo, companyRepo, relationRepo)
 	analysisService := services.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
@@ -120,7 +117,7 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := &controllers.CompanyRelationController{DB: db}
-	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizService)
+	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
@@ -129,7 +126,6 @@ func main() {
 		Mynavi:     scraper.NewMynaviScraper(""),
 		Rikunabi:   scraper.NewRikunabiScraper(),
 		CareerTasu: scraper.NewCareerTasuScraper(),
-		GBiz:       scraper.NewGBizClient(cfg.GBizInfoBaseURL, cfg.GBizInfoToken),
 		Threshold:  0.75,
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, auditLogService)
