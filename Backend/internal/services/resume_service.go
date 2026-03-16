@@ -360,6 +360,7 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 			"severity":    item.Severity,
 			"message":     item.Message,
 			"suggestion":  item.Suggestion,
+			"severity":    item.Severity,
 		})
 	}
 
