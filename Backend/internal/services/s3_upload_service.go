@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -16,6 +17,7 @@ import (
 type S3UploadService struct {
 	bucket   string
 	region   string
+	client   *s3.Client
 	uploader *manager.Uploader
 }
 
@@ -42,6 +44,7 @@ func NewS3UploadService() (*S3UploadService, error) {
 	return &S3UploadService{
 		bucket:   bucket,
 		region:   region,
+		client:   client,
 		uploader: uploader,
 	}, nil
 }
@@ -60,4 +63,19 @@ func (s *S3UploadService) UploadFile(ctx context.Context, key, mimeType string, 
 
 	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
 	return key, url, nil
+}
+
+// PresignGetURL returns a presigned GET URL valid for the given duration.
+// key is the S3 object key (DriveFileID stored in InterviewVideo).
+func (s *S3UploadService) PresignGetURL(ctx context.Context, key string, expires time.Duration) (string, error) {
+	presignClient := s3.NewPresignClient(s.client)
+	req, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: aws.String("inline"),
+	}, s3.WithPresignExpires(expires))
+	if err != nil {
+		return "", fmt.Errorf("presign: %w", err)
+	}
+	return req.URL, nil
 }
