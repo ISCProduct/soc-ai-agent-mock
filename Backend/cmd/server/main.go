@@ -141,13 +141,14 @@ func main() {
 	videoRepo := repositories.NewInterviewVideoRepository(db)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService)
+	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, userRepo)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, userRepo)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)

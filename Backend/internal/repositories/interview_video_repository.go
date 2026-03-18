@@ -36,3 +36,12 @@ func (r *InterviewVideoRepository) FindBySessionID(ctx context.Context, sessionI
 	err := r.db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&videos).Error
 	return videos, err
 }
+
+func (r *InterviewVideoRepository) FindByID(ctx context.Context, id uint) (*models.InterviewVideo, error) {
+	var video models.InterviewVideo
+	err := r.db.WithContext(ctx).First(&video, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &video, nil
+}

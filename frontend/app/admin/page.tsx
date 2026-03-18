@@ -163,6 +163,22 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                面接管理
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                全ユーザーの面接セッションと録画動画を確認できます。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/interviews">
+                面接管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       <Stack spacing={2}>
