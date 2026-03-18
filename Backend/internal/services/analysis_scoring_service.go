@@ -61,6 +61,7 @@ type AnalysisSummary struct {
 	Recommendations       AnalysisRecommendations `json:"recommendations"`
 	JobSuitabilityComment string                  `json:"job_suitability_comment,omitempty"`
 	SuggestedRoles        []JobSuitabilityRole    `json:"suggested_roles,omitempty"`
+	ScoreComment          string                  `json:"score_comment,omitempty"`
 }
 
 type FutureAnalyzer interface {
@@ -167,40 +168,44 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 	scores, _ := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
 	jobSuitabilityComment, suggestedRoles := buildJobSuitabilityComment(scores)
 
+	allScores := AnalysisScores{
+		JobScore:      jobScore,
+		InterestScore: interestScore,
+		AptitudeScore: aptitudeScore,
+		FutureScore:   futureScore,
+		FinalScore:    finalScore,
+	}
+	scoreComment := buildScoreComment(allScores)
+
 	return &AnalysisSummary{
-		Scores: AnalysisScores{
-			JobScore:      jobScore,
-			InterestScore: interestScore,
-			AptitudeScore: aptitudeScore,
-			FutureScore:   futureScore,
-			FinalScore:    finalScore,
-		},
+		Scores:                allScores,
 		Progress:              progress,
 		AptitudeAxes:          axes,
 		FutureSignals:         signals,
 		Recommendations:       recommendations,
 		JobSuitabilityComment: jobSuitabilityComment,
 		SuggestedRoles:        suggestedRoles,
+		ScoreComment:          scoreComment,
 	}, nil
 }
 
 func (s *AnalysisScoringService) calculateJobScore(userID uint, sessionID string) (float64, error) {
 	if s.userEmbeddingRepo == nil || s.jobEmbeddingRepo == nil || s.conversationContextRepo == nil {
-		return 0, nil
+		return s.phaseCompletionScore("job_analysis", userID, sessionID), nil
 	}
 
 	jobCategoryID, err := s.conversationContextRepo.GetJobCategoryID(sessionID)
 	if err != nil || jobCategoryID == 0 {
-		return 0, nil
+		return s.phaseCompletionScore("job_analysis", userID, sessionID), nil
 	}
 
 	userEmbedding, err := s.userEmbeddingRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
-		return 0, nil
+		return s.phaseCompletionScore("job_analysis", userID, sessionID), nil
 	}
 	jobEmbedding, err := s.jobEmbeddingRepo.FindByJobCategoryID(jobCategoryID)
 	if err != nil {
-		return 0, nil
+		return s.phaseCompletionScore("job_analysis", userID, sessionID), nil
 	}
 
 	userVector, err := parseEmbedding(userEmbedding.Embedding)
@@ -215,14 +220,30 @@ func (s *AnalysisScoringService) calculateJobScore(userID uint, sessionID string
 	return cosineSimilarity(userVector, jobVector), nil
 }
 
+func (s *AnalysisScoringService) phaseCompletionScore(phaseName string, userID uint, sessionID string) float64 {
+	if s.progressRepo == nil {
+		return 0
+	}
+	records, err := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	if err != nil {
+		return 0
+	}
+	for _, record := range records {
+		if record.Phase != nil && record.Phase.PhaseName == phaseName {
+			return clamp01(record.CompletionScore / 100.0)
+		}
+	}
+	return 0
+}
+
 func (s *AnalysisScoringService) calculateInterestScore(userID uint, sessionID string) float64 {
 	if s.matchRepo == nil {
-		return 0
+		return s.phaseCompletionScore("interest_analysis", userID, sessionID)
 	}
 
 	stats, err := s.matchRepo.GetMatchStatistics(userID, sessionID)
 	if err != nil {
-		return 0
+		return s.phaseCompletionScore("interest_analysis", userID, sessionID)
 	}
 
 	totalMatches, _ := stats["total_matches"].(int64)
@@ -233,7 +254,7 @@ func (s *AnalysisScoringService) calculateInterestScore(userID uint, sessionID s
 	raw := (float64(viewedCount) * 0.7) + (float64(appliedCount) * 1.0) + (float64(favoritedCount) * 1.2)
 	max := float64(totalMatches) * (0.7 + 1.0 + 1.2)
 	if max <= 0 {
-		return 0
+		return s.phaseCompletionScore("interest_analysis", userID, sessionID)
 	}
 	return clamp01(raw / max)
 }
@@ -471,6 +492,70 @@ func buildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobS
 	)
 
 	return comment, roles
+}
+
+func buildScoreComment(scores AnalysisScores) string {
+	var parts []string
+
+	jobPct := scores.JobScore * 100
+	switch {
+	case jobPct >= 80:
+		parts = append(parts, "志望職種への適性が高い")
+	case jobPct >= 50:
+		parts = append(parts, "志望職種への適性が一定水準ある")
+	case jobPct > 0:
+		parts = append(parts, "志望職種への理解をさらに深めると良い")
+	}
+
+	interestPct := scores.InterestScore * 100
+	switch {
+	case interestPct >= 80:
+		parts = append(parts, "企業への関心・意欲が非常に高い")
+	case interestPct >= 50:
+		parts = append(parts, "企業への関心・意欲が示されている")
+	case interestPct > 0:
+		parts = append(parts, "企業への関心をさらに深めると良い")
+	}
+
+	aptitudePct := scores.AptitudeScore * 100
+	switch {
+	case aptitudePct >= 80:
+		parts = append(parts, "多面的な適性が高く評価されている")
+	case aptitudePct >= 50:
+		parts = append(parts, "複数の適性が確認されている")
+	case aptitudePct > 0:
+		parts = append(parts, "適性をさらに伸ばす余地がある")
+	}
+
+	futurePct := scores.FutureScore * 100
+	switch {
+	case futurePct >= 80:
+		parts = append(parts, "将来への展望・成長意欲が強く感じられる")
+	case futurePct >= 50:
+		parts = append(parts, "将来志向が見られる")
+	case futurePct > 0:
+		parts = append(parts, "将来ビジョンをより明確にするとよい")
+	}
+
+	if len(parts) == 0 {
+		return "チャット診断を完了させることで、より詳細な分析コメントが表示されます。"
+	}
+
+	comment := strings.Join(parts, "、") + "。"
+
+	finalPct := scores.FinalScore * 100
+	switch {
+	case finalPct >= 80:
+		comment += "総合的に非常に優れたプロフィールです。自信を持って就活に臨んでください。"
+	case finalPct >= 60:
+		comment += "総合的にバランスの取れたプロフィールです。強みをアピールしながら就活を進めましょう。"
+	case finalPct >= 40:
+		comment += "いくつかの強みが見られます。診断をさらに深めることでより精度の高いマッチングが可能です。"
+	default:
+		comment += "診断をさらに進めることで、あなたにぴったりの企業が見つかります。"
+	}
+
+	return comment
 }
 
 func parseEmbedding(raw string) ([]float64, error) {
