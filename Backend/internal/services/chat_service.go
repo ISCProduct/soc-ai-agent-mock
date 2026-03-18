@@ -296,11 +296,6 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
 
-	// 2.7. フェーズ進捗を更新（有効な回答のみ）
-	if err := s.updatePhaseProgress(currentPhase, true); err != nil {
-		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
-	}
-
 	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
 		fmt.Printf("Warning: failed to get phases: %v\n", err)
@@ -366,14 +361,18 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// 3. ユーザーの回答から重み係数を判定・更新
-	// 選択肢の回答かどうかをチェック
+	// 3. ユーザーの回答から重み係数を判定・更新し、結果に応じてフェーズ進捗を更新
+	// スコア更新に成功した場合のみ有効回答としてカウントする
 	trimmedAnswer := strings.TrimSpace(req.Message)
 	fmt.Printf("[ProcessChat] Checking if choice answer: '%s' (len=%d)\n", trimmedAnswer, len(trimmedAnswer))
+	scoreUpdated := false
 	if len(trimmedAnswer) <= 3 && s.isChoiceAnswer(trimmedAnswer) {
 		fmt.Printf("[ProcessChat] Processing as choice answer\n")
 		// 選択肢回答の場合は直接スコアを計算
 		if err := s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID); err != nil {
 			fmt.Printf("Warning: failed to process choice answer: %v\n", err)
+		} else {
+			scoreUpdated = true
 		}
 	} else {
 		fmt.Printf("[ProcessChat] Processing as text answer\n")
@@ -381,7 +380,14 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		if err := s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID); err != nil {
 			// ログに記録するが、処理は継続
 			fmt.Printf("Warning: failed to update weights: %v\n", err)
+		} else {
+			scoreUpdated = true
 		}
+	}
+
+	// フェーズ進捗を更新（スコア更新成功時のみ有効カウント）
+	if err := s.updatePhaseProgress(currentPhase, scoreUpdated); err != nil {
+		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
 	}
 
 	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
@@ -2614,7 +2620,7 @@ func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress,
 		progress.InvalidAnswers++
 	}
 
-	progress.CompletionScore = phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
+	progress.CompletionScore = phaseCompletionScore(progress.ValidAnswers, progress.Phase)
 	newIsCompleted := isPhaseComplete(progress.ValidAnswers, progress.Phase)
 	if newIsCompleted {
 		if !progress.IsCompleted {
@@ -2664,7 +2670,7 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 		}
 
 		if progress, exists := progressMap[phase.ID]; exists {
-			completionScore := phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
+			completionScore := phaseCompletionScore(progress.ValidAnswers, &phase)
 			pp.QuestionsAsked = progress.QuestionsAsked
 			pp.ValidAnswers = progress.ValidAnswers
 			pp.CompletionScore = completionScore
@@ -2681,11 +2687,18 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 	return result, current, nil
 }
 
-func phaseCompletionScore(validAnswers, questionsAsked int) float64 {
-	if questionsAsked <= 0 {
+func phaseCompletionScore(validAnswers int, phase *models.AnalysisPhase) float64 {
+	if phase == nil {
 		return 0
 	}
-	score := (float64(validAnswers) / float64(questionsAsked)) * 100
+	required := phase.MaxQuestions
+	if required <= 0 {
+		required = phase.MinQuestions
+	}
+	if required <= 0 {
+		return 0
+	}
+	score := (float64(validAnswers) / float64(required)) * 100
 	if score > 100 {
 		return 100
 	}
