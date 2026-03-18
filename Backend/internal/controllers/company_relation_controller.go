@@ -3,9 +3,14 @@ package controllers
 import (
 	"Backend/internal/models"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -231,4 +236,71 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// WebSearchCompanies Wikipedia APIを使用して企業をWEB検索
+func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		http.Error(w, "q parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	searchURL := fmt.Sprintf(
+		"https://ja.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&srlimit=8&format=json&origin=*",
+		url.QueryEscape(query),
+	)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(searchURL)
+	if err != nil {
+		http.Error(w, "Web search failed", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read search response", http.StatusInternalServerError)
+		return
+	}
+
+	var wikiResp struct {
+		Query struct {
+			Search []struct {
+				Title   string `json:"title"`
+				Snippet string `json:"snippet"`
+			} `json:"search"`
+		} `json:"query"`
+	}
+	if err := json.Unmarshal(body, &wikiResp); err != nil {
+		http.Error(w, "Failed to parse search response", http.StatusInternalServerError)
+		return
+	}
+
+	htmlTagRe := regexp.MustCompile(`<[^>]+>`)
+
+	type WebSearchResult struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Source      string `json:"source"`
+	}
+
+	results := make([]WebSearchResult, 0, len(wikiResp.Query.Search))
+	for _, item := range wikiResp.Query.Search {
+		snippet := htmlTagRe.ReplaceAllString(item.Snippet, "")
+		results = append(results, WebSearchResult{
+			Name:        item.Title,
+			Description: snippet,
+			Source:      "Wikipedia",
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
 }
