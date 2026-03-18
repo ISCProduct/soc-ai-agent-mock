@@ -164,24 +164,6 @@ export default function ResumePage() {
     }
   }
 
-  const severityColor = (severity: string): 'error' | 'warning' | 'info' | 'default' => {
-    switch (severity) {
-      case 'critical': return 'error'
-      case 'warning': return 'warning'
-      case 'info': return 'info'
-      default: return 'default'
-    }
-  }
-
-  const severityLabel = (severity: string): string => {
-    switch (severity) {
-      case 'critical': return '重大'
-      case 'warning': return '注意'
-      case 'info': return '情報'
-      default: return severity
-    }
-  }
-
   const handleDownload = () => {
     if (!documentId) {
       setReviewError('document_id が未設定です')
@@ -388,6 +370,57 @@ export default function ResumePage() {
           )}
         </Stack>
       </Paper>
+
+      {review && (
+        <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            指摘事項
+          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              総合スコア: {review.review.score} / 100
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              {review.review.summary}
+            </Typography>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+          <Stack spacing={2}>
+            {review.items.map((item) => {
+              const config = severityConfig[item.severity] ?? { color: 'default' as const, label: item.severity, borderColor: '#9e9e9e' }
+              return (
+                <Card
+                  key={item.id}
+                  variant="outlined"
+                  sx={{ borderLeft: 4, borderLeftColor: config.borderColor }}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Chip label={config.label} color={config.color} size="small" />
+                      <Typography variant="caption" color="text.secondary">
+                        ページ {item.page_number}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body1" fontWeight="medium">
+                      {item.message}
+                    </Typography>
+                    {item.suggestion && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        改善案: {item.suggestion}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </Stack>
+          <Box sx={{ mt: 3 }}>
+            <Button variant="outlined" onClick={handleDownload}>
+              注釈PDFをダウンロード
+            </Button>
+          </Box>
+        </Paper>
+      )}
     </Box>
   )
 }
