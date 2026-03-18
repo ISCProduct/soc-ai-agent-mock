@@ -617,4 +617,3 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		TotalCategories:     10,
 	}, nil
 }
-
