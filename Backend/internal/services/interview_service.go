@@ -169,6 +169,20 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 	return s.utterRepo.Create(utter)
 }
 
+// ListAllSessionsAdmin lists all interview sessions without performing a user-level admin check.
+// The caller (admin middleware) is responsible for ensuring only admins can invoke this.
+func (s *InterviewService) ListAllSessionsAdmin(limit int, offset int) ([]InterviewSessionResponse, int64, error) {
+	total, err := s.sessionRepo.CountAll()
+	if err != nil {
+		return nil, 0, err
+	}
+	sessions, err := s.sessionRepo.ListAll(limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return toSessionResponses(sessions), total, nil
+}
+
 func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset int) ([]InterviewSessionResponse, int64, error) {
 	if all {
 		user, err := s.userRepo.GetUserByID(userID)

@@ -64,7 +64,6 @@ export default function AdminInterviewsPage() {
       const params = new URLSearchParams({
         page: String(page + 1),
         limit: String(rowsPerPage),
-        admin_user_id: String(admin.id),
       })
       const response = await fetch(`/api/admin/interviews?${params}`, {
         headers: { 'X-Admin-Email': admin.email || '' },

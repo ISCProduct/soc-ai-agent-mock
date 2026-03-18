@@ -296,11 +296,6 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
 
-	// 2.7. フェーズ進捗を更新（有効な回答のみ）
-	if err := s.updatePhaseProgress(currentPhase, true); err != nil {
-		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
-	}
-
 	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
 		fmt.Printf("Warning: failed to get phases: %v\n", err)
@@ -366,14 +361,18 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// 3. ユーザーの回答から重み係数を判定・更新
-	// 選択肢の回答かどうかをチェック
+	// 3. ユーザーの回答から重み係数を判定・更新し、結果に応じてフェーズ進捗を更新
+	// スコア更新に成功した場合のみ有効回答としてカウントする
 	trimmedAnswer := strings.TrimSpace(req.Message)
 	fmt.Printf("[ProcessChat] Checking if choice answer: '%s' (len=%d)\n", trimmedAnswer, len(trimmedAnswer))
+	scoreUpdated := false
 	if len(trimmedAnswer) <= 3 && s.isChoiceAnswer(trimmedAnswer) {
 		fmt.Printf("[ProcessChat] Processing as choice answer\n")
 		// 選択肢回答の場合は直接スコアを計算
 		if err := s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID); err != nil {
 			fmt.Printf("Warning: failed to process choice answer: %v\n", err)
+		} else {
+			scoreUpdated = true
 		}
 	} else {
 		fmt.Printf("[ProcessChat] Processing as text answer\n")
@@ -381,7 +380,14 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		if err := s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID); err != nil {
 			// ログに記録するが、処理は継続
 			fmt.Printf("Warning: failed to update weights: %v\n", err)
+		} else {
+			scoreUpdated = true
 		}
+	}
+
+	// フェーズ進捗を更新（スコア更新成功時のみ有効カウント）
+	if err := s.updatePhaseProgress(currentPhase, scoreUpdated); err != nil {
+		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
 	}
 
 	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
@@ -2242,8 +2248,12 @@ func isQuestion(text string) bool {
 	if strings.ContainsAny(txt, "？?") {
 		return true
 	}
-	// 日本語の疑問語が含まれるか確認
-	questionWords := []string{"どのよう", "どの", "どう", "なぜ", "なに", "何", "いつ", "どれ", "どこ", "どなた", "どんな", "〜ますか", "ますか", "でしょうか"}
+	// 日本語の疑問語・依頼表現が含まれるか確認
+	questionWords := []string{
+		"どのよう", "どの", "どう", "なぜ", "なに", "何", "いつ", "どれ", "どこ", "どなた", "どんな",
+		"〜ますか", "ますか", "でしょうか",
+		"教えてください", "教えて下さい", "聞かせてください", "話してください",
+	}
 	for _, w := range questionWords {
 		if strings.Contains(txt, w) {
 			return true
@@ -2393,6 +2403,12 @@ func isTextBasedQuestion(question string) bool {
 // AI判定が失敗した場合の適度に柔軟なフォールバック
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
+
+	// 十分に長い回答（15文字超）は内容があるとみなし有効
+	if len([]rune(a)) > 15 {
+		fmt.Printf("[Validation] Fallback: Long answer accepted as valid (%d chars)\n", len([]rune(a)))
+		return true
+	}
 
 	// 職種選択系の質問は短い回答（単語）を許容
 	isJobSelection := isJobSelectionQuestionText(question)
@@ -2557,16 +2573,23 @@ func isJobSelectionQuestionText(text string) bool {
 	return false
 }
 
-// containsGreeting: 簡易的な雑談フラグ（挨拶・感謝・了承など）
+// containsGreeting: 短い回答が挨拶・了承のみで構成されているかを判定する。
+// 長い回答（15文字超）は本文があるとみなし false を返す。
 func containsGreeting(s string) bool {
-	l := strings.ToLower(s)
-	greetings := []string{
+	trimmed := strings.TrimSpace(s)
+	// 長い回答は挨拶のみとはみなさない
+	if len([]rune(trimmed)) > 15 {
+		return false
+	}
+	l := strings.ToLower(trimmed)
+	// 完全一致で判定するパターン（誤検知を防ぐため部分一致不使用）
+	exactGreetings := []string{
 		"こんにちは", "こんばんは", "おはよう", "ありがとう", "ありがとうございます",
 		"了解", "わかった", "わかりました", "よろしく", "ありがとうござい",
-		"はい", "いいえ", "ok", "オッケー",
+		"ok", "オッケー",
 	}
-	for _, g := range greetings {
-		if strings.Contains(l, g) {
+	for _, g := range exactGreetings {
+		if l == strings.ToLower(g) {
 			return true
 		}
 	}
@@ -2614,7 +2637,7 @@ func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress,
 		progress.InvalidAnswers++
 	}
 
-	progress.CompletionScore = phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
+	progress.CompletionScore = phaseCompletionScore(progress.ValidAnswers, progress.Phase)
 	newIsCompleted := isPhaseComplete(progress.ValidAnswers, progress.Phase)
 	if newIsCompleted {
 		if !progress.IsCompleted {
@@ -2664,7 +2687,7 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 		}
 
 		if progress, exists := progressMap[phase.ID]; exists {
-			completionScore := phaseCompletionScore(progress.ValidAnswers, progress.QuestionsAsked)
+			completionScore := phaseCompletionScore(progress.ValidAnswers, &phase)
 			pp.QuestionsAsked = progress.QuestionsAsked
 			pp.ValidAnswers = progress.ValidAnswers
 			pp.CompletionScore = completionScore
@@ -2681,11 +2704,18 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 	return result, current, nil
 }
 
-func phaseCompletionScore(validAnswers, questionsAsked int) float64 {
-	if questionsAsked <= 0 {
+func phaseCompletionScore(validAnswers int, phase *models.AnalysisPhase) float64 {
+	if phase == nil {
 		return 0
 	}
-	score := (float64(validAnswers) / float64(questionsAsked)) * 100
+	required := phase.MaxQuestions
+	if required <= 0 {
+		required = phase.MinQuestions
+	}
+	if required <= 0 {
+		return 0
+	}
+	score := (float64(validAnswers) / float64(required)) * 100
 	if score > 100 {
 		return 100
 	}

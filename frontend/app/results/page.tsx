@@ -137,6 +137,8 @@ function ResultsContent() {
   const [isProvisional, setIsProvisional] = useState(false)
   const [jobSuitabilityComment, setJobSuitabilityComment] = useState<string>('')
   const [suggestedRoles, setSuggestedRoles] = useState<{ title: string; reason: string }[]>([])
+  const [scoreComment, setScoreComment] = useState<string>('')
+  const [analysisScores, setAnalysisScores] = useState<{ job: number; interest: number; aptitude: number; future: number } | null>(null)
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [detailTab, setDetailTab] = useState(0)
   const [relations, setRelations] = useState<CapitalRelation[]>([])
@@ -179,6 +181,17 @@ function ResultsContent() {
             }
             if (data?.suggested_roles) {
               setSuggestedRoles(data.suggested_roles)
+            }
+            if (data?.score_comment) {
+              setScoreComment(data.score_comment)
+            }
+            if (data?.scores) {
+              setAnalysisScores({
+                job: Math.round((data.scores.job_score || 0) * 100),
+                interest: Math.round((data.scores.interest_score || 0) * 100),
+                aptitude: Math.round((data.scores.aptitude_score || 0) * 100),
+                future: Math.round((data.scores.future_score || 0) * 100),
+              })
             }
           })
           .catch(() => {/* サイレント失敗 */})
@@ -914,6 +927,37 @@ function ResultsContent() {
         backgroundColor: '#fafafa',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
+          {/* 4分析スコアと総合コメント */}
+          {(scoreComment || analysisScores) && (
+            <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'primary.light', backgroundColor: '#f0f4ff' }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight="bold" gutterBottom>
+                  📊 4分析スコア
+                </Typography>
+                {analysisScores && (
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mb: 2 }}>
+                    {[
+                      { label: '職種分析', value: analysisScores.job },
+                      { label: '興味分析', value: analysisScores.interest },
+                      { label: '適性分析', value: analysisScores.aptitude },
+                      { label: '将来分析', value: analysisScores.future },
+                    ].map(({ label, value }) => (
+                      <Box key={label} sx={{ textAlign: 'center', bgcolor: '#fff', borderRadius: 2, p: 1.5, boxShadow: 1 }}>
+                        <Typography variant="caption" color="text.secondary">{label}</Typography>
+                        <Typography variant="h5" fontWeight="bold" color="primary.main">{value}%</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+                {scoreComment && (
+                  <Typography variant="body2" color="text.secondary">
+                    {scoreComment}
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* 職種適性コメントセクション */}
           {(jobSuitabilityComment || suggestedRoles.length > 0) && (
             <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'success.light', backgroundColor: '#f0faf0' }}>
