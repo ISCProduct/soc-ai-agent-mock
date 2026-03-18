@@ -2248,8 +2248,12 @@ func isQuestion(text string) bool {
 	if strings.ContainsAny(txt, "？?") {
 		return true
 	}
-	// 日本語の疑問語が含まれるか確認
-	questionWords := []string{"どのよう", "どの", "どう", "なぜ", "なに", "何", "いつ", "どれ", "どこ", "どなた", "どんな", "〜ますか", "ますか", "でしょうか"}
+	// 日本語の疑問語・依頼表現が含まれるか確認
+	questionWords := []string{
+		"どのよう", "どの", "どう", "なぜ", "なに", "何", "いつ", "どれ", "どこ", "どなた", "どんな",
+		"〜ますか", "ますか", "でしょうか",
+		"教えてください", "教えて下さい", "聞かせてください", "話してください",
+	}
 	for _, w := range questionWords {
 		if strings.Contains(txt, w) {
 			return true
@@ -2399,6 +2403,12 @@ func isTextBasedQuestion(question string) bool {
 // AI判定が失敗した場合の適度に柔軟なフォールバック
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
+
+	// 十分に長い回答（15文字超）は内容があるとみなし有効
+	if len([]rune(a)) > 15 {
+		fmt.Printf("[Validation] Fallback: Long answer accepted as valid (%d chars)\n", len([]rune(a)))
+		return true
+	}
 
 	// 職種選択系の質問は短い回答（単語）を許容
 	isJobSelection := isJobSelectionQuestionText(question)
@@ -2563,16 +2573,23 @@ func isJobSelectionQuestionText(text string) bool {
 	return false
 }
 
-// containsGreeting: 簡易的な雑談フラグ（挨拶・感謝・了承など）
+// containsGreeting: 短い回答が挨拶・了承のみで構成されているかを判定する。
+// 長い回答（15文字超）は本文があるとみなし false を返す。
 func containsGreeting(s string) bool {
-	l := strings.ToLower(s)
-	greetings := []string{
+	trimmed := strings.TrimSpace(s)
+	// 長い回答は挨拶のみとはみなさない
+	if len([]rune(trimmed)) > 15 {
+		return false
+	}
+	l := strings.ToLower(trimmed)
+	// 完全一致で判定するパターン（誤検知を防ぐため部分一致不使用）
+	exactGreetings := []string{
 		"こんにちは", "こんばんは", "おはよう", "ありがとう", "ありがとうございます",
 		"了解", "わかった", "わかりました", "よろしく", "ありがとうござい",
-		"はい", "いいえ", "ok", "オッケー",
+		"ok", "オッケー",
 	}
-	for _, g := range greetings {
-		if strings.Contains(l, g) {
+	for _, g := range exactGreetings {
+		if l == strings.ToLower(g) {
 			return true
 		}
 	}
