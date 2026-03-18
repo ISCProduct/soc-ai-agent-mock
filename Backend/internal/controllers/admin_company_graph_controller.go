@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,13 +22,14 @@ import (
 
 // AdminCompanyGraphController exposes the multi-source scraping pipeline via HTTP.
 type AdminCompanyGraphController struct {
-	pipeline    *scraper.Pipeline
-	companyRepo *repositories.CompanyRepository
-	audit       *services.AuditLogService
+	pipeline     *scraper.Pipeline
+	companyRepo  *repositories.CompanyRepository
+	relationRepo *repositories.CompanyRelationRepository
+	audit        *services.AuditLogService
 }
 
-func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo *repositories.CompanyRepository, audit *services.AuditLogService) *AdminCompanyGraphController {
-	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, audit: audit}
+func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo *repositories.CompanyRepository, relationRepo *repositories.CompanyRelationRepository, audit *services.AuditLogService) *AdminCompanyGraphController {
+	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit}
 }
 
 // TargetYear handles GET /api/admin/company-graph/target-year
@@ -114,14 +117,18 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 	// DB 保存
 	saved, skipped := c.upsertNodes(nodes)
 
+	// スクレイピングで取得した関連会社・取引先を company_relations に同期
+	relSynced := c.syncRelationsFromNodes(nodes)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"ok":          true,
-		"logs":        logs,
-		"nodes":       len(nodes),
-		"saved":       saved,
-		"skipped":     skipped,
-		"target_year": targetYear,
+		"ok":            true,
+		"logs":          logs,
+		"nodes":         len(nodes),
+		"saved":         saved,
+		"skipped":       skipped,
+		"target_year":   targetYear,
+		"relations_synced": relSynced,
 	})
 
 	adminEmail := r.Header.Get("X-Admin-Email")
@@ -179,6 +186,90 @@ func (c *AdminCompanyGraphController) crawlViaService(
 		return nil, result.Logs, result.TargetYear, errors.New(result.Error)
 	}
 	return result.Nodes, result.Logs, result.TargetYear, nil
+}
+
+var reRelationSep = regexp.MustCompile(`[,、，\r\n]+`)
+var reRelationNoise = regexp.MustCompile(`(?:など|等|・$|その他.*$)`)
+
+// parseCompanyNames はスクレイピングで得た関係テキストを企業名リストに分解する。
+func parseCompanyNames(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	parts := reRelationSep.Split(text, -1)
+	var names []string
+	for _, p := range parts {
+		p = reRelationNoise.ReplaceAllString(strings.TrimSpace(p), "")
+		p = strings.TrimSpace(p)
+		if len([]rune(p)) >= 2 {
+			names = append(names, p)
+		}
+	}
+	return names
+}
+
+// syncRelationsFromNodes はスクレイピングノードの関連会社・取引先テキストを解析し、
+// company_relations テーブルへ Upsert する。
+// 戻り値: 登録成功した関係レコード件数
+func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*scraper.CompanyNode) int {
+	if c.relationRepo == nil || c.companyRepo == nil {
+		return 0
+	}
+	now := time.Now()
+	synced := 0
+
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		// 法人番号で元企業を特定（UNKNOWN_プレフィックスは名寄せ未済のためスキップ）
+		if strings.HasPrefix(node.CorporateNumber, "UNKNOWN_") {
+			continue
+		}
+		fromCompany, err := c.companyRepo.FindByCorporateNumber(node.CorporateNumber)
+		if err != nil || fromCompany == nil {
+			continue
+		}
+
+		type relEntry struct {
+			text         string
+			relationType string
+		}
+		entries := []relEntry{
+			{node.RelatedCompaniesText, "capital_affiliate"},
+			{node.BusinessPartnersText, "business_partner"},
+		}
+
+		for _, entry := range entries {
+			names := parseCompanyNames(entry.text)
+			for _, name := range names {
+				// 既存企業を名前で検索、なければプロビジョナル企業として登録
+				toCompany, err := c.companyRepo.FindByName(name)
+				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				if toCompany == nil {
+					toCompany = &models.Company{
+						Name:            name,
+						SourceType:      "scraping",
+						SourceFetchedAt: &now,
+						IsProvisional:   true,
+						DataStatus:      "draft",
+					}
+					if err := c.companyRepo.Create(toCompany); err != nil {
+						continue
+					}
+				}
+				desc := fmt.Sprintf("scraping:%s", node.OfficialName)
+				if err := c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc); err != nil {
+					continue
+				}
+				synced++
+			}
+		}
+	}
+	return synced
 }
 
 // upsertNodes は CompanyNode を companies テーブルへ upsert する。

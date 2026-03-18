@@ -81,6 +81,7 @@ func main() {
 	auditLogRepo := repositories.NewAuditLogRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 	resumeRepo := repositories.NewResumeRepository(db)
+	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
 	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
 	jobEmbeddingRepo := repositories.NewJobCategoryEmbeddingRepository(db)
 	interviewSessionRepo := repositories.NewInterviewSessionRepository(db)
@@ -128,7 +129,7 @@ func main() {
 		CareerTasu: scraper.NewCareerTasuScraper(),
 		Threshold:  0.75,
 	}
-	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, auditLogService)
+	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)

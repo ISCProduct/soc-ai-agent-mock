@@ -35,16 +35,18 @@ type RawCompany struct {
 
 // CompanyNode is a normalized company record keyed by corporate number.
 type CompanyNode struct {
-	CorporateNumber  string
-	OfficialName     string
-	SourceURLs       []string
-	BusinessCategory string
-	Address          string
-	Website          string
-	Capital          string
-	Employees        string
-	MatchScore       float64
-	NeedsReview      bool
+	CorporateNumber      string
+	OfficialName         string
+	SourceURLs           []string
+	BusinessCategory     string
+	Address              string
+	Website              string
+	Capital              string
+	Employees            string
+	MatchScore           float64
+	NeedsReview          bool
+	RelatedCompaniesText string // 関連会社テキスト（スクレイピング由来）
+	BusinessPartnersText string // 主要取引先テキスト（スクレイピング由来）
 }
 
 // RunRequest parameterises a pipeline run.

@@ -136,29 +136,33 @@ func (c *GBizClient) Match(ctx context.Context, raw *RawCompany, threshold float
 
 	needsReview := bestScore < threshold
 	return &CompanyNode{
-		CorporateNumber:  best.CorporateNumber,
-		OfficialName:     best.Name,
-		SourceURLs:       []string{raw.SourceURL},
-		BusinessCategory: best.BusinessSummary.MajorClassificationName,
-		Address:          best.Location,
-		Website:          best.CompanyURL,
-		Capital:          raw.Capital,
-		Employees:        raw.Employees,
-		MatchScore:       bestScore,
-		NeedsReview:      needsReview,
+		CorporateNumber:      best.CorporateNumber,
+		OfficialName:         best.Name,
+		SourceURLs:           []string{raw.SourceURL},
+		BusinessCategory:     best.BusinessSummary.MajorClassificationName,
+		Address:              best.Location,
+		Website:              best.CompanyURL,
+		Capital:              raw.Capital,
+		Employees:            raw.Employees,
+		MatchScore:           bestScore,
+		NeedsReview:          needsReview,
+		RelatedCompaniesText: raw.RelatedCompaniesText,
+		BusinessPartnersText: raw.BusinessPartnersText,
 	}, nil
 }
 
 func fallbackNode(raw *RawCompany) *CompanyNode {
 	return &CompanyNode{
-		CorporateNumber: "UNKNOWN_" + NormalizeName(raw.RawName),
-		OfficialName:    raw.RawName,
-		SourceURLs:      []string{raw.SourceURL},
-		Address:         raw.Address,
-		Website:         raw.Website,
-		Capital:         raw.Capital,
-		Employees:       raw.Employees,
-		MatchScore:      0,
-		NeedsReview:     true,
+		CorporateNumber:      "UNKNOWN_" + NormalizeName(raw.RawName),
+		OfficialName:         raw.RawName,
+		SourceURLs:           []string{raw.SourceURL},
+		Address:              raw.Address,
+		Website:              raw.Website,
+		Capital:              raw.Capital,
+		Employees:            raw.Employees,
+		MatchScore:           0,
+		NeedsReview:          true,
+		RelatedCompaniesText: raw.RelatedCompaniesText,
+		BusinessPartnersText: raw.BusinessPartnersText,
 	}
 }
