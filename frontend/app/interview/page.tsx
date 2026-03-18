@@ -66,15 +66,22 @@ type Position = {
   department: string
   icon: string
   questions: number
+  category: 'general' | 'sier'
 }
 
 const POSITIONS: Position[] = [
-  { id: 'engineer', title: 'ソフトウェアエンジニア', department: 'Engineering', icon: '💻', questions: 8 },
-  { id: 'designer', title: 'プロダクトデザイナー', department: 'Design', icon: '🎨', questions: 7 },
-  { id: 'sales', title: '営業職', department: 'Sales', icon: '📈', questions: 7 },
-  { id: 'marketing', title: 'マーケティング', department: 'Growth', icon: '📣', questions: 6 },
-  { id: 'pm', title: 'プロダクトマネージャー', department: 'Product', icon: '🧭', questions: 9 },
-  { id: 'data', title: 'データアナリスト', department: 'Data', icon: '📊', questions: 7 },
+  { id: 'engineer', title: 'ソフトウェアエンジニア', department: 'Engineering', icon: '💻', questions: 8, category: 'general' },
+  { id: 'designer', title: 'プロダクトデザイナー', department: 'Design', icon: '🎨', questions: 7, category: 'general' },
+  { id: 'sales', title: '営業職', department: 'Sales', icon: '📈', questions: 7, category: 'general' },
+  { id: 'marketing', title: 'マーケティング', department: 'Growth', icon: '📣', questions: 6, category: 'general' },
+  { id: 'pm', title: 'プロダクトマネージャー', department: 'Product', icon: '🧭', questions: 9, category: 'general' },
+  { id: 'data', title: 'データアナリスト', department: 'Data', icon: '📊', questions: 7, category: 'general' },
+  { id: 'se', title: 'システムエンジニア（SE）', department: 'SIer / Development', icon: '🖥️', questions: 8, category: 'sier' },
+  { id: 'infra', title: 'インフラエンジニア', department: 'SIer / Infrastructure', icon: '🔧', questions: 7, category: 'sier' },
+  { id: 'it_consultant', title: 'ITコンサルタント', department: 'SIer / Consulting', icon: '📋', questions: 8, category: 'sier' },
+  { id: 'pmo', title: 'PMO（プロジェクト管理）', department: 'SIer / PMO', icon: '📅', questions: 7, category: 'sier' },
+  { id: 'network', title: 'ネットワークエンジニア', department: 'SIer / Network', icon: '🌐', questions: 7, category: 'sier' },
+  { id: 'qa', title: 'テスト・品質保証（QA）', department: 'SIer / QA', icon: '✅', questions: 6, category: 'sier' },
 ]
 
 export default function InterviewPage() {
@@ -110,6 +117,7 @@ export default function InterviewPage() {
   const [companySourceTab, setCompanySourceTab] = useState<'db' | 'web'>('db')
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
   const [webSearchLoading, setWebSearchLoading] = useState(false)
+  const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
 
   const [isRecording, _setIsRecording] = useState(false)
   const [turnPending, _setTurnPending] = useState(false)
@@ -784,8 +792,43 @@ export default function InterviewPage() {
                 {/* Position section */}
                 <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0' }}>
                   <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2 }}>応募職種</Typography>
+
+                  {/* Category tab */}
+                  <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setPositionCategory('general')
+                        if (selectedPosition.category === 'sier') setSelectedPosition(POSITIONS[0])
+                      }}
+                      sx={{
+                        px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
+                        bgcolor: positionCategory === 'general' ? PRIMARY : '#f1f5f9',
+                        color: positionCategory === 'general' ? '#fff' : '#475569',
+                        '&:hover': { bgcolor: positionCategory === 'general' ? `${PRIMARY}e0` : '#e2e8f0' },
+                      }}
+                    >
+                      💼 一般・IT職種
+                    </Button>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setPositionCategory('sier')
+                        if (selectedPosition.category === 'general') setSelectedPosition(POSITIONS.find(p => p.category === 'sier')!)
+                      }}
+                      sx={{
+                        px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
+                        bgcolor: positionCategory === 'sier' ? PRIMARY : '#f1f5f9',
+                        color: positionCategory === 'sier' ? '#fff' : '#475569',
+                        '&:hover': { bgcolor: positionCategory === 'sier' ? `${PRIMARY}e0` : '#e2e8f0' },
+                      }}
+                    >
+                      🏗️ SIer職種
+                    </Button>
+                  </Box>
+
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-                    {POSITIONS.map(pos => {
+                    {POSITIONS.filter(p => p.category === positionCategory).map(pos => {
                       const isSelected = selectedPosition.id === pos.id
                       return (
                         <Box
