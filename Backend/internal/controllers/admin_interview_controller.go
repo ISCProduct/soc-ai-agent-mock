@@ -37,13 +37,6 @@ func (c *AdminInterviewController) ListSessions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Use admin user ID from header to verify admin privilege via service
-	adminEmail := r.Header.Get("X-Admin-Email")
-	if adminEmail == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	page := parseIntQuery(r, "page", 1)
 	limit := parseIntQuery(r, "limit", 20)
 	if limit > 100 {
@@ -51,21 +44,9 @@ func (c *AdminInterviewController) ListSessions(w http.ResponseWriter, r *http.R
 	}
 	offset := (page - 1) * limit
 
-	// adminUserID is resolved inside interviewService.ListSessions via userRepo
-	adminUserIDStr := r.URL.Query().Get("admin_user_id")
-	adminUserID, err := strconv.ParseUint(adminUserIDStr, 10, 32)
-	if err != nil || adminUserID == 0 {
-		http.Error(w, "admin_user_id is required", http.StatusBadRequest)
-		return
-	}
-
-	sessions, total, err := c.interviewService.ListSessions(uint(adminUserID), true, limit, offset)
+	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
-		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
