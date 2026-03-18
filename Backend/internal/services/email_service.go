@@ -41,18 +41,20 @@ type EmailReportCompany struct {
 }
 
 type emailReportData struct {
-	UserName         string
-	SessionID        string
-	SentAt           string
-	JobScore         string
-	InterestScore    string
-	AptitudeScore    string
-	FutureScore      string
-	JobProgress      string
-	InterestProgress string
-	AptitudeProgress string
-	FutureProgress   string
-	Companies        []EmailReportCompany
+	UserName              string
+	SessionID             string
+	SentAt                string
+	JobScore              string
+	InterestScore         string
+	AptitudeScore         string
+	FutureScore           string
+	JobProgress           string
+	InterestProgress      string
+	AptitudeProgress      string
+	FutureProgress        string
+	Companies             []EmailReportCompany
+	ScoreComment          string
+	JobSuitabilityComment string
 }
 
 const reportEmailTemplate = `<!DOCTYPE html>
@@ -114,6 +116,20 @@ const reportEmailTemplate = `<!DOCTYPE html>
     </div>
   </div>
 
+  {{if .ScoreComment}}
+  <div class="section">
+    <h2>💬 分析コメント</h2>
+    <p style="font-size:13px;line-height:1.8;color:#333;margin:0;">{{.ScoreComment}}</p>
+  </div>
+  {{end}}
+
+  {{if .JobSuitabilityComment}}
+  <div class="section">
+    <h2>💼 職種適性コメント</h2>
+    <p style="font-size:13px;line-height:1.8;color:#333;margin:0;">{{.JobSuitabilityComment}}</p>
+  </div>
+  {{end}}
+
   <div class="section">
     <h2>📈 フェーズ進捗</h2>
     <div class="phase-item">
@@ -166,18 +182,20 @@ func (s *EmailService) SendAnalysisReport(user *models.User, summary *AnalysisSu
 	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
 
 	data := emailReportData{
-		UserName:         user.Name,
-		SessionID:        sessionID,
-		SentAt:           time.Now().In(jst).Format("2006年01月02日 15:04"),
-		JobScore:         fmt.Sprintf("%.0f", summary.Scores.JobScore*100),
-		InterestScore:    fmt.Sprintf("%.0f", summary.Scores.InterestScore*100),
-		AptitudeScore:    fmt.Sprintf("%.0f", summary.Scores.AptitudeScore*100),
-		FutureScore:      fmt.Sprintf("%.0f", summary.Scores.FutureScore*100),
-		JobProgress:      pct(summary.Progress.Job),
-		InterestProgress: pct(summary.Progress.Interest),
-		AptitudeProgress: pct(summary.Progress.Aptitude),
-		FutureProgress:   pct(summary.Progress.Future),
-		Companies:        companies,
+		UserName:              user.Name,
+		SessionID:             sessionID,
+		SentAt:                time.Now().In(jst).Format("2006年01月02日 15:04"),
+		JobScore:              fmt.Sprintf("%.0f", summary.Scores.JobScore*100),
+		InterestScore:         fmt.Sprintf("%.0f", summary.Scores.InterestScore*100),
+		AptitudeScore:         fmt.Sprintf("%.0f", summary.Scores.AptitudeScore*100),
+		FutureScore:           fmt.Sprintf("%.0f", summary.Scores.FutureScore*100),
+		JobProgress:           pct(summary.Progress.Job),
+		InterestProgress:      pct(summary.Progress.Interest),
+		AptitudeProgress:      pct(summary.Progress.Aptitude),
+		FutureProgress:        pct(summary.Progress.Future),
+		Companies:             companies,
+		ScoreComment:          summary.ScoreComment,
+		JobSuitabilityComment: summary.JobSuitabilityComment,
 	}
 
 	var buf bytes.Buffer
