@@ -5,7 +5,9 @@ import (
 	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -46,12 +48,19 @@ type AnalysisRecommendations struct {
 	TopCompanies  []CompanyRecommendation  `json:"top_companies"`
 }
 
+type JobSuitabilityRole struct {
+	Title  string `json:"title"`
+	Reason string `json:"reason"`
+}
+
 type AnalysisSummary struct {
-	Scores          AnalysisScores          `json:"scores"`
-	Progress        AnalysisProgress        `json:"progress"`
-	AptitudeAxes    []AxisScore             `json:"aptitude_axes"`
-	FutureSignals   []string                `json:"future_signals,omitempty"`
-	Recommendations AnalysisRecommendations `json:"recommendations"`
+	Scores                AnalysisScores          `json:"scores"`
+	Progress              AnalysisProgress        `json:"progress"`
+	AptitudeAxes          []AxisScore             `json:"aptitude_axes"`
+	FutureSignals         []string                `json:"future_signals,omitempty"`
+	Recommendations       AnalysisRecommendations `json:"recommendations"`
+	JobSuitabilityComment string                  `json:"job_suitability_comment,omitempty"`
+	SuggestedRoles        []JobSuitabilityRole    `json:"suggested_roles,omitempty"`
 }
 
 type FutureAnalyzer interface {
@@ -155,6 +164,9 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 	progress := s.calculateProgress(userID, sessionID)
 	recommendations := s.buildRecommendations(userID, sessionID)
 
+	scores, _ := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
+	jobSuitabilityComment, suggestedRoles := buildJobSuitabilityComment(scores)
+
 	return &AnalysisSummary{
 		Scores: AnalysisScores{
 			JobScore:      jobScore,
@@ -163,10 +175,12 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 			FutureScore:   futureScore,
 			FinalScore:    finalScore,
 		},
-		Progress:        progress,
-		AptitudeAxes:    axes,
-		FutureSignals:   signals,
-		Recommendations: recommendations,
+		Progress:              progress,
+		AptitudeAxes:          axes,
+		FutureSignals:         signals,
+		Recommendations:       recommendations,
+		JobSuitabilityComment: jobSuitabilityComment,
+		SuggestedRoles:        suggestedRoles,
 	}, nil
 }
 
@@ -338,6 +352,125 @@ func (s *AnalysisScoringService) buildRecommendations(userID uint, sessionID str
 		})
 	}
 	return recommendations
+}
+
+func buildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobSuitabilityRole) {
+	if len(scores) == 0 {
+		return "", nil
+	}
+
+	scoreMap := make(map[string]int)
+	for _, s := range scores {
+		scoreMap[s.WeightCategory] = s.Score
+	}
+
+	type roleCandidate struct {
+		title  string
+		reason string
+		weight int
+	}
+
+	roleMappings := []struct {
+		categories []string
+		role       roleCandidate
+	}{
+		{
+			categories: []string{"リーダーシップ志向", "成長志向", "チャレンジ志向"},
+			role: roleCandidate{
+				title:  "プロジェクトマネージャー / テックリード",
+				reason: "リーダーシップと成長志向を活かし、チームを率いながら技術的課題を解決する役割に向いています",
+			},
+		},
+		{
+			categories: []string{"リーダーシップ志向", "技術志向"},
+			role: roleCandidate{
+				title:  "エンジニアリングマネージャー",
+				reason: "技術的な深い理解とリーダーシップを組み合わせ、エンジニアチームを牽引できます",
+			},
+		},
+		{
+			categories: []string{"チームワーク志向", "コミュニケーション力"},
+			role: roleCandidate{
+				title:  "ITコンサルタント / スクラムマスター",
+				reason: "コミュニケーション力と協調性を活かし、チーム横断的な課題解決や調整役として活躍できます",
+			},
+		},
+		{
+			categories: []string{"技術志向", "細部志向"},
+			role: roleCandidate{
+				title:  "バックエンド / インフラエンジニア",
+				reason: "技術への探求心と細部へのこだわりを活かした、品質重視の技術職に適しています",
+			},
+		},
+		{
+			categories: []string{"成長志向", "チャレンジ志向"},
+			role: roleCandidate{
+				title:  "スタートアップ / 新規事業エンジニア",
+				reason: "変化への適応力と挑戦意欲を活かし、スピード感ある環境で大きな裁量を持って働けます",
+			},
+		},
+	}
+
+	type scoredRole struct {
+		role  roleCandidate
+		total int
+	}
+	var candidates []scoredRole
+	for _, mapping := range roleMappings {
+		total := 0
+		matched := 0
+		for _, cat := range mapping.categories {
+			if v, ok := scoreMap[cat]; ok && v > 0 {
+				total += v
+				matched++
+			}
+		}
+		if matched >= 1 {
+			candidates = append(candidates, scoredRole{role: mapping.role, total: total})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].total > candidates[j].total
+	})
+
+	maxRoles := 3
+	if len(candidates) < maxRoles {
+		maxRoles = len(candidates)
+	}
+	if maxRoles == 0 {
+		return "", nil
+	}
+
+	var roles []JobSuitabilityRole
+	for i := 0; i < maxRoles; i++ {
+		roles = append(roles, JobSuitabilityRole{
+			Title:  candidates[i].role.title,
+			Reason: candidates[i].role.reason,
+		})
+	}
+
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].Score > scores[j].Score
+	})
+	var strengthParts []string
+	for i := 0; i < len(scores) && i < 3; i++ {
+		if scores[i].Score > 0 {
+			strengthParts = append(strengthParts, strings.TrimSuffix(scores[i].WeightCategory, "志向"))
+		}
+	}
+
+	strengthText := "複数の強み"
+	if len(strengthParts) > 0 {
+		strengthText = strings.Join(strengthParts, "・")
+	}
+
+	comment := fmt.Sprintf(
+		"分析結果から、あなたには%sという強みがあります。これらの特性から、以下の職種が特に向いていると考えられます。",
+		strengthText,
+	)
+
+	return comment, roles
 }
 
 func parseEmbedding(raw string) ([]float64, error) {
