@@ -135,6 +135,8 @@ function ResultsContent() {
   const [empty, setEmpty] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isProvisional, setIsProvisional] = useState(false)
+  const [jobSuitabilityComment, setJobSuitabilityComment] = useState<string>('')
+  const [suggestedRoles, setSuggestedRoles] = useState<{ title: string; reason: string }[]>([])
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [detailTab, setDetailTab] = useState(0)
   const [relations, setRelations] = useState<CapitalRelation[]>([])
@@ -167,6 +169,20 @@ function ResultsContent() {
       try {
         setLoading(true)
         console.log('[Results] Fetching recommendations for user:', userId, 'session:', sessionId)
+
+        // 職種適性コメントを取得
+        fetch(`/api/chat/analysis?user_id=${userId}&session_id=${sessionId}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data?.job_suitability_comment) {
+              setJobSuitabilityComment(data.job_suitability_comment)
+            }
+            if (data?.suggested_roles) {
+              setSuggestedRoles(data.suggested_roles)
+            }
+          })
+          .catch(() => {/* サイレント失敗 */})
+
         const response = await fetch(`/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=10`)
         
         if (!response.ok) {
@@ -898,6 +914,34 @@ function ResultsContent() {
         backgroundColor: '#fafafa',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
+          {/* 職種適性コメントセクション */}
+          {(jobSuitabilityComment || suggestedRoles.length > 0) && (
+            <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'success.light', backgroundColor: '#f0faf0' }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight="bold" gutterBottom>
+                  🎯 あなたに向いている職種
+                </Typography>
+                {jobSuitabilityComment && (
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {jobSuitabilityComment}
+                  </Typography>
+                )}
+                {suggestedRoles.length > 0 && (
+                  <Stack spacing={1.5}>
+                    {suggestedRoles.map((role, i) => (
+                      <Box key={i} sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+                        <Chip label={role.title} color="success" variant="filled" sx={{ fontWeight: 'bold', flexShrink: 0 }} />
+                        <Typography variant="body2" color="text.secondary" sx={{ pt: 0.5 }}>
+                          → {role.reason}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Stack spacing={3}>
             {companies.map((company, index) => (
               <Card 
