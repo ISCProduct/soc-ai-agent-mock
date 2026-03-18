@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services"
 	"encoding/json"
 	"errors"
@@ -13,12 +13,12 @@ import (
 )
 
 type AdminCompanyController struct {
-	repo  *repositories.CompanyRepository
+	repo  repository.CompanyRepository
 	audit *services.AuditLogService
 	gbiz  *services.GBizInfoService
 }
 
-func NewAdminCompanyController(repo *repositories.CompanyRepository, audit *services.AuditLogService, gbiz *services.GBizInfoService) *AdminCompanyController {
+func NewAdminCompanyController(repo repository.CompanyRepository, audit *services.AuditLogService, gbiz *services.GBizInfoService) *AdminCompanyController {
 	return &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 }
 

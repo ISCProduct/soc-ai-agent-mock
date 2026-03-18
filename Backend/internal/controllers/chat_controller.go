@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services"
 	"encoding/json"
 	"fmt"
@@ -16,13 +16,13 @@ type ChatController struct {
 	chatService     *services.ChatService
 	matchingService *services.MatchingService
 	analysisService *services.AnalysisScoringService
-	userRepo        *repositories.UserRepository
+	userRepo        repository.UserRepository
 	emailService    *services.EmailService
 }
 
 const minEvaluatedCategoriesForFinal = 4
 
-func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService, userRepo *repositories.UserRepository, emailService *services.EmailService) *ChatController {
+func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService, userRepo repository.UserRepository, emailService *services.EmailService) *ChatController {
 	return &ChatController{
 		chatService:     chatService,
 		matchingService: matchingService,

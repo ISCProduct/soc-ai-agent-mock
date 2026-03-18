@@ -13,6 +13,7 @@ type CompanyRepository interface {
 	Create(company *models.Company) error
 	Update(company *models.Company) error
 	FindJobPositionByCompanyAndTitle(companyID uint, title string) (*models.CompanyJobPosition, error)
+	FindJobPositionByID(id uint) (*models.CompanyJobPosition, error)
 	CreateJobPosition(position *models.CompanyJobPosition) error
 	UpdateJobPosition(position *models.CompanyJobPosition) error
 	FindJobPositionsByCompany(companyID uint) ([]models.CompanyJobPosition, error)

@@ -62,32 +62,39 @@ func main() {
 	// OAuth設定読み込み
 	oauthConfig := config.LoadOAuthConfig()
 
-	// リポジトリ層の初期化
+	// ── インフラ層: リポジトリ (domain/repository インターフェースを実装) ──────────
+	// ユーザー・認証
 	userRepo := repositories.NewUserRepository(db)
+	pendingRegistrationRepo := repositories.NewPendingRegistrationRepository(db)
+	// チャット・分析
 	questionWeightRepo := repositories.NewQuestionWeightRepository(db)
 	chatMessageRepo := repositories.NewChatMessageRepository(db)
 	userWeightScoreRepo := repositories.NewUserWeightScoreRepository(db)
 	aiGeneratedQuestionRepo := repositories.NewAIGeneratedQuestionRepository(db)
 	predefinedQuestionRepo := repositories.NewPredefinedQuestionRepository(db)
-	jobCategoryRepo := repositories.NewJobCategoryRepository(db)
 	phaseRepo := repositories.NewAnalysisPhaseRepository(db)
 	progressRepo := repositories.NewUserAnalysisProgressRepository(db)
 	sessionValidationRepo := repositories.NewSessionValidationRepository(db)
 	conversationContextRepo := repositories.NewConversationContextRepository(db)
+	// 職種・企業
+	jobCategoryRepo := repositories.NewJobCategoryRepository(db)
 	companyRepo := repositories.NewCompanyRepository(db)
 	crawlRepo := repositories.NewCrawlRepository(db)
 	popularityRepo := repositories.NewCompanyPopularityRepository(db)
 	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
-	auditLogRepo := repositories.NewAuditLogRepository(db)
-	matchRepo := repositories.NewUserCompanyMatchRepository(db)
-	resumeRepo := repositories.NewResumeRepository(db)
 	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
+	matchRepo := repositories.NewUserCompanyMatchRepository(db)
+	// 埋め込み・マッチング
 	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
 	jobEmbeddingRepo := repositories.NewJobCategoryEmbeddingRepository(db)
+	// 面接
 	interviewSessionRepo := repositories.NewInterviewSessionRepository(db)
 	interviewUtteranceRepo := repositories.NewInterviewUtteranceRepository(db)
 	interviewReportRepo := repositories.NewInterviewReportRepository(db)
-	pendingRegistrationRepo := repositories.NewPendingRegistrationRepository(db)
+	videoRepo := repositories.NewInterviewVideoRepository(db)
+	// その他
+	resumeRepo := repositories.NewResumeRepository(db)
+	auditLogRepo := repositories.NewAuditLogRepository(db)
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
@@ -138,7 +145,6 @@ func main() {
 		log.Printf("S3 upload service not available: %v", s3Err)
 		s3UploadService = nil
 	}
-	videoRepo := repositories.NewInterviewVideoRepository(db)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)

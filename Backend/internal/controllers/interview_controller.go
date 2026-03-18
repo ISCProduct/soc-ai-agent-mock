@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services"
 	"context"
 	"encoding/json"
@@ -18,11 +18,11 @@ import (
 
 type InterviewController struct {
 	interviewService *services.InterviewService
-	videoRepo        *repositories.InterviewVideoRepository
+	videoRepo        repository.InterviewVideoRepository
 	s3Service        *services.S3UploadService
 }
 
-func NewInterviewController(interviewService *services.InterviewService, videoRepo *repositories.InterviewVideoRepository, s3Service *services.S3UploadService) *InterviewController {
+func NewInterviewController(interviewService *services.InterviewService, videoRepo repository.InterviewVideoRepository, s3Service *services.S3UploadService) *InterviewController {
 	return &InterviewController{
 		interviewService: interviewService,
 		videoRepo:        videoRepo,
