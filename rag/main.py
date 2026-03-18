@@ -1,10 +1,13 @@
 import logging
 import math
 import os
+import re
 import threading
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
+import chromadb
+import tiktoken
 from crewai import Agent, Task, Crew, Process
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import RatelimitException
@@ -19,12 +22,19 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# ── 環境変数 ────────────────────────────────────────────────────────────────
 CACHE_TTL_SECONDS = int(os.getenv("RAG_SEARCH_CACHE_TTL_SECONDS", "86400"))
 USE_DEEP_RESEARCH = os.getenv("RAG_USE_DEEP_RESEARCH", "true").lower() == "true"
-ALLOW_DDG_FALLBACK = os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "false").lower() == "true"
+ALLOW_DDG_FALLBACK = os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true").lower() == "true"
 STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() == "true"
-_cache_lock = threading.Lock()
-_context_cache = {}
+CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
+MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", "8191"))
+EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", "3"))
+CHROMA_DATA_DIR = os.getenv("RAG_CHROMA_DATA_DIR", "/app/chroma_db")
+
+# ── Chromadb 永続ベクトルストア ────────────────────────────────────────────
+_chroma_client: Optional[chromadb.PersistentClient] = None
+_chroma_lock = threading.Lock()
 
 
 @app.on_event("startup")
@@ -44,6 +54,68 @@ class ReviewResponse(BaseModel):
     report: str
 
 
+def get_chroma_client() -> chromadb.PersistentClient:
+    global _chroma_client
+    if _chroma_client is None:
+        with _chroma_lock:
+            if _chroma_client is None:
+                _chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_DIR)
+    return _chroma_client
+
+
+def _sanitize_collection_name(cache_key: str) -> str:
+    """chromadb のコレクション名制約に合わせてサニタイズする (3-63文字, 英数字/_/-)。"""
+    name = re.sub(r"[^a-zA-Z0-9_-]", "_", cache_key)
+    name = re.sub(r"^[^a-zA-Z0-9]+", "", name)
+    name = re.sub(r"[^a-zA-Z0-9]+$", "", name)
+    if len(name) < 3:
+        name = name.ljust(3, "x")
+    return name[:63]
+
+
+def get_cached_context(
+    cache_key: str, query: str = "採用 価値観 求める人物像"
+) -> List[str]:
+    """chromadb からキャッシュ済みドキュメントをベクトル類似度順で最大 5 件取得する。"""
+    try:
+        client = get_chroma_client()
+        col_name = _sanitize_collection_name(cache_key)
+        try:
+            collection = client.get_collection(col_name)
+        except Exception:
+            return []
+        count = collection.count()
+        if count == 0:
+            return []
+        query_emb = embed_texts([query])[0]
+        results = collection.query(
+            query_embeddings=[query_emb],
+            n_results=min(5, count),
+        )
+        docs: List[str] = results.get("documents", [[]])[0]
+        logger.info("chromadb cache hit key=%s docs=%d", cache_key, len(docs))
+        return docs
+    except Exception as exc:
+        logger.warning("chromadb get failed key=%s error=%s", cache_key, exc)
+        return []
+
+
+def set_cached_context(cache_key: str, docs: List[str]) -> None:
+    """ドキュメントと埋め込みを chromadb に永続保存する。"""
+    if not docs:
+        return
+    try:
+        client = get_chroma_client()
+        col_name = _sanitize_collection_name(cache_key)
+        collection = client.get_or_create_collection(col_name)
+        embeddings = embed_texts(docs)
+        ids = [f"doc_{i}" for i in range(len(docs))]
+        collection.upsert(ids=ids, documents=docs, embeddings=embeddings)
+        logger.info("chromadb upsert key=%s docs=%d", cache_key, len(docs))
+    except Exception as exc:
+        logger.warning("chromadb set failed key=%s error=%s", cache_key, exc)
+
+
 def run_search(query: str, limit: int = 5) -> Tuple[List[dict], bool]:
     try:
         with DDGS() as ddgs:
@@ -54,26 +126,6 @@ def run_search(query: str, limit: int = 5) -> Tuple[List[dict], bool]:
     except Exception as exc:
         logger.warning("duckduckgo search failed for query=%s error=%s", query, exc)
         return [], False
-
-
-def get_cached_context(cache_key: str) -> List[str]:
-    now = time.time()
-    with _cache_lock:
-        entry = _context_cache.get(cache_key)
-        if not entry:
-            return []
-        timestamp, docs = entry
-        if now-timestamp > CACHE_TTL_SECONDS:
-            _context_cache.pop(cache_key, None)
-            return []
-        return docs
-
-
-def set_cached_context(cache_key: str, docs: List[str]) -> None:
-    if not docs:
-        return
-    with _cache_lock:
-        _context_cache[cache_key] = (time.time(), docs)
 
 
 def build_context(results: List[dict]) -> List[str]:
@@ -91,6 +143,24 @@ def build_context(results: List[dict]) -> List[str]:
     return docs
 
 
+def _truncate_text(text: str, model: str) -> str:
+    """テキストが埋め込みモデルのトークン上限を超えている場合に切り詰める。"""
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        enc = tiktoken.get_encoding("cl100k_base")
+    tokens = enc.encode(text)
+    if len(tokens) > MAX_EMBED_TOKENS:
+        logger.warning(
+            "truncating text from %d to %d tokens for model=%s",
+            len(tokens),
+            MAX_EMBED_TOKENS,
+            model,
+        )
+        return enc.decode(tokens[:MAX_EMBED_TOKENS])
+    return text
+
+
 def embed_texts(texts: List[str]) -> List[List[float]]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -98,8 +168,27 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
 
     embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
     client = OpenAI(api_key=api_key)
-    response = client.embeddings.create(model=embedding_model, input=texts)
-    return [item.embedding for item in response.data]
+
+    # トークン上限チェック
+    texts = [_truncate_text(t, embedding_model) for t in texts]
+
+    last_err: Exception = RuntimeError("embed_texts: no attempts made")
+    for attempt in range(1, EMBED_MAX_RETRIES + 1):
+        try:
+            response = client.embeddings.create(model=embedding_model, input=texts)
+            return [item.embedding for item in response.data]
+        except Exception as exc:
+            last_err = exc
+            if attempt < EMBED_MAX_RETRIES:
+                wait = 2 ** (attempt - 1)
+                logger.warning(
+                    "embed_texts failed attempt=%d retrying in %ds error=%s",
+                    attempt,
+                    wait,
+                    exc,
+                )
+                time.sleep(wait)
+    raise last_err
 
 
 def extract_output_text(response) -> str:
@@ -149,6 +238,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         "出力は日本語で、箇条書きを含む短いレポート形式にしてください。"
     ).format(company=company_name, role=role)
     last_err = None
+
     def request_response(use_tools: bool, model_name: str):
         kwargs = {
             "model": model_name,
@@ -192,8 +282,6 @@ def run_deep_research(company_name: str, job_title: str) -> str:
                         fallback_exc,
                     )
     raise last_err
-    logger.info("deep research finished chars=%d", len(output))
-    return output
 
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -224,21 +312,35 @@ def retrieve_docs(docs: List[str], query: str) -> List[str]:
     return top_docs
 
 
-def run_crewai(resume_text: str, company_name: str, job_title: str, context_docs: List[str]) -> str:
+def run_crewai(
+    resume_text: str,
+    company_name: str,
+    job_title: str,
+    context_docs: List[str],
+    context_source: str = "none",
+) -> str:
     context_block = "\n\n".join(context_docs)
+
+    source_labels = {
+        "deep_research": "OpenAI Deep Research（o3-deep-research）",
+        "duckduckgo": "DuckDuckGo ウェブ検索",
+        "cache": "chromadb キャッシュ（以前の検索結果）",
+        "none": "事前学習データのみ（外部検索なし）",
+    }
+    source_label = source_labels.get(context_source, context_source)
 
     researcher = Agent(
         role="Company Researcher",
         goal="Extract company hiring signals and values from search results",
         backstory="You summarize key hiring signals for job applicants.",
-        verbose=False,
+        verbose=CREWAI_VERBOSE,
     )
 
     reviewer = Agent(
         role="Resume Reviewer",
         goal="Produce a company-specific resume review report in Japanese",
         backstory="You are a professional career advisor.",
-        verbose=False,
+        verbose=CREWAI_VERBOSE,
     )
 
     task_research = Task(
@@ -255,7 +357,7 @@ def run_crewai(resume_text: str, company_name: str, job_title: str, context_docs
 
     task_review = Task(
         description=(
-            "Write the final report in Japanese, following this format:\n"
+            "Write the final report in Japanese, following this format exactly:\n"
             "【企業別レビュー報告書】\n"
             "---\n"
             "#### ■ 対象企業\n"
@@ -265,14 +367,25 @@ def run_crewai(resume_text: str, company_name: str, job_title: str, context_docs
             "#### ■ 履歴書の最適化アドバイス\n"
             "- **強みの再定義**: ...\n"
             "- **不足している情報の補足**: ...\n\n"
+            "#### ■ 職種別アドバイス（{role}）\n"
+            "この職種特有の評価ポイント（技術スキル・マインドセット・実績の見せ方など）を "
+            "3点以上、具体的に記述してください。\n\n"
             "#### ■ 修正後の自己PRイメージ\n"
             "...\n\n"
+            "#### ■ 情報の信頼度・参照元\n"
+            "- 情報ソース: {source}\n"
+            "- 注意: 外部情報に基づく内容は変化する可能性があります。最新情報は企業公式サイトで確認してください。\n\n"
             "Use the resume text below and the extracted keywords. "
             "Keep it concise and practical.\n\n"
             "Company: {company}\n"
             "Role: {role}\n"
             "Resume:\n{resume}\n"
-        ).format(company=company_name, role=job_title, resume=resume_text),
+        ).format(
+            company=company_name,
+            role=job_title or "指定なし",
+            resume=resume_text,
+            source=source_label,
+        ),
         expected_output="Final Japanese report in the requested format",
         agent=reviewer,
         context=[task_research],
@@ -282,7 +395,7 @@ def run_crewai(resume_text: str, company_name: str, job_title: str, context_docs
         agents=[researcher, reviewer],
         tasks=[task_research, task_review],
         process=Process.sequential,
-        verbose=False,
+        verbose=CREWAI_VERBOSE,
     )
 
     return str(crew.kickoff())
@@ -296,11 +409,12 @@ def health() -> dict:
 @app.post("/resume/review", response_model=ReviewResponse)
 def review_resume(request: ReviewRequest) -> ReviewResponse:
     role_label = request.job_title or "指定なし"
-
     cache_key = "{company}::{role}".format(company=request.company_name, role=role_label)
+    context_source = "none"
+
     retrieved = get_cached_context(cache_key)
     if retrieved:
-        logger.info("duckduckgo cache hit for key=%s", cache_key)
+        context_source = "cache"
     else:
         if USE_DEEP_RESEARCH and request.company_name.strip():
             try:
@@ -308,6 +422,7 @@ def review_resume(request: ReviewRequest) -> ReviewResponse:
                 if report:
                     retrieved = [report]
                     set_cached_context(cache_key, retrieved)
+                    context_source = "deep_research"
                 else:
                     logger.warning("deep research returned empty result")
             except Exception as exc:
@@ -316,7 +431,11 @@ def review_resume(request: ReviewRequest) -> ReviewResponse:
                     raise HTTPException(status_code=502, detail="Deep Research failed")
 
         if not retrieved and ALLOW_DDG_FALLBACK:
-            logger.info("duckduckgo search start company=%s role=%s", request.company_name, role_label)
+            logger.info(
+                "duckduckgo search start company=%s role=%s",
+                request.company_name,
+                role_label,
+            )
             query = "{company} {role} 求める人物像 大切にしている価値観".format(
                 company=request.company_name,
                 role=role_label,
@@ -327,16 +446,20 @@ def review_resume(request: ReviewRequest) -> ReviewResponse:
                     logger.warning("duckduckgo rate limited; continuing without external context")
                 else:
                     logger.warning("duckduckgo returned no results; continuing without external context")
-                retrieved = []
             else:
                 docs = build_context(results)
-                retrieved = retrieve_docs(docs, "採用 価値観 求める人物像")
-                set_cached_context(cache_key, retrieved)
+                set_cached_context(cache_key, docs)
+                retrieved = get_cached_context(cache_key)
+                if not retrieved:
+                    retrieved = docs[:5]
+                context_source = "duckduckgo"
+
     report = run_crewai(
         resume_text=request.resume_text,
         company_name=request.company_name,
         job_title=role_label,
         context_docs=retrieved,
+        context_source=context_source,
     )
 
     return ReviewResponse(report=report)

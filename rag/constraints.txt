@@ -5,6 +5,7 @@ langchain-core==0.2.43
 langchain-openai==0.1.25
 langchain-text-splitters==0.2.4
 chromadb==0.4.24
+numpy<2.0
 litellm==1.44.22
 openai==1.66.0
 tiktoken==0.7.0
