@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,38 +16,38 @@ import (
 
 type ChatService struct {
 	aiClient                *openai.Client
-	questionWeightRepo      *repositories.QuestionWeightRepository
-	chatMessageRepo         *repositories.ChatMessageRepository
-	userWeightScoreRepo     *repositories.UserWeightScoreRepository
-	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository
-	predefinedQuestionRepo  *repositories.PredefinedQuestionRepository
-	jobCategoryRepo         *repositories.JobCategoryRepository
-	userRepo                *repositories.UserRepository
-	userEmbeddingRepo       *repositories.UserEmbeddingRepository
-	jobEmbeddingRepo        *repositories.JobCategoryEmbeddingRepository
-	phaseRepo               *repositories.AnalysisPhaseRepository
-	progressRepo            *repositories.UserAnalysisProgressRepository
-	sessionValidationRepo   *repositories.SessionValidationRepository
-	conversationContextRepo *repositories.ConversationContextRepository
+	questionWeightRepo      repository.QuestionWeightRepository
+	chatMessageRepo         repository.ChatMessageRepository
+	userWeightScoreRepo     repository.UserWeightScoreRepository
+	aiGeneratedQuestionRepo repository.AIGeneratedQuestionRepository
+	predefinedQuestionRepo  repository.PredefinedQuestionRepository
+	jobCategoryRepo         repository.JobCategoryRepository
+	userRepo                repository.UserRepository
+	userEmbeddingRepo       repository.UserEmbeddingRepository
+	jobEmbeddingRepo        repository.JobCategoryEmbeddingRepository
+	phaseRepo               repository.AnalysisPhaseRepository
+	progressRepo            repository.UserAnalysisProgressRepository
+	sessionValidationRepo   repository.SessionValidationRepository
+	conversationContextRepo repository.ConversationContextRepository
 	answerEvaluator         *AnswerEvaluator
 	jobValidator            *JobCategoryValidator
 }
 
 func NewChatService(
 	aiClient *openai.Client,
-	questionWeightRepo *repositories.QuestionWeightRepository,
-	chatMessageRepo *repositories.ChatMessageRepository,
-	userWeightScoreRepo *repositories.UserWeightScoreRepository,
-	aiGeneratedQuestionRepo *repositories.AIGeneratedQuestionRepository,
-	predefinedQuestionRepo *repositories.PredefinedQuestionRepository,
-	jobCategoryRepo *repositories.JobCategoryRepository,
-	userRepo *repositories.UserRepository,
-	userEmbeddingRepo *repositories.UserEmbeddingRepository,
-	jobEmbeddingRepo *repositories.JobCategoryEmbeddingRepository,
-	phaseRepo *repositories.AnalysisPhaseRepository,
-	progressRepo *repositories.UserAnalysisProgressRepository,
-	sessionValidationRepo *repositories.SessionValidationRepository,
-	conversationContextRepo *repositories.ConversationContextRepository,
+	questionWeightRepo repository.QuestionWeightRepository,
+	chatMessageRepo repository.ChatMessageRepository,
+	userWeightScoreRepo repository.UserWeightScoreRepository,
+	aiGeneratedQuestionRepo repository.AIGeneratedQuestionRepository,
+	predefinedQuestionRepo repository.PredefinedQuestionRepository,
+	jobCategoryRepo repository.JobCategoryRepository,
+	userRepo repository.UserRepository,
+	userEmbeddingRepo repository.UserEmbeddingRepository,
+	jobEmbeddingRepo repository.JobCategoryEmbeddingRepository,
+	phaseRepo repository.AnalysisPhaseRepository,
+	progressRepo repository.UserAnalysisProgressRepository,
+	sessionValidationRepo repository.SessionValidationRepository,
+	conversationContextRepo repository.ConversationContextRepository,
 ) *ChatService {
 	return &ChatService{
 		aiClient:                aiClient,

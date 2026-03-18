@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,9 +22,9 @@ type GBizInfoService struct {
 	baseURL      string
 	token        string
 	client       *http.Client
-	repo         *repositories.GBizInfoRepository
-	companyRepo  *repositories.CompanyRepository
-	relationRepo *repositories.CompanyRelationRepository
+	repo         repository.GBizInfoRepository
+	companyRepo  repository.CompanyRepository
+	relationRepo repository.CompanyRelationRepository
 }
 
 type GBizSearchResult struct {
@@ -69,7 +69,7 @@ type GBizSyncResult struct {
 	WorkplaceUpdated bool   `json:"workplace_updated"`
 }
 
-func NewGBizInfoService(cfg *config.Config, repo *repositories.GBizInfoRepository, companyRepo *repositories.CompanyRepository, relationRepo *repositories.CompanyRelationRepository) *GBizInfoService {
+func NewGBizInfoService(cfg *config.Config, repo repository.GBizInfoRepository, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository) *GBizInfoService {
 	baseURL := strings.TrimRight(cfg.GBizInfoBaseURL, "/")
 	return &GBizInfoService{
 		baseURL:      baseURL,

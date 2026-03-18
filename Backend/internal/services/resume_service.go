@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -28,14 +28,14 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Message }
 
 type ResumeService struct {
-	repo       *repositories.ResumeRepository
+	repo       repository.ResumeRepository
 	storageDir string
 	aiClient   *openai.Client
 	s3         *s3Storage
 	s3Err      error
 }
 
-func NewResumeService(repo *repositories.ResumeRepository, storageDir string, aiClient *openai.Client) *ResumeService {
+func NewResumeService(repo repository.ResumeRepository, storageDir string, aiClient *openai.Client) *ResumeService {
 	if strings.TrimSpace(storageDir) == "" {
 		storageDir = "storage/resumes"
 	}

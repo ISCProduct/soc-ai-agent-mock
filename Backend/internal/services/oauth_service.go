@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,11 +15,11 @@ import (
 )
 
 type OAuthService struct {
-	userRepo    *repositories.UserRepository
+	userRepo    repository.UserRepository
 	oauthConfig *config.OAuthConfig
 }
 
-func NewOAuthService(userRepo *repositories.UserRepository, oauthConfig *config.OAuthConfig) *OAuthService {
+func NewOAuthService(userRepo repository.UserRepository, oauthConfig *config.OAuthConfig) *OAuthService {
 	return &OAuthService{
 		userRepo:    userRepo,
 		oauthConfig: oauthConfig,

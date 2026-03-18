@@ -1,23 +1,23 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"context"
 	"fmt"
 	"math"
 )
 
 type MatchingService struct {
-	userWeightScoreRepo *repositories.UserWeightScoreRepository
-	companyRepo         *repositories.CompanyRepository
-	matchRepo           *repositories.UserCompanyMatchRepository
+	userWeightScoreRepo repository.UserWeightScoreRepository
+	companyRepo         repository.CompanyRepository
+	matchRepo           repository.UserCompanyMatchRepository
 }
 
 func NewMatchingService(
-	userWeightScoreRepo *repositories.UserWeightScoreRepository,
-	companyRepo *repositories.CompanyRepository,
-	matchRepo *repositories.UserCompanyMatchRepository,
+	userWeightScoreRepo repository.UserWeightScoreRepository,
+	companyRepo repository.CompanyRepository,
+	matchRepo repository.UserCompanyMatchRepository,
 ) *MatchingService {
 	return &MatchingService{
 		userWeightScoreRepo: userWeightScoreRepo,

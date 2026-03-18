@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,10 +18,10 @@ import (
 )
 
 type InterviewService struct {
-	sessionRepo  *repositories.InterviewSessionRepository
-	utterRepo    *repositories.InterviewUtteranceRepository
-	reportRepo   *repositories.InterviewReportRepository
-	userRepo     *repositories.UserRepository
+	sessionRepo  repository.InterviewSessionRepository
+	utterRepo    repository.InterviewUtteranceRepository
+	reportRepo   repository.InterviewReportRepository
+	userRepo     repository.UserRepository
 	emailService *EmailService
 	openaiClient *openai.Client
 	jobCh        chan uint
@@ -29,10 +29,10 @@ type InterviewService struct {
 }
 
 func NewInterviewService(
-	sessionRepo *repositories.InterviewSessionRepository,
-	utterRepo *repositories.InterviewUtteranceRepository,
-	reportRepo *repositories.InterviewReportRepository,
-	userRepo *repositories.UserRepository,
+	sessionRepo repository.InterviewSessionRepository,
+	utterRepo repository.InterviewUtteranceRepository,
+	reportRepo repository.InterviewReportRepository,
+	userRepo repository.UserRepository,
 	emailService *EmailService,
 	openaiClient *openai.Client,
 ) *InterviewService {

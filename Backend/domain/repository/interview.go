@@ -1,0 +1,39 @@
+package repository
+
+import (
+	"Backend/internal/models"
+	"context"
+	"time"
+)
+
+// InterviewSessionRepository は面接セッションの永続化インターフェース。
+type InterviewSessionRepository interface {
+	Create(session *models.InterviewSession) error
+	FindByID(id uint) (*models.InterviewSession, error)
+	Update(session *models.InterviewSession) error
+	ListByUser(userID uint, limit int, offset int) ([]models.InterviewSession, error)
+	ListAll(limit int, offset int) ([]models.InterviewSession, error)
+	CountByUser(userID uint) (int64, error)
+	CountAll() (int64, error)
+	CountByUserAndDay(userID uint, day time.Time) (int64, error)
+}
+
+// InterviewUtteranceRepository は面接発話ログの永続化インターフェース。
+type InterviewUtteranceRepository interface {
+	Create(utterance *models.InterviewUtterance) error
+	FindBySessionID(sessionID uint) ([]models.InterviewUtterance, error)
+}
+
+// InterviewReportRepository は面接レポートの永続化インターフェース。
+type InterviewReportRepository interface {
+	FindBySessionID(sessionID uint) (*models.InterviewReport, error)
+	Upsert(report *models.InterviewReport) error
+}
+
+// InterviewVideoRepository は面接動画メタデータの永続化インターフェース。
+type InterviewVideoRepository interface {
+	Create(ctx context.Context, v *models.InterviewVideo) error
+	UpdateStatus(ctx context.Context, id uint, status, errorMessage string, driveFileID, driveFileURL string, uploadedAt *time.Time) error
+	FindBySessionID(ctx context.Context, sessionID uint) ([]models.InterviewVideo, error)
+	FindByID(ctx context.Context, id uint) (*models.InterviewVideo, error)
+}

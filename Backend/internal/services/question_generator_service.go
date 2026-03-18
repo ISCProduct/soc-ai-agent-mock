@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,12 +12,12 @@ import (
 
 type QuestionGeneratorService struct {
 	aiClient           *openai.Client
-	questionWeightRepo *repositories.QuestionWeightRepository
+	questionWeightRepo repository.QuestionWeightRepository
 }
 
 func NewQuestionGeneratorService(
 	aiClient *openai.Client,
-	questionWeightRepo *repositories.QuestionWeightRepository,
+	questionWeightRepo repository.QuestionWeightRepository,
 ) *QuestionGeneratorService {
 	return &QuestionGeneratorService{
 		aiClient:           aiClient,

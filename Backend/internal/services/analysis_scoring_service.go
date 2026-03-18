@@ -1,8 +1,8 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -115,24 +115,24 @@ func (a *RuleBasedFutureAnalyzer) Score(messages []models.ChatMessage) (float64,
 }
 
 type AnalysisScoringService struct {
-	userWeightScoreRepo     *repositories.UserWeightScoreRepository
-	chatMessageRepo         *repositories.ChatMessageRepository
-	progressRepo            *repositories.UserAnalysisProgressRepository
-	conversationContextRepo *repositories.ConversationContextRepository
-	userEmbeddingRepo       *repositories.UserEmbeddingRepository
-	jobEmbeddingRepo        *repositories.JobCategoryEmbeddingRepository
-	matchRepo               *repositories.UserCompanyMatchRepository
+	userWeightScoreRepo     repository.UserWeightScoreRepository
+	chatMessageRepo         repository.ChatMessageRepository
+	progressRepo            repository.UserAnalysisProgressRepository
+	conversationContextRepo repository.ConversationContextRepository
+	userEmbeddingRepo       repository.UserEmbeddingRepository
+	jobEmbeddingRepo        repository.JobCategoryEmbeddingRepository
+	matchRepo               repository.UserCompanyMatchRepository
 	futureAnalyzer          FutureAnalyzer
 }
 
 func NewAnalysisScoringService(
-	userWeightScoreRepo *repositories.UserWeightScoreRepository,
-	chatMessageRepo *repositories.ChatMessageRepository,
-	progressRepo *repositories.UserAnalysisProgressRepository,
-	conversationContextRepo *repositories.ConversationContextRepository,
-	userEmbeddingRepo *repositories.UserEmbeddingRepository,
-	jobEmbeddingRepo *repositories.JobCategoryEmbeddingRepository,
-	matchRepo *repositories.UserCompanyMatchRepository,
+	userWeightScoreRepo repository.UserWeightScoreRepository,
+	chatMessageRepo repository.ChatMessageRepository,
+	progressRepo repository.UserAnalysisProgressRepository,
+	conversationContextRepo repository.ConversationContextRepository,
+	userEmbeddingRepo repository.UserEmbeddingRepository,
+	jobEmbeddingRepo repository.JobCategoryEmbeddingRepository,
+	matchRepo repository.UserCompanyMatchRepository,
 	futureAnalyzer FutureAnalyzer,
 ) *AnalysisScoringService {
 	if futureAnalyzer == nil {

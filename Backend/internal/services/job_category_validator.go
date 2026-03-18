@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,10 +13,10 @@ import (
 // JobCategoryValidator 職種判定サービス
 type JobCategoryValidator struct {
 	aiClient        *openai.Client
-	jobCategoryRepo *repositories.JobCategoryRepository
+	jobCategoryRepo repository.JobCategoryRepository
 }
 
-func NewJobCategoryValidator(aiClient *openai.Client, jobCategoryRepo *repositories.JobCategoryRepository) *JobCategoryValidator {
+func NewJobCategoryValidator(aiClient *openai.Client, jobCategoryRepo repository.JobCategoryRepository) *JobCategoryValidator {
 	return &JobCategoryValidator{
 		aiClient:        aiClient,
 		jobCategoryRepo: jobCategoryRepo,
