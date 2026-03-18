@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/repositories"
+	"Backend/domain/repository"
 	"Backend/internal/services"
 	"encoding/json"
 	"net/http"
@@ -10,11 +10,11 @@ import (
 )
 
 type AdminUserController struct {
-	repo  *repositories.UserRepository
+	repo  repository.UserRepository
 	audit *services.AuditLogService
 }
 
-func NewAdminUserController(repo *repositories.UserRepository, audit *services.AuditLogService) *AdminUserController {
+func NewAdminUserController(repo repository.UserRepository, audit *services.AuditLogService) *AdminUserController {
 	return &AdminUserController{repo: repo, audit: audit}
 }
 

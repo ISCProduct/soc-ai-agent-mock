@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/repositories"
+	"Backend/domain/repository"
 	"Backend/internal/services"
 	"encoding/json"
 	"net/http"
@@ -13,13 +13,13 @@ import (
 // AdminInterviewController provides admin endpoints for viewing interview sessions and videos.
 type AdminInterviewController struct {
 	interviewService *services.InterviewService
-	videoRepo        *repositories.InterviewVideoRepository
+	videoRepo        repository.InterviewVideoRepository
 	s3Service        *services.S3UploadService
 }
 
 func NewAdminInterviewController(
 	interviewService *services.InterviewService,
-	videoRepo *repositories.InterviewVideoRepository,
+	videoRepo repository.InterviewVideoRepository,
 	s3Service *services.S3UploadService,
 ) *AdminInterviewController {
 	return &AdminInterviewController{

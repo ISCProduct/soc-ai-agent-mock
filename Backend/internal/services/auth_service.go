@@ -1,8 +1,8 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -15,12 +15,12 @@ import (
 )
 
 type AuthService struct {
-	userRepo        *repositories.UserRepository
-	pendingRepo     *repositories.PendingRegistrationRepository
-	emailService    *EmailService
+	userRepo     repository.UserRepository
+	pendingRepo  repository.PendingRegistrationRepository
+	emailService *EmailService
 }
 
-func NewAuthService(userRepo *repositories.UserRepository, pendingRepo *repositories.PendingRegistrationRepository, emailService *EmailService) *AuthService {
+func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
 	return &AuthService{userRepo: userRepo, pendingRepo: pendingRepo, emailService: emailService}
 }
 

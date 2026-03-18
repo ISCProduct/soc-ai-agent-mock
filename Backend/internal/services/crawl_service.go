@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,14 +20,14 @@ import (
 )
 
 type CrawlService struct {
-	repo        *repositories.CrawlRepository
-	companyRepo *repositories.CompanyRepository
-	popularRepo *repositories.CompanyPopularityRepository
+	repo        repository.CrawlRepository
+	companyRepo repository.CompanyRepository
+	popularRepo repository.CompanyPopularityRepository
 	aiClient    *openai.Client
 	mu          sync.Mutex
 }
 
-func NewCrawlService(repo *repositories.CrawlRepository, companyRepo *repositories.CompanyRepository, popularRepo *repositories.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {
+func NewCrawlService(repo repository.CrawlRepository, companyRepo repository.CompanyRepository, popularRepo repository.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {
 	return &CrawlService{repo: repo, companyRepo: companyRepo, popularRepo: popularRepo, aiClient: aiClient}
 }
 

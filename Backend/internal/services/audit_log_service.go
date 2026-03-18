@@ -1,16 +1,16 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"encoding/json"
 )
 
 type AuditLogService struct {
-	repo *repositories.AuditLogRepository
+	repo repository.AuditLogRepository
 }
 
-func NewAuditLogService(repo *repositories.AuditLogRepository) *AuditLogService {
+func NewAuditLogService(repo repository.AuditLogRepository) *AuditLogService {
 	return &AuditLogService{repo: repo}
 }
 

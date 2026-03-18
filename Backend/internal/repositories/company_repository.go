@@ -105,6 +105,16 @@ func (r *CompanyRepository) FindJobPositionByCompanyAndTitle(companyID uint, tit
 	return &position, nil
 }
 
+// FindJobPositionByID 募集職種をIDで取得
+func (r *CompanyRepository) FindJobPositionByID(id uint) (*models.CompanyJobPosition, error) {
+	var position models.CompanyJobPosition
+	err := r.db.First(&position, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &position, nil
+}
+
 // CreateJobPosition 募集職種を作成
 func (r *CompanyRepository) CreateJobPosition(position *models.CompanyJobPosition) error {
 	return r.db.Create(position).Error

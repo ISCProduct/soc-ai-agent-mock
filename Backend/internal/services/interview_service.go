@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/repositories"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,10 +18,10 @@ import (
 )
 
 type InterviewService struct {
-	sessionRepo  *repositories.InterviewSessionRepository
-	utterRepo    *repositories.InterviewUtteranceRepository
-	reportRepo   *repositories.InterviewReportRepository
-	userRepo     *repositories.UserRepository
+	sessionRepo  repository.InterviewSessionRepository
+	utterRepo    repository.InterviewUtteranceRepository
+	reportRepo   repository.InterviewReportRepository
+	userRepo     repository.UserRepository
 	emailService *EmailService
 	openaiClient *openai.Client
 	jobCh        chan uint
@@ -29,10 +29,10 @@ type InterviewService struct {
 }
 
 func NewInterviewService(
-	sessionRepo *repositories.InterviewSessionRepository,
-	utterRepo *repositories.InterviewUtteranceRepository,
-	reportRepo *repositories.InterviewReportRepository,
-	userRepo *repositories.UserRepository,
+	sessionRepo repository.InterviewSessionRepository,
+	utterRepo repository.InterviewUtteranceRepository,
+	reportRepo repository.InterviewReportRepository,
+	userRepo repository.UserRepository,
 	emailService *EmailService,
 	openaiClient *openai.Client,
 ) *InterviewService {
@@ -435,6 +435,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	transcript := transcriptBuilder.String()
 	systemPrompt := "あなたは就職面接の評価者です。面接ログを読んで、応募者の回答を客観的に評価し、JSONのみで返してください。"
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
+出力言語: %s
 
 ## 評価基準（各スコアは0〜5の整数）
 - logic（論理性）: 回答が筋道立っているか、主張に一貫性があるか

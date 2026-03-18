@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,13 +10,13 @@ import (
 )
 
 type CompanyEntryController struct {
-	companyRepo  *repositories.CompanyRepository
-	graduateRepo *repositories.GraduateEmploymentRepository
+	companyRepo  repository.CompanyRepository
+	graduateRepo repository.GraduateEmploymentRepository
 }
 
 func NewCompanyEntryController(
-	companyRepo *repositories.CompanyRepository,
-	graduateRepo *repositories.GraduateEmploymentRepository,
+	companyRepo repository.CompanyRepository,
+	graduateRepo repository.GraduateEmploymentRepository,
 ) *CompanyEntryController {
 	return &CompanyEntryController{
 		companyRepo:  companyRepo,

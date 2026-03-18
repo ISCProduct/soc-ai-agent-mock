@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
 	"bytes"
@@ -23,12 +23,12 @@ import (
 // AdminCompanyGraphController exposes the multi-source scraping pipeline via HTTP.
 type AdminCompanyGraphController struct {
 	pipeline     *scraper.Pipeline
-	companyRepo  *repositories.CompanyRepository
-	relationRepo *repositories.CompanyRelationRepository
+	companyRepo  repository.CompanyRepository
+	relationRepo repository.CompanyRelationRepository
 	audit        *services.AuditLogService
 }
 
-func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo *repositories.CompanyRepository, relationRepo *repositories.CompanyRelationRepository, audit *services.AuditLogService) *AdminCompanyGraphController {
+func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit *services.AuditLogService) *AdminCompanyGraphController {
 	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit}
 }
 

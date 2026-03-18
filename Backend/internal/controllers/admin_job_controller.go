@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
 	"Backend/internal/services"
 	"encoding/json"
 	"net/http"
@@ -12,13 +12,13 @@ import (
 )
 
 type AdminJobController struct {
-	companyRepo  *repositories.CompanyRepository
-	jobCategory  *repositories.JobCategoryRepository
-	graduateRepo *repositories.GraduateEmploymentRepository
+	companyRepo  repository.CompanyRepository
+	jobCategory  repository.JobCategoryRepository
+	graduateRepo repository.GraduateEmploymentRepository
 	audit        *services.AuditLogService
 }
 
-func NewAdminJobController(companyRepo *repositories.CompanyRepository, jobCategory *repositories.JobCategoryRepository, graduateRepo *repositories.GraduateEmploymentRepository, audit *services.AuditLogService) *AdminJobController {
+func NewAdminJobController(companyRepo repository.CompanyRepository, jobCategory repository.JobCategoryRepository, graduateRepo repository.GraduateEmploymentRepository, audit *services.AuditLogService) *AdminJobController {
 	return &AdminJobController{
 		companyRepo:  companyRepo,
 		jobCategory:  jobCategory,
@@ -71,8 +71,8 @@ func (c *AdminJobController) JobPositionAction(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var position models.CompanyJobPosition
-	if err := c.companyRepo.DB().First(&position, id).Error; err != nil {
+	position, err := c.companyRepo.FindJobPositionByID(uint(id))
+	if err != nil {
 		http.Error(w, "job position not found", http.StatusNotFound)
 		return
 	}
@@ -89,7 +89,7 @@ func (c *AdminJobController) JobPositionAction(w http.ResponseWriter, r *http.Re
 		http.Error(w, "unknown action", http.StatusBadRequest)
 		return
 	}
-	if err := c.companyRepo.DB().Save(&position).Error; err != nil {
+	if err := c.companyRepo.UpdateJobPosition(position); err != nil {
 		http.Error(w, "failed to update", http.StatusInternalServerError)
 		return
 	}
