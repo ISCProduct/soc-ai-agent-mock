@@ -15,6 +15,14 @@ export async function GET(request: NextRequest) {
   const response = await fetch(url, {
     headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
   })
-  const data = await response.json().catch(() => ({}))
+  const raw = await response.text()
+  let data: any = {}
+  if (raw) {
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      data = response.ok ? {} : { error: raw.trim() }
+    }
+  }
   return NextResponse.json(data, { status: response.status })
 }
