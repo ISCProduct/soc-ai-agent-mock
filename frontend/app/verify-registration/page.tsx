@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
   Box,
@@ -18,7 +19,7 @@ import { CERTIFICATION_OPTIONS, joinCertifications } from '@/lib/profile'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
 
-export default function VerifyRegistrationPage() {
+function VerifyRegistrationContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get('token') ?? ''
@@ -194,5 +195,19 @@ export default function VerifyRegistrationPage() {
         </CardContent>
       </Card>
     </Box>
+  )
+}
+
+export default function VerifyRegistrationPage() {
+  return (
+    <Suspense
+      fallback={
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <VerifyRegistrationContent />
+    </Suspense>
   )
 }
