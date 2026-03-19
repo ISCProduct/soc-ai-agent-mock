@@ -206,32 +206,114 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter,
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
 }
 
-// searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する
+// searchCompaniesWithOpenAI はDuckDuckGo APIを使って企業候補を取得し、失敗時はOpenAI ChatCompletion にフォールバックする
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
-	prompt := fmt.Sprintf(
-		`「%s」に関連する日本の企業を最大5件検索して、以下のJSON形式のみで返してください。説明文は不要です。
+	// 1. DuckDuckGo Instant Answer API で検索
+	if results := searchWithDuckDuckGo(ctx, query); len(results) > 0 {
+		return results
+	}
+
+	// 2. OpenAI ChatCompletion にフォールバック
+	return ctrl.searchWithChatCompletion(ctx, query)
+}
+
+// searchWithDuckDuckGo はDuckDuckGo Instant Answer APIを使って企業を検索する
+func searchWithDuckDuckGo(ctx context.Context, query string) []map[string]string {
+	type ddgTopic struct {
+		Text    string `json:"Text"`
+		FirstURL string `json:"FirstURL"`
+	}
+	type ddgResponse struct {
+		RelatedTopics []ddgTopic `json:"RelatedTopics"`
+		AbstractText  string     `json:"AbstractText"`
+		AbstractURL   string     `json:"AbstractURL"`
+	}
+
+	searchURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&no_html=1&skip_disambig=1&no_redirect=1",
+		strings.NewReplacer(" ", "+").Replace(query))
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctxTimeout, http.MethodGet, searchURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var ddg ddgResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ddg); err != nil {
+		return nil
+	}
+
+	results := []map[string]string{}
+
+	// AbstractText があれば最初の結果として追加
+	if ddg.AbstractText != "" {
+		desc := ddg.AbstractText
+		if len([]rune(desc)) > 100 {
+			runes := []rune(desc)
+			desc = string(runes[:100]) + "…"
+		}
+		results = append(results, map[string]string{"name": query, "description": desc})
+	}
+
+	// RelatedTopics から追加
+	for _, topic := range ddg.RelatedTopics {
+		if topic.Text == "" {
+			continue
+		}
+		parts := strings.SplitN(topic.Text, " - ", 2)
+		name := strings.TrimSpace(parts[0])
+		desc := ""
+		if len(parts) > 1 {
+			desc = strings.TrimSpace(parts[1])
+		}
+		results = append(results, map[string]string{"name": name, "description": desc})
+		if len(results) >= 5 {
+			break
+		}
+	}
+
+	return results
+}
+
+// searchWithChatCompletion はOpenAI ChatCompletionJSON APIで企業情報を生成する（フォールバック）
+func (ctrl *CompanyRelationController) searchWithChatCompletion(ctx context.Context, query string) []map[string]string {
+	if ctrl.openaiClient == nil {
+		return []map[string]string{}
+	}
+
+	systemPrompt := "あなたは日本の企業情報に詳しいアシスタントです。入力されたキーワードに一致する企業を優先して挙げ、次に関連する企業を補足してください。"
+	userPrompt := fmt.Sprintf(
+		`「%s」という検索キーワードで日本の企業を最大5件挙げてください。キーワードと一致する企業名が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
 [{"name":"企業名","description":"事業内容の1行説明"}]`,
 		query,
 	)
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	text, err := ctrl.openaiClient.WebSearchQuery(ctxTimeout, prompt)
+	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.3, 500)
 	if err != nil {
 		return []map[string]string{}
 	}
 
-	// JSON配列部分を抽出
 	start := strings.Index(text, "[")
 	end := strings.LastIndex(text, "]")
 	if start == -1 || end == -1 || end <= start {
 		return []map[string]string{}
 	}
-	jsonPart := text[start : end+1]
 
 	var results []map[string]string
-	if err := json.Unmarshal([]byte(jsonPart), &results); err != nil {
+	if err := json.Unmarshal([]byte(text[start:end+1]), &results); err != nil {
 		return []map[string]string{}
 	}
 	return results
