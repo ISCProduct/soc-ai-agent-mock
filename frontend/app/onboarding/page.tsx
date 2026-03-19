@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, Button, Card, CardContent, MenuItem, TextField, Typography, Alert } from '@mui/material'
+import { Box, Button, Card, CardContent, Container, MenuItem, TextField, Typography, Alert } from '@mui/material'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
+import GitHubSkills from '@/components/github-skills'
 
 export default function OnboardingPage() {
   const router = useRouter()
@@ -72,17 +73,23 @@ export default function OnboardingPage() {
   }
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        bgcolor: 'background.default',
-        p: 2,
-      }}
-    >
-      <Card sx={{ maxWidth: 480, width: '100%' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', py: 4 }}>
+      <Container maxWidth="lg">
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 3,
+            alignItems: 'flex-start',
+            flexWrap: { xs: 'wrap', md: 'nowrap' },
+          }}
+        >
+          {/* GitHubスキル分析（左カラム） */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <GitHubSkills userId={user.user_id} />
+          </Box>
+
+          {/* プロフィール設定フォーム（右カラム） */}
+          <Card sx={{ width: { xs: '100%', md: 480 }, flexShrink: 0 }}>
         <CardContent sx={{ p: 4 }}>
           <Typography variant="h5" gutterBottom fontWeight="bold">
             まずは簡単な情報を教えてください
@@ -180,6 +187,8 @@ export default function OnboardingPage() {
           </Box>
         </CardContent>
       </Card>
+        </Box>
+      </Container>
     </Box>
   )
 }
