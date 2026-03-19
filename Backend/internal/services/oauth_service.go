@@ -150,6 +150,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
+		OAuthProvider:            "google",
 	}, nil
 }
 
@@ -268,6 +269,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
+		OAuthProvider:            "github",
 	}, nil
 }
 

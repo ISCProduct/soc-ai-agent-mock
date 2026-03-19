@@ -98,11 +98,13 @@ func main() {
 	auditLogRepo := repositories.NewAuditLogRepository(db)
 	// GitHub連携
 	githubRepo := repositories.NewGitHubRepository(db)
+	skillScoreRepo := repositories.NewSkillScoreRepository(db)
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
-	githubService := services.NewGitHubService(githubRepo)
+	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
+	githubService := services.NewGitHubService(githubRepo, skillScoreService)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
@@ -153,7 +155,7 @@ func main() {
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
-	githubController := controllers.NewGitHubController(githubService)
+	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)

@@ -11,11 +11,15 @@ import (
 
 // GitHubController GitHub連携APIのコントローラー
 type GitHubController struct {
-	githubService *services.GitHubService
+	githubService     *services.GitHubService
+	skillScoreService *services.SkillScoreService
 }
 
-func NewGitHubController(githubService *services.GitHubService) *GitHubController {
-	return &GitHubController{githubService: githubService}
+func NewGitHubController(githubService *services.GitHubService, skillScoreService *services.SkillScoreService) *GitHubController {
+	return &GitHubController{
+		githubService:     githubService,
+		skillScoreService: skillScoreService,
+	}
 }
 
 // GetProfile GitHubプロフィール・リポジトリ・言語統計を取得する
@@ -115,6 +119,30 @@ func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "sync completed",
 	})
+}
+
+// GetSkills ユーザーのカテゴリ別スキルスコアを取得する
+// GET /api/github/skills?user_id=<id>
+func (c *GitHubController) GetSkills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := parseUserID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	scores, err := c.skillScoreService.GetScores(userID)
+	if err != nil {
+		http.Error(w, "failed to get skill scores", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(scores)
 }
 
 func parseUserID(r *http.Request) (uint, error) {

@@ -25,11 +25,15 @@ const (
 
 // GitHubService GitHub API連携サービス
 type GitHubService struct {
-	githubRepo *repositories.GitHubRepository
+	githubRepo      *repositories.GitHubRepository
+	skillScoreService *SkillScoreService
 }
 
-func NewGitHubService(githubRepo *repositories.GitHubRepository) *GitHubService {
-	return &GitHubService{githubRepo: githubRepo}
+func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *SkillScoreService) *GitHubService {
+	return &GitHubService{
+		githubRepo:      githubRepo,
+		skillScoreService: skillScoreService,
+	}
 }
 
 // StoreAccessToken GitHubアクセストークンとプロフィール基本情報を保存する
@@ -111,6 +115,13 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 	// 6. 言語比率保存
 	if err := s.githubRepo.ReplaceLanguageStats(userID, langStats); err != nil {
 		return fmt.Errorf("save language stats: %w", err)
+	}
+
+	// 7. スキルスコア算出・保存
+	if s.skillScoreService != nil {
+		if err := s.skillScoreService.CalculateAndSave(userID, langStats, repos, contributions); err != nil {
+			log.Printf("[GitHubService] skill score calculation warning: %v", err)
+		}
 	}
 
 	log.Printf("[GitHubService] user %d: sync completed (%d repos, %d contributions)", userID, len(repos), contributions)

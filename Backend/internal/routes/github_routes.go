@@ -10,4 +10,5 @@ func SetupGitHubRoutes(githubController *controllers.GitHubController) {
 	http.HandleFunc("/api/github/profile", githubController.GetProfile)
 	http.HandleFunc("/api/github/sync", githubController.Sync)
 	http.HandleFunc("/api/github/sync/wait", githubController.SyncAndWait)
+	http.HandleFunc("/api/github/skills", githubController.GetSkills)
 }

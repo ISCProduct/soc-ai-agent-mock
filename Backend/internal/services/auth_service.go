@@ -64,7 +64,8 @@ type AuthResponse struct {
 	CertificationsAcquired   string `json:"certifications_acquired,omitempty"`
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`
-	Token                    string `json:"token,omitempty"` // 将来的なトークン認証用
+	OAuthProvider            string `json:"oauth_provider,omitempty"` // OAuth連携プロバイダ
+	Token                    string `json:"token,omitempty"`          // 将来的なトークン認証用
 	EmailVerified            bool   `json:"email_verified"`
 	RequiresReVerification   bool   `json:"requires_re_verification,omitempty"`
 }
@@ -336,6 +337,8 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
+		OAuthProvider:            user.OAuthProvider,
 	}, nil
 }
 
