@@ -2,22 +2,23 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/openai"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type CompanyRelationController struct {
-	repo repository.CompanyRelationQueryRepository
+	repo        repository.CompanyRelationQueryRepository
+	openaiClient *openai.Client
 }
 
-func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository) *CompanyRelationController {
-	return &CompanyRelationController{repo: repo}
+func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository, openaiClient *openai.Client) *CompanyRelationController {
+	return &CompanyRelationController{repo: repo, openaiClient: openaiClient}
 }
 
 // GetCompanyRelations 企業IDに関連する企業関係を取得
@@ -176,7 +177,7 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(response)
 }
 
-// WebSearchCompanies Wikipedia APIを使用して企業をWEB検索
+// WebSearchCompanies OpenAI Web Searchを使用して企業をWEB検索
 func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -194,58 +195,46 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter,
 		return
 	}
 
-	searchURL := fmt.Sprintf(
-		"https://ja.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&srlimit=8&format=json&origin=*",
-		url.QueryEscape(query),
-	)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(searchURL)
-	if err != nil {
-		http.Error(w, "Web search failed", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		http.Error(w, "Failed to read search response", http.StatusInternalServerError)
-		return
-	}
-
-	var wikiResp struct {
-		Query struct {
-			Search []struct {
-				Title   string `json:"title"`
-				Snippet string `json:"snippet"`
-			} `json:"search"`
-		} `json:"query"`
-	}
-	if err := json.Unmarshal(body, &wikiResp); err != nil {
-		http.Error(w, "Failed to parse search response", http.StatusInternalServerError)
-		return
-	}
-
-	htmlTagRe := regexp.MustCompile(`<[^>]+>`)
-
 	type WebSearchResult struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		Source      string `json:"source"`
 	}
 
-	results := make([]WebSearchResult, 0, len(wikiResp.Query.Search))
-	for _, item := range wikiResp.Query.Search {
-		snippet := htmlTagRe.ReplaceAllString(item.Snippet, "")
-		results = append(results, WebSearchResult{
-			Name:        item.Title,
-			Description: snippet,
-			Source:      "Wikipedia",
-		})
-	}
+	results := ctrl.searchCompaniesWithOpenAI(r.Context(), query)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+}
+
+// searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する
+func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
+	prompt := fmt.Sprintf(
+		`「%s」に関連する日本の企業を最大5件検索して、以下のJSON形式のみで返してください。説明文は不要です。
+[{"name":"企業名","description":"事業内容の1行説明"}]`,
+		query,
+	)
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	text, err := ctrl.openaiClient.WebSearchQuery(ctxTimeout, prompt)
+	if err != nil {
+		return []map[string]string{}
+	}
+
+	// JSON配列部分を抽出
+	start := strings.Index(text, "[")
+	end := strings.LastIndex(text, "]")
+	if start == -1 || end == -1 || end <= start {
+		return []map[string]string{}
+	}
+	jsonPart := text[start : end+1]
+
+	var results []map[string]string
+	if err := json.Unmarshal([]byte(jsonPart), &results); err != nil {
+		return []map[string]string{}
+	}
+	return results
 }
 
 // splitPath はURLパスを "/" で分割してスラッシュを除去した要素のスライスを返す
