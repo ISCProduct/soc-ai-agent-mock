@@ -173,7 +173,9 @@ export default function GitHubSkills({ userId }: { userId: number }) {
   const [langStats, setLangStats] = useState<LanguageStat[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [notLinked, setNotLinked] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [connecting, setConnecting] = useState(false)
 
   useEffect(() => {
     fetchAll()
@@ -182,6 +184,7 @@ export default function GitHubSkills({ userId }: { userId: number }) {
   const fetchAll = async () => {
     setLoading(true)
     setError(null)
+    setNotLinked(false)
     try {
       const [skillsRes, profileRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`),
@@ -202,13 +205,25 @@ export default function GitHubSkills({ userId }: { userId: number }) {
             : []
         )
       } else if (profileRes.status === 404) {
-        // GitHubアカウント未連携
-        setError('GitHubアカウントが連携されていません。GitHubでログインすると自動的に連携されます。')
+        setNotLinked(true)
       }
     } catch {
       setError('データの取得に失敗しました')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/auth/github`)
+      if (!res.ok) throw new Error()
+      const { auth_url } = await res.json()
+      window.location.href = auth_url
+    } catch {
+      setError('GitHub連携URLの取得に失敗しました')
+      setConnecting(false)
     }
   }
 
@@ -233,9 +248,37 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     )
   }
 
+  if (notLinked) {
+    return (
+      <Paper sx={{ p: 3, mt: 3, bgcolor: '#0f172a', borderRadius: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <GitHubIcon sx={{ color: '#94a3b8' }} />
+          <Typography variant="h6" sx={{ fontWeight: 700, color: '#f1f5f9' }}>
+            GitHub スキル分析
+          </Typography>
+        </Box>
+        <Alert
+          severity="info"
+          sx={{ mb: 2, bgcolor: '#1e293b', color: '#94a3b8', '& .MuiAlert-icon': { color: '#4FC3F7' } }}
+        >
+          GitHubアカウントが連携されていません。GitHubでログインするとスキル分析が自動的に生成されます。
+        </Alert>
+        <Button
+          variant="contained"
+          startIcon={connecting ? <CircularProgress size={16} /> : <GitHubIcon />}
+          onClick={handleConnect}
+          disabled={connecting}
+          sx={{ bgcolor: '#24292e', '&:hover': { bgcolor: '#444d56' } }}
+        >
+          {connecting ? '連携中...' : 'GitHubと連携する'}
+        </Button>
+      </Paper>
+    )
+  }
+
   if (error) {
     return (
-      <Alert severity="info" sx={{ mt: 2 }}>
+      <Alert severity="error" sx={{ mt: 2 }}>
         {error}
       </Alert>
     )
