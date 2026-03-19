@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/prompts"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -102,36 +103,8 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 	// 選択肢型の質問: AI判定を使用
 	fmt.Printf("[Validation] Choice-based question detected, using AI validation\n")
 
-	systemPrompt := `あなたは回答の妥当性を判定する審査AIです。
-
-## 重要な制約
-- 必ずJSON形式のみで応答してください
-- 他の説明文やコメントは一切含めないでください
-
-## 出力形式（厳守）
-{"valid": true} または {"valid": false}`
-
-	userPrompt := fmt.Sprintf(`以下の質問に対するユーザーの回答が適切かどうかを判定してください。
-
-## 質問
-%s
-
-## ユーザーの回答
-%s
-
-## 判定基準
-以下のいずれかに該当する場合は有効な回答とみなす：
-1. 選択肢記号（A、B、C、1、2、3など）が含まれている
-2. 質問に対する明確な選択や意思表示がある
-3. 「はい」「いいえ」などの意思表示
-
-以下の場合のみ無効とする：
-- 挨拶のみ
-- 完全に無関係な話題
-- 質問を完全に無視した内容
-
-## 判定
-{"valid": true} または {"valid": false}`, question, answer)
+	systemPrompt := prompts.AnswerValidationSystemPrompt
+	userPrompt := prompts.BuildAnswerValidationUserPrompt(question, answer)
 
 	// temperature=0で安定した判定を行う
 	response, err := s.aiClient.ResponsesWithTemperature(ctx, systemPrompt, userPrompt, 0.0)
