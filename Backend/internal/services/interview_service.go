@@ -64,16 +64,17 @@ func (s *InterviewService) runWorker() {
 }
 
 type InterviewSessionResponse struct {
-	ID               uint       `json:"id"`
-	UserID           uint       `json:"user_id"`
-	Status           string     `json:"status"`
-	Language         string     `json:"language"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	EndedAt          *time.Time `json:"ended_at,omitempty"`
-	EstimatedCostUSD float64    `json:"estimated_cost_usd"`
-	TemplateVersion  string     `json:"template_version"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID                uint       `json:"id"`
+	UserID            uint       `json:"user_id"`
+	Status            string     `json:"status"`
+	Language          string     `json:"language"`
+	InterviewerGender string     `json:"interviewer_gender"`
+	StartedAt         *time.Time `json:"started_at,omitempty"`
+	EndedAt           *time.Time `json:"ended_at,omitempty"`
+	EstimatedCostUSD  float64    `json:"estimated_cost_usd"`
+	TemplateVersion   string     `json:"template_version"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type InterviewDetailResponse struct {
@@ -82,7 +83,7 @@ type InterviewDetailResponse struct {
 	Report     *models.InterviewReport     `json:"report,omitempty"`
 }
 
-func (s *InterviewService) CreateSession(userID uint, language string) (*InterviewSessionResponse, error) {
+func (s *InterviewService) CreateSession(userID uint, language string, interviewerGender string) (*InterviewSessionResponse, error) {
 	user, err := s.userRepo.GetUserByID(userID)
 	if err != nil || user == nil {
 		return nil, errors.New("user not found")
@@ -90,11 +91,15 @@ func (s *InterviewService) CreateSession(userID uint, language string) (*Intervi
 	if language == "" {
 		language = "ja"
 	}
+	if interviewerGender != "male" && interviewerGender != "female" {
+		interviewerGender = "female"
+	}
 	session := &models.InterviewSession{
-		UserID:          userID,
-		Status:          "ready",
-		Language:        language,
-		TemplateVersion: getEnv("INTERVIEW_TEMPLATE_VERSION", "v1"),
+		UserID:            userID,
+		Status:            "ready",
+		Language:          language,
+		InterviewerGender: interviewerGender,
+		TemplateVersion:   getEnv("INTERVIEW_TEMPLATE_VERSION", "v1"),
 	}
 	if err := s.sessionRepo.Create(session); err != nil {
 		return nil, err
@@ -252,8 +257,12 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	if lang == "" {
 		lang = "ja"
 	}
+	gender := session.InterviewerGender
+	if gender == "" {
+		gender = "female"
+	}
 	model := getEnv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
-	voice := realtimeVoiceForLang(lang)
+	voice := realtimeVoiceForLangAndGender(lang, gender)
 	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 	maxTokens := getIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
 	req := openai.RealtimeSessionRequest{
@@ -328,7 +337,7 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 	}
 
 	// TTS: AI返答を音声化
-	voice := getEnv("OPENAI_TTS_VOICE", "alloy")
+	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	audio, err := s.openaiClient.TTS(ctx, aiText, voice)
 	if err != nil {
 		return nil, fmt.Errorf("tts error: %w", err)
@@ -354,7 +363,7 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
 
-	voice := getEnv("OPENAI_TTS_VOICE", "alloy")
+	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	audio, err := s.openaiClient.TTS(ctx, aiText, voice)
 	if err != nil {
 		return nil, fmt.Errorf("tts error: %w", err)
@@ -535,17 +544,22 @@ func toSessionResponse(session *models.InterviewSession) *InterviewSessionRespon
 	if lang == "" {
 		lang = "ja"
 	}
+	gender := session.InterviewerGender
+	if gender == "" {
+		gender = "female"
+	}
 	return &InterviewSessionResponse{
-		ID:               session.ID,
-		UserID:           session.UserID,
-		Status:           session.Status,
-		Language:         lang,
-		StartedAt:        session.StartedAt,
-		EndedAt:          session.EndedAt,
-		EstimatedCostUSD: session.EstimatedCostUSD,
-		TemplateVersion:  session.TemplateVersion,
-		CreatedAt:        session.CreatedAt,
-		UpdatedAt:        session.UpdatedAt,
+		ID:                session.ID,
+		UserID:            session.UserID,
+		Status:            session.Status,
+		Language:          lang,
+		InterviewerGender: gender,
+		StartedAt:         session.StartedAt,
+		EndedAt:           session.EndedAt,
+		EstimatedCostUSD:  session.EstimatedCostUSD,
+		TemplateVersion:   session.TemplateVersion,
+		CreatedAt:         session.CreatedAt,
+		UpdatedAt:         session.UpdatedAt,
 	}
 }
 
@@ -615,24 +629,34 @@ func buildReportSystemPrompt(lang string) string {
 	return fmt.Sprintf("You are a job interview assessment assistant. Read the interview transcript and return evaluation as JSON. Use language code \"%s\" for the summary and evidence fields.", lang)
 }
 
-// realtimeVoiceForLang 言語コードに応じた推奨ボイスを返す。
+// ttsVoiceForGenderAndLang 性別と言語に応じたTTSボイスを返す。
+// male: onyx(ja/ko) / echo(en/other), female: nova(ja/ko) / shimmer(en/other)
+func ttsVoiceForGenderAndLang(gender, lang string) string {
+	switch gender {
+	case "male":
+		switch lang {
+		case "ja", "ko":
+			return "onyx"
+		default:
+			return "echo"
+		}
+	default: // female
+		switch lang {
+		case "ja", "ko":
+			return "nova"
+		default:
+			return "shimmer"
+		}
+	}
+}
+
+// realtimeVoiceForLangAndGender 言語・性別コードに応じた推奨ボイスを返す。
 // 環境変数 OPENAI_REALTIME_VOICE が設定されている場合はそちらを優先する。
-func realtimeVoiceForLang(lang string) string {
+func realtimeVoiceForLangAndGender(lang, gender string) string {
 	if v := getEnv("OPENAI_REALTIME_VOICE", ""); v != "" {
 		return v
 	}
-	switch lang {
-	case "ja":
-		return "alloy"
-	case "en":
-		return "shimmer"
-	case "zh":
-		return "nova"
-	case "ko":
-		return "alloy"
-	default:
-		return "alloy"
-	}
+	return ttsVoiceForGenderAndLang(gender, lang)
 }
 
 // buildRealtimeInstructions 面接官AIへのシステムプロンプトを返す。
