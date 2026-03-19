@@ -49,5 +49,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&InterviewReport{},
 		&InterviewVideo{},
 		&PendingRegistration{},
+		// GitHub連携
+		&GitHubProfile{},
+		&GitHubRepo{},
+		&GitHubLanguageStat{},
 	)
 }
