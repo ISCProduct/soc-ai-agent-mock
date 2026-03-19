@@ -318,6 +318,11 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 		userText = "（聞き取れませんでした）"
 	}
 
+	// 読み仮名が未指定の場合はWeb検索で自動取得
+	if companyName != "" && companyReading == "" {
+		companyReading = s.lookupCompanyReading(ctx, companyName)
+	}
+
 	// 履歴にユーザー発言を追加
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
@@ -347,6 +352,11 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		return nil, errors.New("forbidden")
 	}
 
+	// 読み仮名が未指定の場合はWeb検索で自動取得
+	if companyName != "" && companyReading == "" {
+		companyReading = s.lookupCompanyReading(ctx, companyName)
+	}
+
 	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo), []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
@@ -361,6 +371,27 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 	}
 
 	return &TurnResult{AIText: aiText, Audio: audio}, nil
+}
+
+// lookupCompanyReading はWeb検索を使って企業名の日本語読み（ふりがな）を取得します。
+// 取得に失敗した場合は空文字を返します（エラーは無視）。
+func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName string) string {
+	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", companyName)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	result, err := s.openaiClient.WebSearchQuery(ctxTimeout, query)
+	if err != nil {
+		return ""
+	}
+	// 最初の行だけ抽出し、余分な記号や空白を除去
+	lines := strings.Split(strings.TrimSpace(result), "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	reading := strings.TrimSpace(lines[0])
+	// 句読点・括弧・引用符等を除去
+	reading = strings.Trim(reading, "「」『』（）()。、・ ")
+	return reading
 }
 
 func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo string) string {
