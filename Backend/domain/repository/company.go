@@ -2,6 +2,17 @@ package repository
 
 import "Backend/internal/models"
 
+// CompanyRelationQueryRepository は企業関係情報の読み取り専用インターフェース。
+// CompanyRelationController で使用する。
+type CompanyRelationQueryRepository interface {
+	GetByCompanyID(companyID uint) ([]models.CompanyRelation, error)
+	GetAll() ([]models.CompanyRelation, error)
+	GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error)
+	GetAllMarketInfo() ([]models.CompanyMarketInfo, error)
+	GetJobPositionsByCompany(companyID uint) ([]models.CompanyJobPosition, error)
+	GetCompaniesFiltered(limit, offset int, industry, name string) ([]models.Company, int64, error)
+}
+
 // CompanyRepository は企業情報の永続化インターフェース。
 type CompanyRepository interface {
 	FindAllActive(limit, offset int) ([]models.Company, error)

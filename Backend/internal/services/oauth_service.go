@@ -1,9 +1,9 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
-	"Backend/internal/models"
 	"context"
 	"encoding/json"
 	"errors"
@@ -120,7 +120,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
-			user = &models.User{
+			user = &entity.User{
 				Email:         userInfo.Email,
 				Name:          userInfo.Name,
 				OAuthProvider: "google",
@@ -227,7 +227,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 			if name == "" {
 				name = userInfo.Login
 			}
-			user = &models.User{
+			user = &entity.User{
 				Email:         email,
 				Name:          name,
 				OAuthProvider: "github",

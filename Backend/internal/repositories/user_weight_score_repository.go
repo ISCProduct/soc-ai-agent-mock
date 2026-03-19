@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"Backend/domain/entity"
+	"Backend/domain/mapper"
 	"Backend/internal/models"
 
 	"gorm.io/gorm"
@@ -38,32 +40,38 @@ func (r *UserWeightScoreRepository) UpdateScore(userID uint, sessionID, category
 }
 
 // FindByUserAndSession ユーザーとセッションに紐づく全スコアを取得
-func (r *UserWeightScoreRepository) FindByUserAndSession(userID uint, sessionID string) ([]models.UserWeightScore, error) {
-	var scores []models.UserWeightScore
+func (r *UserWeightScoreRepository) FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
+	var ms []models.UserWeightScore
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
-		Find(&scores).Error
-	return scores, err
-}
-
-// FindTopCategories トップNのカテゴリを取得
-func (r *UserWeightScoreRepository) FindTopCategories(userID uint, sessionID string, limit int) ([]models.UserWeightScore, error) {
-	var scores []models.UserWeightScore
-	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
-		Order("score DESC").
-		Limit(limit).
-		Find(&scores).Error
-	return scores, err
-}
-
-// FindByUserSessionAndCategory ユーザー、セッション、カテゴリで検索
-func (r *UserWeightScoreRepository) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*models.UserWeightScore, error) {
-	var score models.UserWeightScore
-	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?", userID, sessionID, category).
-		First(&score).Error
+		Find(&ms).Error
 	if err != nil {
 		return nil, err
 	}
-	return &score, nil
+	return mapper.UserWeightScoresToEntities(ms), nil
+}
+
+// FindTopCategories トップNのカテゴリを取得
+func (r *UserWeightScoreRepository) FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error) {
+	var ms []models.UserWeightScore
+	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
+		Order("score DESC").
+		Limit(limit).
+		Find(&ms).Error
+	if err != nil {
+		return nil, err
+	}
+	return mapper.UserWeightScoresToEntities(ms), nil
+}
+
+// FindByUserSessionAndCategory ユーザー、セッション、カテゴリで検索
+func (r *UserWeightScoreRepository) FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error) {
+	var m models.UserWeightScore
+	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?", userID, sessionID, category).
+		First(&m).Error
+	if err != nil {
+		return nil, err
+	}
+	return mapper.UserWeightScoreToEntity(&m), nil
 }
 
 // CountByUserAndSession ユーザーとセッションに紐づくスコア数を取得

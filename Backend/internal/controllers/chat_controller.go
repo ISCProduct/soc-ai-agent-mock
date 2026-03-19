@@ -1,8 +1,8 @@
 package controllers
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
-	"Backend/internal/models"
 	"Backend/internal/services"
 	"encoding/json"
 	"fmt"
@@ -32,7 +32,7 @@ func NewChatController(chatService *services.ChatService, matchingService *servi
 	}
 }
 
-func countEvaluatedCategories(scores []models.UserWeightScore) int {
+func countEvaluatedCategories(scores []entity.UserWeightScore) int {
 	count := 0
 	for _, score := range scores {
 		if score.Score != 0 {
@@ -181,7 +181,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		userScores, scoreErr := c.chatService.GetUserScores(uint(userID), sessionID)
 		if scoreErr != nil {
 			fmt.Printf("[GetRecommendations] Failed to load user scores for provisional status: %v\n", scoreErr)
-			userScores = []models.UserWeightScore{}
+			userScores = []entity.UserWeightScore{}
 		}
 
 		reason := "matching_results_empty"
@@ -237,14 +237,14 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 	userScores, err := c.chatService.GetUserScores(uint(userID), sessionID)
 	if err != nil {
 		fmt.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
-		userScores = []models.UserWeightScore{}
+		userScores = []entity.UserWeightScore{}
 	}
 	evaluatedCategories := countEvaluatedCategories(userScores)
 	isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
 
 	var items []CompanyRecommendation
 	for _, match := range matches {
-		if match.Company.ID == 0 {
+		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
 
@@ -338,7 +338,7 @@ func generateReasonForCategory(category string, score int) string {
 }
 
 // generateMatchReason 企業マッチングの理由を生成
-func generateMatchReason(match *models.UserCompanyMatch) string {
+func generateMatchReason(match *entity.UserCompanyMatch) string {
 	// AIで生成された理由があればそれを使用
 	if match.MatchReason != "" {
 		return match.MatchReason
@@ -455,7 +455,7 @@ func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
 
 	var companies []services.EmailReportCompany
 	for i, match := range matches {
-		if match.Company.ID == 0 {
+		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
 		companies = append(companies, services.EmailReportCompany{

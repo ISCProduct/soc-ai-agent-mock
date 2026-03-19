@@ -1,7 +1,7 @@
 package services
 
 import (
-	"Backend/internal/models"
+	"Backend/domain/entity"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -64,8 +64,8 @@ type scoreItem struct {
 	score float64
 }
 
-func BuildMatchReason(match *models.UserCompanyMatch, userScores []models.UserWeightScore) string {
-	if match == nil || match.Company.ID == 0 {
+func BuildMatchReason(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+	if match == nil || match.Company == nil || match.Company.ID == 0 {
 		return ""
 	}
 	if match.MatchReason != "" {
@@ -98,7 +98,7 @@ func BuildMatchReason(match *models.UserCompanyMatch, userScores []models.UserWe
 	return strings.Join(filterNonEmpty(sections), "\n\n")
 }
 
-func topMatchSummaries(match *models.UserCompanyMatch) string {
+func topMatchSummaries(match *entity.UserCompanyMatch) string {
 	scores := []scoreItem{
 		{label: "技術志向", score: match.TechnicalMatch},
 		{label: "チームワーク", score: match.TeamworkMatch},
@@ -126,7 +126,7 @@ func topMatchSummaries(match *models.UserCompanyMatch) string {
 	return strings.Join(parts, "・")
 }
 
-func topUserStrengths(scores []models.UserWeightScore) string {
+func topUserStrengths(scores []entity.UserWeightScore) string {
 	if len(scores) == 0 {
 		return "複数の軸でバランス良く評価"
 	}
@@ -146,7 +146,10 @@ func topUserStrengths(scores []models.UserWeightScore) string {
 	return strings.Join(parts, "・")
 }
 
-func buildCompanyContext(company models.Company) string {
+func buildCompanyContext(company *entity.Company) string {
+	if company == nil {
+		return "事業内容や開発環境に合った適性が活かせる企業です。"
+	}
 	parts := []string{}
 	if strings.TrimSpace(company.MainBusiness) != "" {
 		parts = append(parts, fmt.Sprintf("主な事業は「%s」です。", company.MainBusiness))

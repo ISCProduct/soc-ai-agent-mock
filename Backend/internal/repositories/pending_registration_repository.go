@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"Backend/domain/entity"
+	"Backend/domain/mapper"
 	"Backend/internal/models"
 	"time"
 
@@ -15,17 +17,21 @@ func NewPendingRegistrationRepository(db *gorm.DB) *PendingRegistrationRepositor
 	return &PendingRegistrationRepository{db: db}
 }
 
-func (r *PendingRegistrationRepository) Create(p *models.PendingRegistration) error {
-	return r.db.Create(p).Error
+func (r *PendingRegistrationRepository) Create(p *entity.PendingRegistration) error {
+	m := mapper.PendingRegistrationFromEntity(p)
+	return r.db.Create(m).Error
 }
 
-func (r *PendingRegistrationRepository) FindByToken(token string) (*models.PendingRegistration, error) {
-	var p models.PendingRegistration
-	err := r.db.Where("token = ? AND expires_at > ?", token, time.Now()).First(&p).Error
+func (r *PendingRegistrationRepository) FindByToken(token string) (*entity.PendingRegistration, error) {
+	var m models.PendingRegistration
+	err := r.db.Where("token = ? AND expires_at > ?", token, time.Now()).First(&m).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
-	return &p, err
+	if err != nil {
+		return nil, err
+	}
+	return mapper.PendingRegistrationToEntity(&m), nil
 }
 
 func (r *PendingRegistrationRepository) DeleteByEmail(email string) error {

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -77,7 +78,7 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Response            string                   `json:"response"`
 	QuestionWeightID    uint                     `json:"question_weight_id,omitempty"`
-	CurrentScores       []models.UserWeightScore `json:"current_scores,omitempty"`
+	CurrentScores       []entity.UserWeightScore `json:"current_scores,omitempty"`
 	CurrentPhase        *PhaseProgress           `json:"current_phase,omitempty"`
 	AllPhases           []PhaseProgress          `json:"all_phases,omitempty"`
 	IsComplete          bool                     `json:"is_complete"`
@@ -297,7 +298,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	completedPhaseCount := 0
-	phaseByID := make(map[uint]*models.AnalysisPhase, len(allPhases))
+	phaseByID := make(map[uint]*entity.AnalysisPhase, len(allPhases))
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}
