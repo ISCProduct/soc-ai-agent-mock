@@ -53,5 +53,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&GitHubProfile{},
 		&GitHubRepo{},
 		&GitHubLanguageStat{},
+		&SkillScore{},
 	)
 }

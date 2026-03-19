@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import GitHubSkills from '@/components/github-skills'
 
 interface ChatSession {
   session_id: string
@@ -18,6 +19,7 @@ interface ChatSession {
 export default function ProfilePage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+  const [userId, setUserId] = useState<number | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -27,6 +29,7 @@ export default function ProfilePage() {
       return
     }
 
+    setUserId(user.user_id)
     fetchSessions(user.user_id)
   }, [router])
 
@@ -85,7 +88,10 @@ export default function ProfilePage() {
         戻る
       </Button>
 
-      <Typography variant="h4" gutterBottom>
+      {/* GitHub スキル分析セクション */}
+      {userId !== null && <GitHubSkills userId={userId} />}
+
+      <Typography variant="h4" gutterBottom sx={{ mt: 4 }}>
         チャット履歴
       </Typography>
 
