@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+// EmailService はSMTPを介してメール送信を担うサービス。
+// SMTP_HOST 環境変数が未設定の場合は開発用フォールバックとしてログ出力のみを行う。
 type EmailService struct {
 	host     string
 	port     int
@@ -19,6 +21,9 @@ type EmailService struct {
 	from     string
 }
 
+// NewEmailService は環境変数からSMTP設定を読み込み EmailService を生成する。
+// SMTP_HOST が空の場合は実送信を行わず、標準出力へのログ出力のみで動作する（開発環境フォールバック）。
+// SMTP_PORT が未設定または不正値の場合はデフォルト 587 ポートを使用する。
 func NewEmailService() *EmailService {
 	port, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
 	if port == 0 {
@@ -33,6 +38,7 @@ func NewEmailService() *EmailService {
 	}
 }
 
+// EmailReportCompany は分析レポートメールに含めるおすすめ企業1件分のデータ。
 type EmailReportCompany struct {
 	Rank   int
 	Name   string
@@ -40,6 +46,8 @@ type EmailReportCompany struct {
 	Reason string
 }
 
+// emailReportData は reportEmailTemplate に渡す内部用テンプレートデータ。
+// スコア・進捗・AIコメント・おすすめ企業を保持する。
 type emailReportData struct {
 	UserName              string
 	SessionID             string
@@ -57,6 +65,8 @@ type emailReportData struct {
 	JobSuitabilityComment string
 }
 
+// reportEmailTemplate はAI就活分析レポートメール用のHTMLテンプレート。
+// emailReportData を渡して Execute する。
 const reportEmailTemplate = `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -172,12 +182,16 @@ const reportEmailTemplate = `<!DOCTYPE html>
 </body>
 </html>`
 
+// SendAnalysisReport はAI就活分析レポートをユーザーのメールアドレスへ送信する。
+// summary にはスコア・進捗・AIコメント、companies にはおすすめ企業リストを渡す。
+// SMTP未設定時はログ出力のみでエラーを返さない（開発環境フォールバック）。
 func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSummary, companies []EmailReportCompany, sessionID string) error {
 	tmpl, err := template.New("report").Parse(reportEmailTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse email template: %w", err)
 	}
 
+	// pct は 0〜1 のスコアを 0〜100% の整数文字列に変換するヘルパー
 	pct := func(v float64) string { return fmt.Sprintf("%.0f", v*100) }
 	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
 
@@ -211,6 +225,7 @@ func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSu
 		return nil
 	}
 
+	// MIMEヘッダーとHTMLボディを組み立ててSMTP送信
 	msg := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: AI就活分析レポート\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
 		s.from, user.Email, htmlBody,
@@ -298,6 +313,8 @@ type InterviewReportEmailData struct {
 	OwnEvid    string
 }
 
+// interviewReportEmailTemplate はAI面接練習レポートメール用のHTMLテンプレート。
+// InterviewReportEmailData を渡して Execute する。
 const interviewReportEmailTemplate = `<!DOCTYPE html>
 <html lang="ja">
 <head>
