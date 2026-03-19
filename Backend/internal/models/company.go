@@ -6,6 +6,7 @@ import "time"
 type Company struct {
 	ID               uint       `gorm:"primaryKey" json:"id"`
 	Name             string     `gorm:"type:varchar(255);not null" json:"name"`
+	NameReading      string     `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
 	Description      string     `gorm:"type:text" json:"description"`
 	Industry         string     `gorm:"type:varchar(100)" json:"industry"`
 	EmployeeCount    int        `gorm:"default:0" json:"employee_count"`

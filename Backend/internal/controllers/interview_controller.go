@@ -231,6 +231,7 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal([]byte(historyStr), &history)
 	}
 	companyName := r.FormValue("company_name")
+	companyReading := r.FormValue("company_reading")
 	position := r.FormValue("position")
 	companyInfo := r.FormValue("company_info")
 
@@ -246,7 +247,7 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := c.interviewService.Turn(r.Context(), userID, sessionID, audioData, history, companyName, position, companyInfo)
+	result, err := c.interviewService.Turn(r.Context(), userID, sessionID, audioData, history, companyName, companyReading, position, companyInfo)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -279,14 +280,15 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
-		UserID      uint   `json:"user_id"`
-		CompanyName string `json:"company_name"`
-		Position    string `json:"position"`
-		CompanyInfo string `json:"company_info"`
+		UserID          uint   `json:"user_id"`
+		CompanyName     string `json:"company_name"`
+		CompanyReading  string `json:"company_reading"`
+		Position        string `json:"position"`
+		CompanyInfo     string `json:"company_info"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	result, err := c.interviewService.StartTurn(r.Context(), req.UserID, sessionID, req.CompanyName, req.Position, req.CompanyInfo)
+	result, err := c.interviewService.StartTurn(r.Context(), req.UserID, sessionID, req.CompanyName, req.CompanyReading, req.Position, req.CompanyInfo)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
