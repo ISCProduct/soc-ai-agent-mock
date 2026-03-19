@@ -15,14 +15,16 @@ import (
 )
 
 type OAuthService struct {
-	userRepo    repository.UserRepository
-	oauthConfig *config.OAuthConfig
+	userRepo      repository.UserRepository
+	oauthConfig   *config.OAuthConfig
+	githubService *GitHubService
 }
 
-func NewOAuthService(userRepo repository.UserRepository, oauthConfig *config.OAuthConfig) *OAuthService {
+func NewOAuthService(userRepo repository.UserRepository, oauthConfig *config.OAuthConfig, githubService *GitHubService) *OAuthService {
 	return &OAuthService{
-		userRepo:    userRepo,
-		oauthConfig: oauthConfig,
+		userRepo:      userRepo,
+		oauthConfig:   oauthConfig,
+		githubService: githubService,
 	}
 }
 
@@ -241,6 +243,17 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
+		}
+	}
+
+	// アクセストークン保存 & 非同期データ同期
+	if s.githubService != nil {
+		accessToken := token.AccessToken
+		if err := s.githubService.StoreAccessToken(user.ID, userInfo.Login, accessToken); err != nil {
+			// トークン保存失敗はログのみ（ログイン自体は成功扱い）
+			fmt.Printf("[OAuthService] failed to store github access token for user %d: %v\n", user.ID, err)
+		} else {
+			s.githubService.TriggerAsyncSync(user.ID)
 		}
 	}
 

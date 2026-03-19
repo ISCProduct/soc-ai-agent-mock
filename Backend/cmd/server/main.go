@@ -96,11 +96,14 @@ func main() {
 	// その他
 	resumeRepo := repositories.NewResumeRepository(db)
 	auditLogRepo := repositories.NewAuditLogRepository(db)
+	// GitHub連携
+	githubRepo := repositories.NewGitHubRepository(db)
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
-	oauthService := services.NewOAuthService(userRepo, oauthConfig)
+	githubService := services.NewGitHubService(githubRepo)
+	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo)
@@ -150,6 +153,7 @@ func main() {
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
+	githubController := controllers.NewGitHubController(githubService)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -158,6 +162,7 @@ func main() {
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, userRepo)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
+	routes.SetupGitHubRoutes(githubController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
