@@ -309,7 +309,7 @@ type TurnResult struct {
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
-func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, companyReading, position, companyInfo string) (*TurnResult, error) {
+func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, companyReading, position, companyInfo, companyType string) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -332,11 +332,16 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 		companyReading = s.lookupCompanyReading(ctx, companyName)
 	}
 
+	// 自社開発企業の場合は公式サイト情報を取得
+	if companyType == "general" && companyName != "" && companyInfo == "" {
+		companyInfo = s.lookupCompanyProfile(ctx, companyName)
+	}
+
 	// 履歴にユーザー発言を追加
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo), history)
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType), history)
 	if err != nil {
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
@@ -352,7 +357,7 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
-func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint, companyName, companyReading, position, companyInfo string) (*TurnResult, error) {
+func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint, companyName, companyReading, position, companyInfo, companyType string) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -366,7 +371,12 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		companyReading = s.lookupCompanyReading(ctx, companyName)
 	}
 
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo), []map[string]string{
+	// 自社開発企業の場合は公式サイト情報を取得
+	if companyType == "general" && companyName != "" && companyInfo == "" {
+		companyInfo = s.lookupCompanyProfile(ctx, companyName)
+	}
+
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType), []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
@@ -403,7 +413,20 @@ func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName
 	return reading
 }
 
-func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo string) string {
+// lookupCompanyProfile はWeb検索を使って企業の公式サイト情報（理念・求める人物像・事業内容）を取得します。
+// 取得に失敗した場合は空文字を返します（エラーは無視）。
+func (s *InterviewService) lookupCompanyProfile(ctx context.Context, companyName string) string {
+	query := fmt.Sprintf("%s 公式サイト 求める人物像 企業理念 事業内容", companyName)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	result, err := s.openaiClient.WebSearchQuery(ctxTimeout, query)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(result)
+}
+
+func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType string) string {
 	base := `あなたは日本語の就活面接官です。以下を守ってください。
 - 1回の返答は2〜3文以内で短くまとめる
 - 必ず1つの質問で締めくくる
@@ -424,10 +447,26 @@ func buildInterviewSystemPrompt(companyName, companyReading, position, companyIn
 			base += "\n応募職種: " + position
 		}
 		if companyInfo != "" {
-			base += "\n企業概要: " + companyInfo
+			if companyType == "general" {
+				base += "\n\n【企業研究情報（公式サイトより）】\n" + companyInfo
+			} else {
+				base += "\n企業概要: " + companyInfo
+			}
 		}
 		base += "\n\n上記の企業・職種に合わせた質問を行ってください。"
 	}
+
+	if companyType == "sier" {
+		base += `
+
+【SIer企業向け質問ガイドライン】
+- 常駐先での顧客折衝・要件ヒアリング経験を深掘りする
+- 上流工程（要件定義・基本設計）への関与実績を確認する
+- ウォーターフォール・アジャイルどちらの経験があるか確認する
+- IPA資格や技術資格の取得状況・今後の学習意欲を聞く
+- 多様な現場・技術スタックへの適応力を問う`
+	}
+
 	return strings.TrimSpace(base)
 }
 
