@@ -50,6 +50,7 @@ type Utterance = {
 type InterviewCompany = {
   id: number
   name: string
+  name_reading?: string
   description?: string
   main_business?: string
   industry?: string
@@ -367,6 +368,7 @@ export default function InterviewPage() {
       body: JSON.stringify({
         user_id: userId,
         company_name: interviewCompany?.name || '',
+        company_reading: interviewCompany?.name_reading || '',
         position: selectedPosition?.title || '',
         company_info: [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '),
       }),
@@ -524,6 +526,7 @@ export default function InterviewPage() {
     formData.append('user_id', String(user.user_id))
     formData.append('history', JSON.stringify(historyRef.current))
     formData.append('company_name', interviewCompany?.name || '')
+    formData.append('company_reading', interviewCompany?.name_reading || '')
     formData.append('position', selectedPosition?.title || '')
     formData.append('company_info', [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '))
     try {
@@ -736,7 +739,7 @@ export default function InterviewPage() {
                               </Button>
                             )
                           })}
-                          {filteredCompanies.length === 0 && !companiesLoading && (
+                          {filteredCompanies.length === 0 && !companiesLoading && !companySearch.trim() && (
                             <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>登録企業が見つかりません</Typography>
                           )}
                         </Box>

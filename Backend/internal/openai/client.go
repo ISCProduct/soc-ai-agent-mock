@@ -453,6 +453,83 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	return "", lastErr
 }
 
+// WebSearchQuery は Responses API の web_search_preview ツールを使ってWeb検索を実行し、結果テキストを返します。
+func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, error) {
+	if cli.apiKey == "" {
+		return "", errors.New("openai api key is not set")
+	}
+
+	type webSearchTool struct {
+		Type string `json:"type"`
+	}
+	type webSearchRequest struct {
+		Model string          `json:"model"`
+		Tools []webSearchTool `json:"tools"`
+		Input string          `json:"input"`
+	}
+
+	payload := webSearchRequest{
+		Model: "gpt-4o-mini-search-preview",
+		Tools: []webSearchTool{{Type: "web_search_preview"}},
+		Input: query,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", errors.New(string(respBody))
+	}
+
+	type outputContent struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type outputItem struct {
+		Type    string          `json:"type"`
+		Content []outputContent `json:"content"`
+	}
+	type webSearchResponse struct {
+		Output     []outputItem `json:"output"`
+		OutputText string       `json:"output_text"`
+	}
+
+	var parsed webSearchResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(parsed.OutputText) != "" {
+		return strings.TrimSpace(parsed.OutputText), nil
+	}
+	for _, out := range parsed.Output {
+		for _, c := range out.Content {
+			if strings.TrimSpace(c.Text) != "" {
+				return strings.TrimSpace(c.Text), nil
+			}
+		}
+	}
+	return "", errors.New("empty web search response")
+}
+
 // ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。
 // Chat Completions API の代替として、JSON レスポンスが必要な場合にも利用できます。
 func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {

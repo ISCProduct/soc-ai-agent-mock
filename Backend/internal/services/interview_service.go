@@ -309,7 +309,7 @@ type TurnResult struct {
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
-func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, position, companyInfo string) (*TurnResult, error) {
+func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, companyReading, position, companyInfo string) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -327,11 +327,16 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 		userText = "（聞き取れませんでした）"
 	}
 
+	// 読み仮名が未指定の場合はWeb検索で自動取得
+	if companyName != "" && companyReading == "" {
+		companyReading = s.lookupCompanyReading(ctx, companyName)
+	}
+
 	// 履歴にユーザー発言を追加
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, position, companyInfo), history)
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo), history)
 	if err != nil {
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
@@ -347,7 +352,7 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
-func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint, companyName, position, companyInfo string) (*TurnResult, error) {
+func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint, companyName, companyReading, position, companyInfo string) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -356,7 +361,12 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		return nil, errors.New("forbidden")
 	}
 
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, position, companyInfo), []map[string]string{
+	// 読み仮名が未指定の場合はWeb検索で自動取得
+	if companyName != "" && companyReading == "" {
+		companyReading = s.lookupCompanyReading(ctx, companyName)
+	}
+
+	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo), []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
@@ -372,17 +382,43 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 	return &TurnResult{AIText: aiText, Audio: audio}, nil
 }
 
-func buildInterviewSystemPrompt(companyName, position, companyInfo string) string {
+// lookupCompanyReading はWeb検索を使って企業名の日本語読み（ふりがな）を取得します。
+// 取得に失敗した場合は空文字を返します（エラーは無視）。
+func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName string) string {
+	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", companyName)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	result, err := s.openaiClient.WebSearchQuery(ctxTimeout, query)
+	if err != nil {
+		return ""
+	}
+	// 最初の行だけ抽出し、余分な記号や空白を除去
+	lines := strings.Split(strings.TrimSpace(result), "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	reading := strings.TrimSpace(lines[0])
+	// 句読点・括弧・引用符等を除去
+	reading = strings.Trim(reading, "「」『』（）()。、・ ")
+	return reading
+}
+
+func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo string) string {
 	base := `あなたは日本語の就活面接官です。以下を守ってください。
 - 1回の返答は2〜3文以内で短くまとめる
 - 必ず1つの質問で締めくくる
 - 応募者が話しやすいよう具体的に深掘りする
-- 評価・講評は面接終了まで行わない`
+- 評価・講評は面接終了まで行わない
+- 企業名を発話する際は、英字・略語はカタカナの正しい読み方で読んでください`
 
 	if companyName != "" || position != "" {
 		base += "\n\n【面接情報】"
 		if companyName != "" {
-			base += "\n志望企業: " + companyName
+			companyLabel := companyName
+			if companyReading != "" {
+				companyLabel += "（読み: " + companyReading + "）"
+			}
+			base += "\n志望企業: " + companyLabel
 		}
 		if position != "" {
 			base += "\n応募職種: " + position
