@@ -2,7 +2,27 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, Button, Card, CardContent, Container, MenuItem, TextField, Typography, Alert } from '@mui/material'
+import {
+  Avatar,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Container,
+  Divider,
+  MenuItem,
+  TextField,
+  Typography,
+  Alert,
+  Snackbar,
+} from '@mui/material'
+import PersonIcon from '@mui/icons-material/Person'
+import SchoolIcon from '@mui/icons-material/School'
+import WorkIcon from '@mui/icons-material/Work'
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
+import SaveIcon from '@mui/icons-material/Save'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
@@ -18,6 +38,8 @@ export default function OnboardingPage() {
   const [certificationsInProgress, setCertificationsInProgress] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [isFirstTime, setIsFirstTime] = useState(false)
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -27,6 +49,7 @@ export default function OnboardingPage() {
     }
     setUser(storedUser)
     setName(storedUser.name || '')
+
     const storedSchool = storedUser.school_name || ''
     const predefinedSchools = ['学校法人岩崎学園情報科学専門学校']
     if (predefinedSchools.includes(storedSchool)) {
@@ -36,11 +59,17 @@ export default function OnboardingPage() {
       setSchoolOption('other')
       setSchoolName(storedSchool)
     }
+
     setCertificationsAcquired(splitCertifications(storedUser.certifications_acquired))
     setCertificationsInProgress(storedUser.certifications_in_progress || '')
+
     if (storedUser.target_level === '新卒' || storedUser.target_level === '中途') {
       setTargetLevel(storedUser.target_level)
     }
+
+    // 初回セットアップかどうか（target_levelが未設定なら初回）
+    const firstTime = !storedUser.target_level || (storedUser.target_level !== '新卒' && storedUser.target_level !== '中途')
+    setIsFirstTime(firstTime)
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,135 +89,256 @@ export default function OnboardingPage() {
         certificationsInProgress,
       )
       authService.saveAuth(response)
-      router.replace('/')
+      setUser(authService.getStoredUser())
+      setSaved(true)
+      if (isFirstTime) {
+        router.replace('/')
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to update profile')
+      setError(err.message || '保存に失敗しました')
     } finally {
       setLoading(false)
     }
   }
 
-  if (!user) {
-    return null
-  }
+  if (!user) return null
+
+  const avatarLetter = name ? name[0].toUpperCase() : user.email[0].toUpperCase()
+  const isGitHubUser = user.oauth_provider === 'github'
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', py: 4 }}>
-      <Container maxWidth="lg">
-        <Box
-          sx={{
-            display: 'flex',
-            gap: 3,
-            alignItems: 'flex-start',
-            flexWrap: { xs: 'wrap', md: 'nowrap' },
-          }}
-        >
-          {/* GitHubスキル分析（左カラム） */}
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
+      {/* ページヘッダー */}
+      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: 3, py: 1.5 }}>
+        <Container maxWidth="lg">
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography variant="h6" fontWeight="bold" color="primary">
+              プロフィール
+            </Typography>
+            {!isFirstTime && (
+              <Button
+                startIcon={<ArrowBackIcon />}
+                onClick={() => router.push('/')}
+                size="small"
+              >
+                ホームへ戻る
+              </Button>
+            )}
+          </Box>
+        </Container>
+      </Box>
+
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        {/* ユーザーヘッダーカード */}
+        <Card sx={{ mb: 3, borderRadius: 2 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5, flexWrap: 'wrap' }}>
+              <Avatar
+                src={user.avatar_url || undefined}
+                sx={{ width: 72, height: 72, fontSize: '1.8rem', bgcolor: 'primary.main' }}
+              >
+                {!user.avatar_url && avatarLetter}
+              </Avatar>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+                  <Typography variant="h5" fontWeight="bold" noWrap>
+                    {name || '（名前未設定）'}
+                  </Typography>
+                  {isGitHubUser && (
+                    <Chip
+                      label="GitHub連携済み"
+                      size="small"
+                      sx={{ bgcolor: '#24292e', color: 'white', fontSize: '0.7rem' }}
+                    />
+                  )}
+                  {(targetLevel === '新卒' || targetLevel === '中途') && (
+                    <Chip
+                      label={targetLevel}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                    />
+                  )}
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  {user.email}
+                </Typography>
+                {schoolName && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                    {schoolOption === 'other' ? schoolName : schoolOption}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+
+        {/* メインコンテンツ */}
+        <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
+          {/* 左カラム: プロフィール編集フォーム */}
+          <Box sx={{ width: { xs: '100%', md: 420 }, flexShrink: 0 }}>
+            <Card sx={{ borderRadius: 2, height: '100%' }}>
+              <CardContent sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                  <PersonIcon color="primary" />
+                  <Typography variant="h6" fontWeight="bold">
+                    {isFirstTime ? 'はじめに情報を入力してください' : 'プロフィール編集'}
+                  </Typography>
+                </Box>
+
+                {isFirstTime && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    診断の質問内容を最適化するために必要です。
+                  </Alert>
+                )}
+
+                {error && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {error}
+                  </Alert>
+                )}
+
+                <Box component="form" onSubmit={handleSubmit}>
+                  {/* 基本情報 */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <PersonIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    <Typography variant="body2" fontWeight="bold" color="text.secondary">
+                      基本情報
+                    </Typography>
+                  </Box>
+                  <TextField
+                    fullWidth
+                    label="名前"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    size="small"
+                    sx={{ mb: 2 }}
+                  />
+                  <TextField
+                    fullWidth
+                    select
+                    label="区分"
+                    value={targetLevel}
+                    onChange={(e) => setTargetLevel(e.target.value)}
+                    size="small"
+                    sx={{ mb: 3 }}
+                  >
+                    <MenuItem value="新卒">新卒</MenuItem>
+                    <MenuItem value="中途">中途</MenuItem>
+                  </TextField>
+
+                  <Divider sx={{ mb: 2 }} />
+
+                  {/* 学校情報 */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <SchoolIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    <Typography variant="body2" fontWeight="bold" color="text.secondary">
+                      学校
+                    </Typography>
+                  </Box>
+                  <TextField
+                    fullWidth
+                    select
+                    label="学校名"
+                    value={schoolOption}
+                    onChange={(e) => setSchoolOption(e.target.value)}
+                    required
+                    size="small"
+                    sx={{ mb: 2 }}
+                  >
+                    <MenuItem value="学校法人岩崎学園情報科学専門学校">
+                      学校法人岩崎学園情報科学専門学校
+                    </MenuItem>
+                    <MenuItem value="other">その他</MenuItem>
+                  </TextField>
+                  {schoolOption === 'other' && (
+                    <TextField
+                      fullWidth
+                      label="学校名（その他）"
+                      value={schoolName}
+                      onChange={(e) => setSchoolName(e.target.value)}
+                      required
+                      size="small"
+                      sx={{ mb: 2 }}
+                    />
+                  )}
+
+                  <Divider sx={{ mb: 2 }} />
+
+                  {/* 資格 */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <EmojiEventsIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    <Typography variant="body2" fontWeight="bold" color="text.secondary">
+                      資格
+                    </Typography>
+                  </Box>
+                  <TextField
+                    fullWidth
+                    select
+                    label="取得資格"
+                    value={certificationsAcquired}
+                    onChange={(e) =>
+                      setCertificationsAcquired(
+                        typeof e.target.value === 'string' ? e.target.value.split(',') : (e.target.value as string[]),
+                      )
+                    }
+                    SelectProps={{
+                      multiple: true,
+                      renderValue: (selected) => (selected as string[]).join(', '),
+                    }}
+                    helperText="複数選択可"
+                    size="small"
+                    sx={{ mb: 2 }}
+                  >
+                    {CERTIFICATION_OPTIONS.map((option) => (
+                      <MenuItem key={option} value={option}>
+                        {option}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    fullWidth
+                    label="勉強中の資格"
+                    value={certificationsInProgress}
+                    onChange={(e) => setCertificationsInProgress(e.target.value)}
+                    placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
+                    multiline
+                    minRows={2}
+                    size="small"
+                    sx={{ mb: 3 }}
+                  />
+
+                  <Button
+                    type="submit"
+                    fullWidth
+                    variant="contained"
+                    size="large"
+                    disabled={loading}
+                    startIcon={<SaveIcon />}
+                  >
+                    {loading ? '保存中...' : isFirstTime ? '登録して診断を始める' : '保存する'}
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+
+          {/* 右カラム: GitHub スキル分析 */}
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <GitHubSkills userId={user.user_id} />
           </Box>
-
-          {/* プロフィール設定フォーム（右カラム） */}
-          <Card sx={{ width: { xs: '100%', md: 480 }, flexShrink: 0 }}>
-        <CardContent sx={{ p: 4 }}>
-          <Typography variant="h5" gutterBottom fontWeight="bold">
-            まずは簡単な情報を教えてください
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            診断の質問内容を最適化するために必要です。
-          </Typography>
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
-
-          <Box component="form" onSubmit={handleSubmit}>
-            <TextField
-              fullWidth
-              label="名前"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              fullWidth
-              select
-              label="区分"
-              value={targetLevel}
-              onChange={(e) => setTargetLevel(e.target.value)}
-              sx={{ mb: 3 }}
-            >
-              <MenuItem value="新卒">新卒</MenuItem>
-              <MenuItem value="中途">中途</MenuItem>
-            </TextField>
-            <TextField
-              fullWidth
-              select
-              label="学校名"
-              value={schoolOption}
-              onChange={(e) => setSchoolOption(e.target.value)}
-              required
-              sx={{ mb: 2 }}
-            >
-              <MenuItem value="学校法人岩崎学園情報科学専門学校">
-                学校法人岩崎学園情報科学専門学校
-              </MenuItem>
-              <MenuItem value="other">その他</MenuItem>
-            </TextField>
-            {schoolOption === 'other' && (
-              <TextField
-                fullWidth
-                label="学校名（その他）"
-                value={schoolName}
-                onChange={(e) => setSchoolName(e.target.value)}
-                required
-                sx={{ mb: 2 }}
-              />
-            )}
-            <TextField
-              fullWidth
-              select
-              label="取得資格"
-              value={certificationsAcquired}
-              onChange={(e) =>
-                setCertificationsAcquired(
-                  typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
-                )
-              }
-              SelectProps={{
-                multiple: true,
-                renderValue: (selected) => (selected as string[]).join(', '),
-              }}
-              helperText="複数選択可"
-              sx={{ mb: 2 }}
-            >
-              {CERTIFICATION_OPTIONS.map((option) => (
-                <MenuItem key={option} value={option}>
-                  {option}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              fullWidth
-              label="勉強中の資格"
-              value={certificationsInProgress}
-              onChange={(e) => setCertificationsInProgress(e.target.value)}
-              placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
-              multiline
-              minRows={3}
-              sx={{ mb: 3 }}
-            />
-            <Button type="submit" fullWidth variant="contained" size="large" disabled={loading}>
-              登録して診断を始める
-            </Button>
-          </Box>
-        </CardContent>
-      </Card>
         </Box>
       </Container>
+
+      {/* 保存成功トースト */}
+      <Snackbar
+        open={saved}
+        autoHideDuration={3000}
+        onClose={() => setSaved(false)}
+        message="プロフィールを保存しました"
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
     </Box>
   )
 }
