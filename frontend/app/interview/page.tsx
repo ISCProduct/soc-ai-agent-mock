@@ -371,6 +371,7 @@ export default function InterviewPage() {
         company_reading: interviewCompany?.name_reading || '',
         position: selectedPosition?.title || '',
         company_info: [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '),
+        company_type: selectedPosition?.category || 'general',
       }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -529,6 +530,7 @@ export default function InterviewPage() {
     formData.append('company_reading', interviewCompany?.name_reading || '')
     formData.append('position', selectedPosition?.title || '')
     formData.append('company_info', [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '))
+    formData.append('company_type', selectedPosition?.category || 'general')
     try {
       const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
       const res = await fetch(`${BACKEND}/api/interviews/${session.id}/turn`, {
