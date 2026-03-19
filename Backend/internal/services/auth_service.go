@@ -337,6 +337,8 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 		IsAdmin:                  user.IsAdmin,
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
+		AvatarURL:                user.AvatarURL,
+		OAuthProvider:            user.OAuthProvider,
 	}, nil
 }
 
