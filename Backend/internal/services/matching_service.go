@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"context"
@@ -89,8 +90,8 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 func (s *MatchingService) calculateMatchScore(
 	userScores map[string]float64,
 	companyProfile *models.CompanyWeightProfile,
-) *models.UserCompanyMatch {
-	match := &models.UserCompanyMatch{}
+) *entity.UserCompanyMatch {
+	match := &entity.UserCompanyMatch{}
 	evaluatedCount := 0
 	totalScore := 0.0
 
@@ -134,7 +135,7 @@ func calculateCategoryMatch(userScore, companyWeight float64) float64 {
 }
 
 // GetTopMatches マッチング度の高い企業を取得
-func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*models.UserCompanyMatch, error) {
+func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error) {
 	return s.matchRepo.FindTopMatchesByUserAndSession(userID, sessionID, limit)
 }
 
@@ -165,7 +166,7 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 }
 
 // GenerateMatchReason AIを使ってマッチング理由を生成（オプション）
-func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *models.UserCompanyMatch) (string, error) {
+func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch) (string, error) {
 	// TODO: OpenAI APIを使って、ユーザーの適性と企業の特徴を基にマッチング理由を生成
 	reason := fmt.Sprintf(
 		"あなたの適性スコアと企業の求める人材像が%0.1f%%マッチしています。"+

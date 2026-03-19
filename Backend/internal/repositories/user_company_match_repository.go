@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"Backend/domain/entity"
+	"Backend/domain/mapper"
 	"Backend/internal/models"
 	"time"
 
@@ -16,56 +18,63 @@ func NewUserCompanyMatchRepository(db *gorm.DB) *UserCompanyMatchRepository {
 }
 
 // CreateOrUpdate マッチング結果を作成または更新
-func (r *UserCompanyMatchRepository) CreateOrUpdate(match *models.UserCompanyMatch) error {
+func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMatch) error {
 	var existing models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ? AND company_id = ?",
 		match.UserID, match.SessionID, match.CompanyID).First(&existing).Error
 
+	m := mapper.UserCompanyMatchFromEntity(match)
+
 	if err == gorm.ErrRecordNotFound {
 		// 新規作成
-		return r.db.Create(match).Error
+		return r.db.Create(m).Error
 	} else if err != nil {
 		return err
 	}
 
 	// 更新（ID以外のフィールドを更新）
-	match.ID = existing.ID
-	match.CreatedAt = existing.CreatedAt
-	match.UpdatedAt = time.Now()
-	match.IsViewed = existing.IsViewed
-	match.IsFavorited = existing.IsFavorited
-	match.IsApplied = existing.IsApplied
-	return r.db.Save(match).Error
+	m.ID = existing.ID
+	m.CreatedAt = existing.CreatedAt
+	m.UpdatedAt = time.Now()
+	m.IsViewed = existing.IsViewed
+	m.IsFavorited = existing.IsFavorited
+	m.IsApplied = existing.IsApplied
+	return r.db.Save(m).Error
 }
 
 // FindTopMatchesByUserAndSession マッチング度の高い順に企業を取得
 func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	userID uint, sessionID string, limit int,
-) ([]*models.UserCompanyMatch, error) {
-	var matches []*models.UserCompanyMatch
+) ([]*entity.UserCompanyMatch, error) {
+	var ms []*models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Order("match_score DESC").
 		Limit(limit).
 		Preload("Company").
 		Preload("JobPosition").
-		Find(&matches).Error
+		Find(&ms).Error
 
 	if err != nil {
 		return nil, err
 	}
-	return matches, nil
+
+	result := make([]*entity.UserCompanyMatch, len(ms))
+	for i, m := range ms {
+		result[i] = mapper.UserCompanyMatchToEntity(m)
+	}
+	return result, nil
 }
 
 // FindByID IDでマッチング結果を取得
-func (r *UserCompanyMatchRepository) FindByID(id uint) (*models.UserCompanyMatch, error) {
-	var match models.UserCompanyMatch
+func (r *UserCompanyMatchRepository) FindByID(id uint) (*entity.UserCompanyMatch, error) {
+	var m models.UserCompanyMatch
 	err := r.db.Preload("Company").
 		Preload("JobPosition").
-		First(&match, id).Error
+		First(&m, id).Error
 	if err != nil {
 		return nil, err
 	}
-	return &match, nil
+	return mapper.UserCompanyMatchToEntity(&m), nil
 }
 
 // MarkAsViewed 閲覧済みにする
@@ -92,14 +101,21 @@ func (r *UserCompanyMatchRepository) MarkAsApplied(matchID uint) error {
 }
 
 // FindFavoritesByUser ユーザーのお気に入り企業を取得
-func (r *UserCompanyMatchRepository) FindFavoritesByUser(userID uint, sessionID string) ([]*models.UserCompanyMatch, error) {
-	var matches []*models.UserCompanyMatch
+func (r *UserCompanyMatchRepository) FindFavoritesByUser(userID uint, sessionID string) ([]*entity.UserCompanyMatch, error) {
+	var ms []*models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ? AND is_favorited = ?", userID, sessionID, true).
 		Order("match_score DESC").
 		Preload("Company").
 		Preload("JobPosition").
-		Find(&matches).Error
-	return matches, err
+		Find(&ms).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*entity.UserCompanyMatch, len(ms))
+	for i, m := range ms {
+		result[i] = mapper.UserCompanyMatchToEntity(m)
+	}
+	return result, nil
 }
 
 // GetMatchStatistics マッチング統計情報を取得

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"context"
@@ -363,7 +364,7 @@ func (s *AnalysisScoringService) buildRecommendations(userID uint, sessionID str
 	}
 
 	for _, match := range topMatches {
-		if match.Company.ID == 0 {
+		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
 		recommendations.TopCompanies = append(recommendations.TopCompanies, CompanyRecommendation{
@@ -375,7 +376,7 @@ func (s *AnalysisScoringService) buildRecommendations(userID uint, sessionID str
 	return recommendations
 }
 
-func buildJobSuitabilityComment(scores []models.UserWeightScore) (string, []JobSuitabilityRole) {
+func buildJobSuitabilityComment(scores []entity.UserWeightScore) (string, []JobSuitabilityRole) {
 	if len(scores) == 0 {
 		return "", nil
 	}

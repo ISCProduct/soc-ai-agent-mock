@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -61,7 +62,7 @@ func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (
 }
 
 // generateStrategicQuestion AIが戦略的に次の質問を生成
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *models.UserAnalysisProgress) (string, uint, error) {
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress) (string, uint, error) {
 	// 会話履歴を構築
 	historyText := ""
 	for _, msg := range history {

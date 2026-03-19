@@ -1,8 +1,8 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
-	"Backend/internal/models"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -94,7 +94,7 @@ func (s *AuthService) RequestRegistration(email string) error {
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	pending := &models.PendingRegistration{
+	pending := &entity.PendingRegistration{
 		Token:     token,
 		Email:     email,
 		ExpiresAt: time.Now().Add(24 * time.Hour),
@@ -163,7 +163,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// ユーザー作成
-	user := &models.User{
+	user := &entity.User{
 		Email:                    req.Email,
 		Password:                 string(hashedPassword),
 		Name:                     req.Name,
@@ -289,7 +289,7 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	}
 	guestID := base64.URLEncoding.EncodeToString(randomBytes)
 
-	user := &models.User{
+	user := &entity.User{
 		Email:       fmt.Sprintf("guest_%s@temp.local", guestID),
 		Password:    "", // ゲストユーザーはパスワード不要
 		Name:        fmt.Sprintf("Guest_%s", guestID[:8]),

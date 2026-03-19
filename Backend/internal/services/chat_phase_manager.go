@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -8,14 +9,14 @@ import (
 )
 
 // getCurrentOrNextPhase 現在のフェーズを取得または次のフェーズを開始
-func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, sessionID string) (*models.UserAnalysisProgress, error) {
+func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, sessionID string) (*entity.UserAnalysisProgress, error) {
 	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
 		return nil, err
 	}
 
 	progresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
-	progressMap := make(map[uint]*models.UserAnalysisProgress, len(progresses))
+	progressMap := make(map[uint]*entity.UserAnalysisProgress, len(progresses))
 	for i := range progresses {
 		progressMap[progresses[i].PhaseID] = &progresses[i]
 	}
@@ -40,7 +41,7 @@ func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, se
 }
 
 // updatePhaseProgress フェーズの進捗を更新
-func (s *ChatService) updatePhaseProgress(progress *models.UserAnalysisProgress, isValidAnswer bool) error {
+func (s *ChatService) updatePhaseProgress(progress *entity.UserAnalysisProgress, isValidAnswer bool) error {
 	progress.QuestionsAsked++
 	if isValidAnswer {
 		progress.ValidAnswers++
@@ -80,7 +81,7 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 		return nil, nil, err
 	}
 
-	progressMap := make(map[uint]*models.UserAnalysisProgress)
+	progressMap := make(map[uint]*entity.UserAnalysisProgress)
 	for i := range progresses {
 		progressMap[progresses[i].PhaseID] = &progresses[i]
 	}
@@ -115,7 +116,7 @@ func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) 
 	return result, current, nil
 }
 
-func phaseCompletionScore(validAnswers int, phase *models.AnalysisPhase) float64 {
+func phaseCompletionScore(validAnswers int, phase *entity.AnalysisPhase) float64 {
 	if phase == nil {
 		return 0
 	}
@@ -136,7 +137,7 @@ func phaseCompletionScore(validAnswers int, phase *models.AnalysisPhase) float64
 	return score
 }
 
-func isPhaseComplete(validAnswers int, phase *models.AnalysisPhase) bool {
+func isPhaseComplete(validAnswers int, phase *entity.AnalysisPhase) bool {
 	if phase == nil {
 		return false
 	}
@@ -150,7 +151,7 @@ func isPhaseComplete(validAnswers int, phase *models.AnalysisPhase) bool {
 	return validAnswers >= required
 }
 
-func (s *ChatService) getLastPhaseProgress(userID uint, sessionID string) (*models.UserAnalysisProgress, error) {
+func (s *ChatService) getLastPhaseProgress(userID uint, sessionID string) (*entity.UserAnalysisProgress, error) {
 	progresses, err := s.progressRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
 		return nil, err
@@ -161,11 +162,11 @@ func (s *ChatService) getLastPhaseProgress(userID uint, sessionID string) (*mode
 	return &progresses[len(progresses)-1], nil
 }
 
-func allPhasesReachedMax(progresses []models.UserAnalysisProgress, phases []models.AnalysisPhase) bool {
+func allPhasesReachedMax(progresses []entity.UserAnalysisProgress, phases []entity.AnalysisPhase) bool {
 	if len(phases) == 0 {
 		return false
 	}
-	progressMap := make(map[uint]models.UserAnalysisProgress, len(progresses))
+	progressMap := make(map[uint]entity.UserAnalysisProgress, len(progresses))
 	for _, p := range progresses {
 		progressMap[p.PhaseID] = p
 	}
@@ -181,7 +182,7 @@ func allPhasesReachedMax(progresses []models.UserAnalysisProgress, phases []mode
 	return true
 }
 
-func shouldForceTextQuestion(history []models.ChatMessage, currentPhase *models.UserAnalysisProgress) bool {
+func shouldForceTextQuestion(history []models.ChatMessage, currentPhase *entity.UserAnalysisProgress) bool {
 	if currentPhase == nil || currentPhase.Phase == nil {
 		return false
 	}

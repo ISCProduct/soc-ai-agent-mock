@@ -83,6 +83,7 @@ func main() {
 	popularityRepo := repositories.NewCompanyPopularityRepository(db)
 	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
 	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
+	companyQueryRepo := repositories.NewCompanyQueryRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 	// 埋め込み・マッチング
 	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
@@ -124,7 +125,7 @@ func main() {
 	oauthController := controllers.NewOAuthController(oauthService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
-	relationController := &controllers.CompanyRelationController{DB: db}
+	relationController := controllers.NewCompanyRelationController(companyQueryRepo)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)

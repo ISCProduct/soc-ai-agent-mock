@@ -1,13 +1,13 @@
 package services
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
-	"Backend/internal/models"
 	"os"
 	"strings"
 )
 
-func promoteAdminIfMatched(user *models.User, repo repository.UserRepository) {
+func promoteAdminIfMatched(user *entity.User, repo repository.UserRepository) {
 	if user == nil || repo == nil || user.IsAdmin {
 		return
 	}

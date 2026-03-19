@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/models"
+	"Backend/domain/repository"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,44 +9,33 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type CompanyRelationController struct {
-	DB *gorm.DB
+	repo repository.CompanyRelationQueryRepository
+}
+
+func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository) *CompanyRelationController {
+	return &CompanyRelationController{repo: repo}
 }
 
 // GetCompanyRelations 企業IDに関連する企業関係を取得
 func (ctrl *CompanyRelationController) GetCompanyRelations(w http.ResponseWriter, r *http.Request) {
 	// パスから企業IDを抽出
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	pathParts := splitPath(r.URL.Path)
 	if len(pathParts) < 3 {
 		http.Error(w, "Invalid company ID", http.StatusBadRequest)
 		return
 	}
 
-	companyIDStr := pathParts[2]
-	companyID, err := strconv.ParseUint(companyIDStr, 10, 32)
+	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
 	if err != nil {
 		http.Error(w, "Invalid company ID", http.StatusBadRequest)
 		return
 	}
 
-	var relations []models.CompanyRelation
-
-	err = ctrl.DB.
-		Preload("Parent").
-		Preload("Child").
-		Preload("From").
-		Preload("To").
-		Where("parent_id = ? OR child_id = ? OR from_id = ? OR to_id = ?",
-			companyID, companyID, companyID, companyID).
-		Where("is_active = ?", true).
-		Find(&relations).Error
-
+	relations, err := ctrl.repo.GetByCompanyID(uint(companyID))
 	if err != nil {
 		http.Error(w, "Failed to fetch relations", http.StatusInternalServerError)
 		return
@@ -58,32 +47,25 @@ func (ctrl *CompanyRelationController) GetCompanyRelations(w http.ResponseWriter
 
 // GetCompanyMarketInfo 企業の市場情報を取得
 func (ctrl *CompanyRelationController) GetCompanyMarketInfo(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	pathParts := splitPath(r.URL.Path)
 	if len(pathParts) < 3 {
 		http.Error(w, "Invalid company ID", http.StatusBadRequest)
 		return
 	}
 
-	companyIDStr := pathParts[2]
-	companyID, err := strconv.ParseUint(companyIDStr, 10, 32)
+	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
 	if err != nil {
 		http.Error(w, "Invalid company ID", http.StatusBadRequest)
 		return
 	}
 
-	var marketInfo models.CompanyMarketInfo
-	err = ctrl.DB.
-		Preload("Company").
-		Where("company_id = ?", companyID).
-		First(&marketInfo).Error
-
-	if err == gorm.ErrRecordNotFound {
-		http.Error(w, "Market info not found", http.StatusNotFound)
-		return
-	}
-
+	marketInfo, err := ctrl.repo.GetMarketInfoByCompanyID(uint(companyID))
 	if err != nil {
 		http.Error(w, "Failed to fetch market info", http.StatusInternalServerError)
+		return
+	}
+	if marketInfo == nil {
+		http.Error(w, "Market info not found", http.StatusNotFound)
 		return
 	}
 
@@ -93,16 +75,7 @@ func (ctrl *CompanyRelationController) GetCompanyMarketInfo(w http.ResponseWrite
 
 // GetAllCompanyRelations 全企業関係を取得（関連図用）
 func (ctrl *CompanyRelationController) GetAllCompanyRelations(w http.ResponseWriter, r *http.Request) {
-	var relations []models.CompanyRelation
-
-	err := ctrl.DB.
-		Preload("Parent").
-		Preload("Child").
-		Preload("From").
-		Preload("To").
-		Where("is_active = ?", true).
-		Find(&relations).Error
-
+	relations, err := ctrl.repo.GetAll()
 	if err != nil {
 		http.Error(w, "Failed to fetch relations", http.StatusInternalServerError)
 		return
@@ -114,12 +87,7 @@ func (ctrl *CompanyRelationController) GetAllCompanyRelations(w http.ResponseWri
 
 // GetAllMarketInfo 全企業の市場情報を取得
 func (ctrl *CompanyRelationController) GetAllMarketInfo(w http.ResponseWriter, r *http.Request) {
-	var marketInfos []models.CompanyMarketInfo
-
-	err := ctrl.DB.
-		Preload("Company").
-		Find(&marketInfos).Error
-
+	marketInfos, err := ctrl.repo.GetAllMarketInfo()
 	if err != nil {
 		http.Error(w, "Failed to fetch market info", http.StatusInternalServerError)
 		return
@@ -135,7 +103,7 @@ func (ctrl *CompanyRelationController) GetCompanyJobPositions(w http.ResponseWri
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	pathParts := splitPath(r.URL.Path)
 	// path: /api/companies/{id}/job-positions → ["api","companies","{id}","job-positions"]
 	if len(pathParts) < 3 {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
@@ -147,12 +115,7 @@ func (ctrl *CompanyRelationController) GetCompanyJobPositions(w http.ResponseWri
 		return
 	}
 
-	var positions []models.CompanyJobPosition
-	err = ctrl.DB.
-		Where("company_id = ? AND is_active = ? AND data_status = ?", companyID, true, "published").
-		Preload("JobCategory").
-		Order("created_at desc").
-		Find(&positions).Error
+	positions, err := ctrl.repo.GetJobPositionsByCompany(uint(companyID))
 	if err != nil {
 		http.Error(w, "Failed to fetch job positions", http.StatusInternalServerError)
 		return
@@ -169,6 +132,7 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	industry := r.URL.Query().Get("industry")
+	name := r.URL.Query().Get("name")
 
 	limit := 10 // デフォルト
 	offset := 0
@@ -188,44 +152,18 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 		}
 	}
 
-	name := r.URL.Query().Get("name")
-
-	query := ctrl.DB.Where("is_active = ?", true)
-
-	if industry != "" {
-		query = query.Where("industry = ?", industry)
-	}
-
-	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
-	}
-
-	order := "RAND()"
-	if name != "" {
-		order = "name ASC"
-	}
-
-	var companies []models.Company
-	err := query.
-		Limit(limit).
-		Offset(offset).
-		Order(order).
-		Find(&companies).Error
-
+	companies, total, err := ctrl.repo.GetCompaniesFiltered(limit, offset, industry, name)
 	if err != nil {
 		http.Error(w, "Failed to fetch companies", http.StatusInternalServerError)
 		return
 	}
 
 	type CompanyResponse struct {
-		Companies []models.Company `json:"companies"`
-		Total     int64            `json:"total"`
-		Limit     int              `json:"limit"`
-		Offset    int              `json:"offset"`
+		Companies interface{} `json:"companies"`
+		Total     int64       `json:"total"`
+		Limit     int         `json:"limit"`
+		Offset    int         `json:"offset"`
 	}
-
-	var total int64
-	ctrl.DB.Model(&models.Company{}).Where("is_active = ?", true).Count(&total)
 
 	response := CompanyResponse{
 		Companies: companies,
@@ -245,7 +183,12 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter,
 		return
 	}
 
-	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "q parameter is required", http.StatusBadRequest)
+		return
+	}
+	query = trimSpace(query)
 	if query == "" {
 		http.Error(w, "q parameter is required", http.StatusBadRequest)
 		return
@@ -303,4 +246,33 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter,
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+}
+
+// splitPath はURLパスを "/" で分割してスラッシュを除去した要素のスライスを返す
+func splitPath(path string) []string {
+	// strings パッケージは同一ファイル内で使えるのでコピーして利用
+	result := []string{}
+	start := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '/' {
+			if i > start {
+				result = append(result, path[start:i])
+			}
+			start = i + 1
+		}
+	}
+	return result
+}
+
+// trimSpace は文字列の先頭と末尾の空白を除去する（標準ライブラリ呼び出しを避けるためのラッパー）
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
 }
