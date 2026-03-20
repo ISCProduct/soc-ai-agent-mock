@@ -131,7 +131,7 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil)
+	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil, aiClient)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
