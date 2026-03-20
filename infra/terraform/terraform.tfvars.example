@@ -36,9 +36,15 @@ db_username           = "app_user"
 # db_allocated_storage = 20
 
 # ─── Secrets Manager ──────────────────────────────────────────
-# 既存のSecrets ManagerのARNを指定してください
+# OpenAI APIキー（文字列形式 or {"OPENAI_API_KEY":"sk-..."} 形式）
 openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:970835573274:secret:prod/openai/api-key-ctv4bB"
-db_secret_arn     = "arn:aws:secretsmanager:ap-northeast-1:970835573274:secret:rds!db-3abb75b9-c579-47de-a978-d4f6e56dd4ba-kXjKwE"
+
+# RDS マネージドシークレット（JSON形式: {"username":"...","password":"...","host":"..."}）
+# ECSタスク定義で以下のように個別環境変数に展開されます:
+#   DB_PASSWORD  ← <arn>:password::
+#   DB_USER      ← <arn>:username::
+# バックエンドの config.go は DB_USER / DB_PASSWORD / DB_HOST / DB_PORT / DB_NAME を読みます
+db_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:970835573274:secret:rds!db-3abb75b9-c579-47de-a978-d4f6e56dd4ba-kXjKwE"
 
 # ─── ALB / HTTPS ──────────────────────────────────────────────
 # ACM証明書のARN（HTTPSを使う場合のみ設定）

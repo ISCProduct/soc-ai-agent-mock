@@ -50,10 +50,14 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "DB_HOST", value = local.db_host },
         { name = "DB_PORT", value = "3306" },
         { name = "DB_NAME", value = var.db_name },
+        # DB_USER は Secrets Manager から取得しない場合のフォールバック
         { name = "DB_USER", value = var.db_username },
         { name = "BACKEND_URL", value = "http://localhost:8080" }
       ]
 
+      # secrets: Secrets Manager の JSON キーを個別環境変数に展開
+      # RDS マネージドシークレット形式: {"username":"...","password":"...","host":"...","port":...}
+      # valueFrom の末尾 ":json-key::" で特定フィールドのみ取得できる
       secrets = concat(
         var.openai_secret_arn != "" ? [
           {
@@ -63,8 +67,14 @@ resource "aws_ecs_task_definition" "backend" {
         ] : [],
         var.db_secret_arn != "" ? [
           {
-            name      = "DB_SECRET"
-            valueFrom = var.db_secret_arn
+            # config.go が読む "DB_PASSWORD" に直接マッピング
+            name      = "DB_PASSWORD"
+            valueFrom = "${var.db_secret_arn}:password::"
+          },
+          {
+            # DB_USER も Secrets Manager から上書き（オプション）
+            name      = "DB_USER"
+            valueFrom = "${var.db_secret_arn}:username::"
           }
         ] : []
       )
