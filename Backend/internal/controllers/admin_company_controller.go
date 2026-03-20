@@ -3,9 +3,12 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/services"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,13 +16,18 @@ import (
 )
 
 type AdminCompanyController struct {
-	repo  repository.CompanyRepository
-	audit *services.AuditLogService
-	gbiz  *services.GBizInfoService
+	repo        repository.CompanyRepository
+	audit       *services.AuditLogService
+	gbiz        *services.GBizInfoService
+	openaiClient *openai.Client
 }
 
-func NewAdminCompanyController(repo repository.CompanyRepository, audit *services.AuditLogService, gbiz *services.GBizInfoService) *AdminCompanyController {
-	return &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
+func NewAdminCompanyController(repo repository.CompanyRepository, audit *services.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
+	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
+	if len(openaiClient) > 0 {
+		ctrl.openaiClient = openaiClient[0]
+	}
+	return ctrl
 }
 
 func (c *AdminCompanyController) ListOrCreate(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +54,10 @@ func (c *AdminCompanyController) Detail(w http.ResponseWriter, r *http.Request) 
 	}
 	if strings.HasSuffix(idStr, "/gbiz-sync") {
 		c.syncGBiz(w, r, strings.TrimSuffix(idStr, "/gbiz-sync"))
+		return
+	}
+	if strings.HasSuffix(idStr, "/tech-stack-search") {
+		c.fetchTechStack(w, r, strings.TrimSuffix(idStr, "/tech-stack-search"))
 		return
 	}
 	if strings.HasSuffix(idStr, "/publish") {
@@ -270,6 +282,107 @@ func (c *AdminCompanyController) syncGBiz(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(result)
 }
 
+// fetchTechStack はOpenAI WebSearchで企業の技術スタックを取得してDBを更新する
+func (c *AdminCompanyController) fetchTechStack(w http.ResponseWriter, r *http.Request, idStr string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	idStr = strings.Trim(idStr, "/")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid company id", http.StatusBadRequest)
+		return
+	}
+	if c.openaiClient == nil {
+		http.Error(w, "openai client not configured", http.StatusServiceUnavailable)
+		return
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		http.Error(w, "company not found", http.StatusNotFound)
+		return
+	}
+
+	prompt := fmt.Sprintf(
+		`「%s」という日本のIT企業の技術スタックを調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+{
+  "tech_stack": ["言語・フレームワーク名（例: Go, React, TypeScript）"],
+  "infra_stack": ["インフラ名（例: AWS, GCP, Azure, オンプレ）"],
+  "cicd_tools": ["CI/CDツール名（例: GitHub Actions, Jenkins, CircleCI）"],
+  "development_style": "開発手法（例: スクラム, ウォーターフォール, カンバン）"
+}`,
+		company.Name,
+	)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	text, err := c.openaiClient.WebSearchQuery(ctx, prompt)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("web search failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// JSON部分を抽出
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start == -1 || end == -1 || end <= start {
+		http.Error(w, "failed to parse web search response", http.StatusInternalServerError)
+		return
+	}
+
+	type techStackResult struct {
+		TechStack        []string `json:"tech_stack"`
+		InfraStack       []string `json:"infra_stack"`
+		CicdTools        []string `json:"cicd_tools"`
+		DevelopmentStyle string   `json:"development_style"`
+	}
+	var result techStackResult
+	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
+		http.Error(w, "failed to parse tech stack json", http.StatusInternalServerError)
+		return
+	}
+
+	// JSON配列をシリアライズしてDBに保存
+	if len(result.TechStack) > 0 {
+		if b, err := json.Marshal(result.TechStack); err == nil {
+			company.TechStack = string(b)
+		}
+	}
+	if len(result.InfraStack) > 0 {
+		if b, err := json.Marshal(result.InfraStack); err == nil {
+			company.InfraStack = string(b)
+		}
+	}
+	if len(result.CicdTools) > 0 {
+		if b, err := json.Marshal(result.CicdTools); err == nil {
+			company.CicdTools = string(b)
+		}
+	}
+	if result.DevelopmentStyle != "" {
+		company.DevelopmentStyle = result.DevelopmentStyle
+	}
+
+	if err := c.repo.Update(company); err != nil {
+		http.Error(w, "failed to update company", http.StatusInternalServerError)
+		return
+	}
+
+	actor := r.Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]interface{}{
+		"name": company.Name,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tech_stack":        result.TechStack,
+		"infra_stack":       result.InfraStack,
+		"cicd_tools":        result.CicdTools,
+		"development_style": result.DevelopmentStyle,
+	})
+}
+
 func applyCompanyDefaults(company *models.Company) {
 	if strings.TrimSpace(company.SourceType) == "" {
 		company.SourceType = "manual"
@@ -331,6 +444,12 @@ func mergeCompany(existing *models.Company, payload *models.Company) error {
 	}
 	if strings.TrimSpace(payload.TechStack) != "" {
 		existing.TechStack = payload.TechStack
+	}
+	if strings.TrimSpace(payload.InfraStack) != "" {
+		existing.InfraStack = payload.InfraStack
+	}
+	if strings.TrimSpace(payload.CicdTools) != "" {
+		existing.CicdTools = payload.CicdTools
 	}
 	if strings.TrimSpace(payload.DevelopmentStyle) != "" {
 		existing.DevelopmentStyle = payload.DevelopmentStyle

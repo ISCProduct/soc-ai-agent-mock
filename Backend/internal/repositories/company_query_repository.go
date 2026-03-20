@@ -79,15 +79,36 @@ func (r *CompanyQueryRepository) GetJobPositionsByCompany(companyID uint) ([]mod
 	return positions, err
 }
 
-// GetCompaniesFiltered フィルタリングされた企業一覧と総件数を取得
-func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industry, name string) ([]models.Company, int64, error) {
-	query := r.db.Where("is_active = ?", true)
-
-	if industry != "" {
-		query = query.Where("industry = ?", industry)
+// GetCompanyByID 指定IDの企業を取得
+func (r *CompanyQueryRepository) GetCompanyByID(id uint) (*models.Company, error) {
+	var company models.Company
+	err := r.db.Where("id = ? AND is_active = ?", id, true).First(&company).Error
+	if err != nil {
+		return nil, err
 	}
-	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+	return &company, nil
+}
+
+// GetCompaniesFiltered フィルタリングされた企業一覧と総件数を取得
+func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industry, name, tech string) ([]models.Company, int64, error) {
+	applyFilters := func(q interface{ Where(query interface{}, args ...interface{}) *gorm.DB }) *gorm.DB {
+		db := q.Where("is_active = ?", true)
+		if industry != "" {
+			db = db.Where("industry = ?", industry)
+		}
+		if name != "" {
+			db = db.Where("name LIKE ?", "%"+name+"%")
+		}
+		if tech != "" {
+			like := "%" + tech + "%"
+			db = db.Where("tech_stack LIKE ? OR infra_stack LIKE ? OR cicd_tools LIKE ?", like, like, like)
+		}
+		return db
+	}
+
+	var total int64
+	if err := applyFilters(r.db.Model(&models.Company{})).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
 
 	order := "RAND()"
@@ -95,20 +116,8 @@ func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industr
 		order = "name ASC"
 	}
 
-	var total int64
-	countQuery := r.db.Model(&models.Company{}).Where("is_active = ?", true)
-	if industry != "" {
-		countQuery = countQuery.Where("industry = ?", industry)
-	}
-	if name != "" {
-		countQuery = countQuery.Where("name LIKE ?", "%"+name+"%")
-	}
-	if err := countQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
 	var companies []models.Company
-	err := query.
+	err := applyFilters(r.db).
 		Limit(limit).
 		Offset(offset).
 		Order(order).

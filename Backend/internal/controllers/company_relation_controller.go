@@ -98,6 +98,33 @@ func (ctrl *CompanyRelationController) GetAllMarketInfo(w http.ResponseWriter, r
 	json.NewEncoder(w).Encode(marketInfos)
 }
 
+// GetCompanyByID 企業IDで企業詳細を取得
+func (ctrl *CompanyRelationController) GetCompanyByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pathParts := splitPath(r.URL.Path)
+	if len(pathParts) < 3 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid company ID", http.StatusBadRequest)
+		return
+	}
+
+	company, err := ctrl.repo.GetCompanyByID(uint(companyID))
+	if err != nil {
+		http.Error(w, "Company not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(company)
+}
+
 // GetCompanyJobPositions 企業の公開済み求人一覧を取得
 func (ctrl *CompanyRelationController) GetCompanyJobPositions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -134,6 +161,7 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 	offsetStr := r.URL.Query().Get("offset")
 	industry := r.URL.Query().Get("industry")
 	name := r.URL.Query().Get("name")
+	tech := r.URL.Query().Get("tech")
 
 	limit := 10 // デフォルト
 	offset := 0
@@ -153,7 +181,7 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 		}
 	}
 
-	companies, total, err := ctrl.repo.GetCompaniesFiltered(limit, offset, industry, name)
+	companies, total, err := ctrl.repo.GetCompaniesFiltered(limit, offset, industry, name, tech)
 	if err != nil {
 		http.Error(w, "Failed to fetch companies", http.StatusInternalServerError)
 		return

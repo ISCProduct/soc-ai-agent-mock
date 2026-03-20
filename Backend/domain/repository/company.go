@@ -10,7 +10,8 @@ type CompanyRelationQueryRepository interface {
 	GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error)
 	GetAllMarketInfo() ([]models.CompanyMarketInfo, error)
 	GetJobPositionsByCompany(companyID uint) ([]models.CompanyJobPosition, error)
-	GetCompaniesFiltered(limit, offset int, industry, name string) ([]models.Company, int64, error)
+	GetCompaniesFiltered(limit, offset int, industry, name, tech string) ([]models.Company, int64, error)
+	GetCompanyByID(id uint) (*models.Company, error)
 }
 
 // CompanyRepository は企業情報の永続化インターフェース。
