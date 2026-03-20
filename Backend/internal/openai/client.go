@@ -468,8 +468,12 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 		Input string          `json:"input"`
 	}
 
+	model := cli.DefaultModel
+	if model == "" {
+		model = "gpt-4o-search-preview"
+	}
 	payload := webSearchRequest{
-		Model: "gpt-4o-mini-search-preview",
+		Model: model,
 		Tools: []webSearchTool{{Type: "web_search_preview"}},
 		Input: query,
 	}

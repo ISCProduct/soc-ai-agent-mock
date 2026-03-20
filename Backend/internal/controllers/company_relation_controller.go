@@ -209,12 +209,12 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter,
 // searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
 	prompt := fmt.Sprintf(
-		`「%s」に関連する日本の企業を最大5件検索して、以下のJSON形式のみで返してください。説明文は不要です。
+		`「%s」という検索キーワードで日本の企業を最大5件検索してください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
 [{"name":"企業名","description":"事業内容の1行説明"}]`,
 		query,
 	)
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
 	text, err := ctrl.openaiClient.WebSearchQuery(ctxTimeout, prompt)
@@ -222,16 +222,14 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 		return []map[string]string{}
 	}
 
-	// JSON配列部分を抽出
 	start := strings.Index(text, "[")
 	end := strings.LastIndex(text, "]")
 	if start == -1 || end == -1 || end <= start {
 		return []map[string]string{}
 	}
-	jsonPart := text[start : end+1]
 
 	var results []map[string]string
-	if err := json.Unmarshal([]byte(jsonPart), &results); err != nil {
+	if err := json.Unmarshal([]byte(text[start:end+1]), &results); err != nil {
 		return []map[string]string{}
 	}
 	return results
