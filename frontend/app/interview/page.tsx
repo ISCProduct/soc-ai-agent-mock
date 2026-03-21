@@ -134,6 +134,8 @@ export default function InterviewPage() {
   const videoChunksRef = useRef<Blob[]>([])
   const historyRef = useRef<{ role: string; content: string }[]>([])
   const aiAudioRef = useRef<HTMLAudioElement | null>(null)
+  const aiAudioCtxRef = useRef<AudioContext | null>(null)
+  const aiLevelRafRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sessionStartRef = useRef<number | null>(null)
@@ -286,6 +288,9 @@ export default function InterviewPage() {
       mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
     }
     if (aiAudioRef.current) { aiAudioRef.current.pause(); aiAudioRef.current.src = '' }
+    if (aiLevelRafRef.current !== null) { cancelAnimationFrame(aiLevelRafRef.current); aiLevelRafRef.current = null }
+    if (aiAudioCtxRef.current) { aiAudioCtxRef.current.close().catch(() => {}); aiAudioCtxRef.current = null }
+    setAiLevel(0)
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
     setIsRecording(false); setTurnPending(false); setAiSpeaking(false)
   }
@@ -350,13 +355,51 @@ export default function InterviewPage() {
   const playAudioBlob = (blob: Blob): Promise<void> => {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(blob)
-      const el = aiAudioRef.current || new Audio()
+      // Always create a fresh Audio element so createMediaElementSource can be called each time
+      const el = new Audio()
       aiAudioRef.current = el
       el.src = url
       setAiSpeaking(true)
-      el.onended = () => { setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.onerror = () => { setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.play().catch(() => { setAiSpeaking(false); resolve() })
+
+      // Set up AudioContext for real-time amplitude analysis (drives aiLevel / lipsync)
+      let rafId: number | null = null
+      try {
+        if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
+          aiAudioCtxRef.current = new AudioContext()
+        }
+        const ctx = aiAudioCtxRef.current
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+
+        const source   = ctx.createMediaElementSource(el)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 512
+        analyser.smoothingTimeConstant = 0.6
+        source.connect(analyser)
+        analyser.connect(ctx.destination)
+
+        const timeData = new Uint8Array(analyser.fftSize)
+        const trackLevel = () => {
+          analyser.getByteTimeDomainData(timeData)
+          let sum = 0
+          for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
+          const rms = Math.sqrt(sum / timeData.length)
+          setAiLevel(Math.min(1, rms * 6))
+          rafId = requestAnimationFrame(trackLevel)
+        }
+        rafId = requestAnimationFrame(trackLevel)
+        aiLevelRafRef.current = rafId
+      } catch { /* AudioContext not supported – lipsync disabled */ }
+
+      const cleanup = () => {
+        if (rafId !== null) cancelAnimationFrame(rafId)
+        if (aiLevelRafRef.current !== null) cancelAnimationFrame(aiLevelRafRef.current)
+        aiLevelRafRef.current = null
+        setAiLevel(0)
+      }
+
+      el.onended = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
+      el.onerror = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
+      el.play().catch(() => { cleanup(); setAiSpeaking(false); resolve() })
     })
   }
 
@@ -1273,12 +1316,6 @@ export default function InterviewPage() {
               </Typography>
             </Box>
 
-            {/* Subtitle overlay */}
-            {captionsVisible && latestAiText && (
-              <Box sx={{ position: 'absolute', bottom: 48, left: '50%', transform: 'translateX(-50%)', maxWidth: '85%', bgcolor: 'rgba(0,0,0,0.72)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
-                <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
-              </Box>
-            )}
 
             {/* Error overlay */}
             {status === 'error' && (
@@ -1299,6 +1336,13 @@ export default function InterviewPage() {
               </Box>
             )}
           </Box>
+
+          {/* Subtitle below avatar frame */}
+          {captionsVisible && latestAiText && (
+            <Box sx={{ mx: 1, mt: -0.5, mb: 0.5, bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
+              <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
+            </Box>
+          )}
 
           {/* User camera tile */}
           <Box sx={{ position: 'relative', aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden', bgcolor: '#3c4043', boxShadow: `0 0 0 2px rgba(236,91,19,0.3), 0 8px 32px rgba(0,0,0,0.4)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

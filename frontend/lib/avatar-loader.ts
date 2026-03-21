@@ -62,30 +62,26 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
     console.log(`[AvatarLoader] Loading local avatar: ${localPath}`)
     const gltf = await loadWithTimeout(loader, localPath, 10000)
     console.log(`[AvatarLoader] Successfully loaded local avatar`)
-    validateAvatarMorphTargets(gltf)
-    return gltf
-  } catch (localError) {
-    console.warn(`[AvatarLoader] Local avatar not found (${localPath}). Trying Ready Player Me fallback...`)
-
-    // Try Ready Player Me CDN as fallback
-    const fallbackUrl = READY_PLAYER_ME_FALLBACK[gender]
-    try {
-      console.log(`[AvatarLoader] Loading RPM fallback: ${fallbackUrl}`)
-      const gltf = await loadWithTimeout(loader, fallbackUrl, 15000)
-      console.log(`[AvatarLoader] Successfully loaded RPM fallback avatar`)
-      validateAvatarMorphTargets(gltf)
-      return gltf
-    } catch (fallbackError) {
-      console.warn(`[AvatarLoader] RPM fallback also failed. Falling back to SVG avatar.`)
-      console.info(
-        `[AvatarLoader] To use local 3D avatars, add GLB files to frontend/public/avatars/\n` +
-        `See frontend/public/avatars/README.md for instructions.`
-      )
-      throw new Error(
-        `Avatar loading failed for "${gender}". ` +
-        `Add ${gender}-avatar.glb to frontend/public/avatars/ or check your network connection.`
-      )
+    if (!hasMorphTargets(gltf)) {
+      console.warn('[AvatarLoader] Avatar does not have morph targets. Lipsync will not work.')
     }
+    return gltf
+  } catch {
+    console.warn(`[AvatarLoader] Local avatar not found (${localPath}). Trying Ready Player Me fallback...`)
+  }
+
+  // Fallback to Ready Player Me CDN
+  const fallbackUrl = READY_PLAYER_ME_FALLBACK[gender]
+  try {
+    console.log(`[AvatarLoader] Loading RPM fallback: ${fallbackUrl}`)
+    const gltf = await loadWithTimeout(loader, fallbackUrl, 15000)
+    console.log(`[AvatarLoader] Successfully loaded RPM fallback avatar`)
+    return gltf
+  } catch {
+    throw new Error(
+      `Avatar loading failed for "${gender}". ` +
+      `Add ${gender}-avatar.glb to frontend/public/avatars/ or check your network connection.`
+    )
   }
 }
 
@@ -133,24 +129,16 @@ function loadWithTimeout(
 }
 
 /**
- * Validate that the loaded avatar has required morph targets for lipsync
+ * Returns true if the loaded GLTF has at least one mesh with morph targets.
  */
-function validateAvatarMorphTargets(gltf: GLTF): void {
-  let hasMorphTargets = false
-
+function hasMorphTargets(gltf: GLTF): boolean {
+  let found = false
   gltf.scene.traverse((child: any) => {
-    if (child.isMesh && child.morphTargetDictionary) {
-      const morphTargets = Object.keys(child.morphTargetDictionary)
-      if (morphTargets.length > 0) {
-        hasMorphTargets = true
-        console.log(`[AvatarLoader] Found ${morphTargets.length} morph targets:`, morphTargets)
-      }
+    if (!found && child.isMesh && child.morphTargetDictionary) {
+      if (Object.keys(child.morphTargetDictionary).length > 0) found = true
     }
   })
-
-  if (!hasMorphTargets) {
-    console.warn('[AvatarLoader] Warning: Avatar does not have morph targets. Lipsync will not work.')
-  }
+  return found
 }
 
 /**
