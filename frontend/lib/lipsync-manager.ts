@@ -1,99 +1,65 @@
 /**
- * LipsyncManager - Manages real-time lipsync using wawa-lipsync library
- * Converts audio stream to viseme data and maps to morph target weights
+ * LipsyncManager - Manages real-time lipsync using Web Audio API frequency analysis
+ * Analyzes audio frequency bands to determine mouth shape without external dependencies
  */
-
-// Oculus OVR LipSync viseme list (used by Ready Player Me)
-// Reference: https://docs.readyplayer.me/ready-player-me/api-reference/avatars/morph-targets/oculus-ovr-libsync
-const OCULUS_VISEMES = [
-  'viseme_sil',  // silence
-  'viseme_PP',   // PP, BB, MB
-  'viseme_FF',   // FF, V
-  'viseme_TH',   // TH
-  'viseme_DD',   // DD, T, N, L
-  'viseme_kk',   // K, G, NG, CH, SH, ZH
-  'viseme_CH',   // CH, J, SH
-  'viseme_SS',   // S, Z
-  'viseme_nn',   // N, NG
-  'viseme_RR',   // R
-  'viseme_aa',   // AA, AO
-  'viseme_E',    // EH, AE, UH
-  'viseme_I',    // IH
-  'viseme_O',    // O
-  'viseme_U',    // UW, UH
-] as const
-
-// Map from wawa-lipsync phoneme codes to Oculus visemes
-const PHONEME_TO_VISEME_MAP: Record<string, string> = {
-  // Silence
-  'sil': 'viseme_sil',
-
-  // Consonants
-  'p': 'viseme_PP',
-  'b': 'viseme_PP',
-  'm': 'viseme_PP',
-
-  'f': 'viseme_FF',
-  'v': 'viseme_FF',
-
-  'th': 'viseme_TH',
-  'dh': 'viseme_TH',
-
-  't': 'viseme_DD',
-  'd': 'viseme_DD',
-  'n': 'viseme_DD',
-  'l': 'viseme_DD',
-
-  'k': 'viseme_kk',
-  'g': 'viseme_kk',
-  'ng': 'viseme_kk',
-
-  'ch': 'viseme_CH',
-  'jh': 'viseme_CH',
-  'sh': 'viseme_CH',
-  'zh': 'viseme_CH',
-
-  's': 'viseme_SS',
-  'z': 'viseme_SS',
-
-  'r': 'viseme_RR',
-
-  // Vowels
-  'aa': 'viseme_aa',
-  'ao': 'viseme_aa',
-  'ax': 'viseme_aa',
-
-  'eh': 'viseme_E',
-  'ae': 'viseme_E',
-  'ah': 'viseme_E',
-  'uh': 'viseme_E',
-
-  'ih': 'viseme_I',
-  'iy': 'viseme_I',
-
-  'oh': 'viseme_O',
-  'ow': 'viseme_O',
-
-  'uw': 'viseme_U',
-  'uu': 'viseme_U',
-}
 
 export interface VisemeWeights {
   [visemeName: string]: number
 }
 
+// Simple vowel shapes mapped to common morph target names
+// These are used as fallback when model has Oculus-style visemes
+const OCULUS_VISEMES = [
+  'viseme_sil',
+  'viseme_PP',
+  'viseme_FF',
+  'viseme_TH',
+  'viseme_DD',
+  'viseme_kk',
+  'viseme_CH',
+  'viseme_SS',
+  'viseme_nn',
+  'viseme_RR',
+  'viseme_aa',
+  'viseme_E',
+  'viseme_I',
+  'viseme_O',
+  'viseme_U',
+] as const
+
+type OculusViseme = (typeof OCULUS_VISEMES)[number]
+
+// Frequency band definitions (Hz) for vowel detection
+// Based on approximate F1/F2 formant ranges for Japanese vowels
+const FREQ_BANDS = {
+  sub:  [0,    80],   // sub-bass (jaw movement)
+  low:  [80,   300],  // low fundamental
+  mid:  [300,  800],  // first formant (F1)
+  high: [800,  2500], // second formant (F2)
+  air:  [2500, 8000], // sibilants / fricatives
+} as const
+
 export class LipsyncManager {
   private audioContext: AudioContext | null = null
   private analyser: AnalyserNode | null = null
   private sourceNode: MediaStreamAudioSourceNode | null = null
-  private currentViseme: string = 'viseme_sil'
-  private targetViseme: string = 'viseme_sil'
-  private visemeWeight: number = 0
-  private smoothingFactor: number = 0.3
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private freqData: any = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private timeData: any = null
   private animationFrameId: number | null = null
-  private dataArray: Uint8Array<ArrayBuffer> | null = null
-  private lastUpdateTime: number = 0
-  private updateInterval: number = 1000 / 30 // 30fps for morph target updates
+
+  // Current state with smoothing
+  private currentViseme: OculusViseme = 'viseme_sil'
+  private currentWeight = 0
+  private targetViseme: OculusViseme = 'viseme_sil'
+  private targetWeight = 0
+
+  // Smoothing constants
+  private readonly WEIGHT_ATTACK  = 0.25   // how fast weight rises
+  private readonly WEIGHT_RELEASE = 0.18   // how fast weight falls
+  private readonly VISEME_HOLD_MS = 60     // minimum time to hold a viseme (ms)
+  private lastVisemeChangeTime = 0
 
   constructor(audioStream: MediaStream | null) {
     if (audioStream) {
@@ -101,19 +67,17 @@ export class LipsyncManager {
     }
   }
 
-  /**
-   * Initialize audio analysis from MediaStream
-   */
   private initializeAudioAnalysis(audioStream: MediaStream): void {
     try {
       this.audioContext = new AudioContext()
-      this.sourceNode = this.audioContext.createMediaStreamSource(audioStream)
       this.analyser = this.audioContext.createAnalyser()
+      this.analyser.fftSize = 1024
+      this.analyser.smoothingTimeConstant = 0.75
 
-      this.analyser.fftSize = 2048
-      this.analyser.smoothingTimeConstant = 0.8
-      this.dataArray = new Uint8Array(this.analyser.frequencyBinCount)
+      this.freqData = new Uint8Array(this.analyser.frequencyBinCount)
+      this.timeData = new Uint8Array(this.analyser.fftSize)
 
+      this.sourceNode = this.audioContext.createMediaStreamSource(audioStream)
       this.sourceNode.connect(this.analyser)
 
       console.log('[LipsyncManager] Audio analysis initialized')
@@ -123,158 +87,131 @@ export class LipsyncManager {
     }
   }
 
-  /**
-   * Start analyzing audio and generating viseme data
-   */
   private startAnalysis(): void {
-    const analyze = (currentTime: number) => {
-      if (!this.analyser || !this.dataArray) {
-        return
-      }
+    const tick = () => {
+      if (!this.analyser || !this.freqData || !this.timeData) return
 
-      // Throttle updates to 30fps
-      if (currentTime - this.lastUpdateTime < this.updateInterval) {
-        this.animationFrameId = requestAnimationFrame(analyze)
-        return
-      }
-      this.lastUpdateTime = currentTime
-
-      // Get audio data
-      this.analyser.getByteFrequencyData(this.dataArray)
-
-      // Calculate RMS (root mean square) for volume
+      // RMS from time-domain data
+      this.analyser.getByteTimeDomainData(this.timeData)
       let sum = 0
-      for (let i = 0; i < this.dataArray.length; i++) {
-        const normalized = this.dataArray[i] / 255
-        sum += normalized * normalized
+      for (const v of this.timeData) {
+        const n = (v - 128) / 128
+        sum += n * n
       }
-      const rms = Math.sqrt(sum / this.dataArray.length)
+      const rms = Math.sqrt(sum / this.timeData.length)
 
-      // Simple viseme selection based on frequency bands
-      // This is a simplified approach; wawa-lipsync would provide more accurate phoneme detection
-      const viseme = this.selectVisemeFromFrequencies(this.dataArray, rms)
+      // Frequency band energies
+      this.analyser.getByteFrequencyData(this.freqData)
+      const sampleRate = this.audioContext!.sampleRate
+      const binHz = sampleRate / (this.analyser.fftSize)
 
-      // Update target viseme
-      if (viseme !== this.targetViseme) {
-        this.targetViseme = viseme
-      }
-
-      // Smooth transition between visemes
-      if (this.currentViseme !== this.targetViseme) {
-        this.currentViseme = this.targetViseme
-        this.visemeWeight = 0
+      const bandEnergy = (lo: number, hi: number): number => {
+        const start = Math.floor(lo / binHz)
+        const end   = Math.min(Math.ceil(hi / binHz), this.freqData!.length)
+        let s = 0
+        for (let i = start; i < end; i++) s += this.freqData![i] / 255
+        return end > start ? s / (end - start) : 0
       }
 
-      // Animate weight
-      if (rms > 0.01) {
-        this.visemeWeight = Math.min(1, this.visemeWeight + this.smoothingFactor)
+      const eMid  = bandEnergy(...FREQ_BANDS.mid)
+      const eHigh = bandEnergy(...FREQ_BANDS.high)
+      const eAir  = bandEnergy(...FREQ_BANDS.air)
+
+      // Determine target viseme from frequency ratios (no randomness)
+      const now = performance.now()
+      const canChange = now - this.lastVisemeChangeTime > this.VISEME_HOLD_MS
+
+      if (rms < 0.015) {
+        this.targetViseme  = 'viseme_sil'
+        this.targetWeight  = 0
       } else {
-        this.visemeWeight = Math.max(0, this.visemeWeight - this.smoothingFactor * 2)
-        if (this.visemeWeight === 0) {
-          this.currentViseme = 'viseme_sil'
-          this.targetViseme = 'viseme_sil'
+        // Sibilants: high air-band energy
+        if (eAir > 0.25 && eAir > eMid * 1.4) {
+          if (canChange) { this.targetViseme = 'viseme_SS'; this.lastVisemeChangeTime = now }
+          this.targetWeight = Math.min(1, rms * 4)
+        }
+        // Fricatives / FF: strong high-band without extreme air
+        else if (eHigh > eMid * 1.5 && eHigh > 0.2) {
+          if (canChange) { this.targetViseme = 'viseme_FF'; this.lastVisemeChangeTime = now }
+          this.targetWeight = Math.min(1, rms * 3.5)
+        }
+        // Open vowel aa/O: strong mid-band (F1 dominant)
+        else if (eMid > eHigh * 1.3 && eMid > 0.15) {
+          if (canChange) {
+            this.targetViseme = eHigh > 0.1 ? 'viseme_aa' : 'viseme_O'
+            this.lastVisemeChangeTime = now
+          }
+          this.targetWeight = Math.min(1, rms * 4)
+        }
+        // Front/high vowels E/I: high F2
+        else if (eHigh > 0.18) {
+          if (canChange) {
+            this.targetViseme = eHigh > eMid ? 'viseme_I' : 'viseme_E'
+            this.lastVisemeChangeTime = now
+          }
+          this.targetWeight = Math.min(1, rms * 3.5)
+        }
+        // Round vowel U
+        else if (eMid > 0.1) {
+          if (canChange) { this.targetViseme = 'viseme_U'; this.lastVisemeChangeTime = now }
+          this.targetWeight = Math.min(1, rms * 3)
+        }
+        // Default: open mouth
+        else {
+          if (canChange) { this.targetViseme = 'viseme_aa'; this.lastVisemeChangeTime = now }
+          this.targetWeight = Math.min(0.6, rms * 4)
         }
       }
 
-      this.animationFrameId = requestAnimationFrame(analyze)
-    }
+      // Smooth weight transitions
+      if (this.targetWeight > this.currentWeight) {
+        this.currentWeight += (this.targetWeight - this.currentWeight) * this.WEIGHT_ATTACK
+      } else {
+        this.currentWeight += (this.targetWeight - this.currentWeight) * this.WEIGHT_RELEASE
+      }
+      if (this.currentWeight < 0.01) {
+        this.currentViseme = 'viseme_sil'
+        this.currentWeight = 0
+      } else {
+        this.currentViseme = this.targetViseme
+      }
 
-    this.animationFrameId = requestAnimationFrame(analyze)
+      this.animationFrameId = requestAnimationFrame(tick)
+    }
+    this.animationFrameId = requestAnimationFrame(tick)
   }
 
-  /**
-   * Select viseme based on frequency analysis
-   * This is a simplified heuristic approach
-   */
-  private selectVisemeFromFrequencies(frequencies: Uint8Array, rms: number): string {
-    if (rms < 0.01) {
-      return 'viseme_sil'
-    }
-
-    // Analyze different frequency bands
-    const lowFreq = this.getFrequencyBandEnergy(frequencies, 0, 200)      // 0-200 Hz
-    const midFreq = this.getFrequencyBandEnergy(frequencies, 200, 600)    // 200-600 Hz
-    const highFreq = this.getFrequencyBandEnergy(frequencies, 600, 2000)  // 600-2000 Hz
-    const veryHighFreq = this.getFrequencyBandEnergy(frequencies, 2000, frequencies.length) // 2000+ Hz
-
-    // Simple heuristic mapping (this is a fallback; ideally wawa-lipsync would provide better analysis)
-    if (veryHighFreq > highFreq && veryHighFreq > midFreq) {
-      return Math.random() > 0.5 ? 'viseme_SS' : 'viseme_FF' // Sibilants
-    } else if (highFreq > midFreq * 1.5) {
-      return Math.random() > 0.5 ? 'viseme_E' : 'viseme_I' // High vowels
-    } else if (midFreq > lowFreq * 1.2) {
-      return Math.random() > 0.5 ? 'viseme_aa' : 'viseme_O' // Mid vowels
-    } else if (lowFreq > 0.3) {
-      return Math.random() > 0.5 ? 'viseme_PP' : 'viseme_DD' // Consonants
-    }
-
-    return 'viseme_aa' // Default open mouth for speech
-  }
-
-  /**
-   * Get energy in a specific frequency band
-   */
-  private getFrequencyBandEnergy(frequencies: Uint8Array, startIdx: number, endIdx: number): number {
-    let sum = 0
-    const actualEnd = Math.min(endIdx, frequencies.length)
-    for (let i = startIdx; i < actualEnd; i++) {
-      sum += frequencies[i] / 255
-    }
-    return sum / (actualEnd - startIdx)
-  }
-
-  /**
-   * Get current viseme weights for morph targets
-   * Returns an object with viseme names as keys and weights (0-1) as values
-   */
   getCurrentVisemes(): VisemeWeights {
     const weights: VisemeWeights = {}
-
-    // Initialize all visemes to 0
-    OCULUS_VISEMES.forEach(viseme => {
-      weights[viseme] = 0
-    })
-
-    // Set current viseme weight
-    if (this.currentViseme && this.visemeWeight > 0) {
-      weights[this.currentViseme] = this.visemeWeight
+    for (const v of OCULUS_VISEMES) weights[v] = 0
+    if (this.currentViseme && this.currentWeight > 0) {
+      weights[this.currentViseme] = this.currentWeight
     }
-
     return weights
   }
 
-  /**
-   * Update audio stream (for when it changes)
-   */
-  updateAudioStream(audioStream: MediaStream | null): void {
-    this.dispose()
-    if (audioStream) {
-      this.initializeAudioAnalysis(audioStream)
-    }
+  /** Current overall amplitude (0–1), useful for driving simple mouth-open shape keys */
+  getAmplitude(): number {
+    return this.currentWeight
   }
 
-  /**
-   * Clean up resources
-   */
+  updateAudioStream(audioStream: MediaStream | null): void {
+    this.dispose()
+    if (audioStream) this.initializeAudioAnalysis(audioStream)
+  }
+
   dispose(): void {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId)
       this.animationFrameId = null
     }
-
-    if (this.sourceNode) {
-      this.sourceNode.disconnect()
-      this.sourceNode = null
-    }
-
-    if (this.audioContext) {
-      this.audioContext.close()
-      this.audioContext = null
-    }
-
+    this.sourceNode?.disconnect()
+    this.sourceNode = null
+    this.audioContext?.close()
+    this.audioContext = null
     this.analyser = null
-    this.dataArray = null
-
+    this.freqData = null
+    this.timeData = null
     console.log('[LipsyncManager] Disposed')
   }
 }
