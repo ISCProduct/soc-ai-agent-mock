@@ -281,39 +281,29 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
           'jaw_master', 'lowerjaw', 'LowerJaw', 'lower_jaw',
           'mouth', 'Mouth',
         ]
-        const allBones: string[] = []
-        model.traverse((child) => {
-          if (child instanceof THREE.Bone) allBones.push(child.name)
-        })
-        if (allBones.length > 0) {
-          console.log('[ThreeAvatar] All bones:', allBones)
-          // Exact match first
-          let found: THREE.Bone | null = null
-          for (const pat of JAW_BONE_PATTERNS) {
-            const bone = allBones.find(n => n === pat)
-            if (bone) {
-              model.traverse((c) => {
-                if (!found && c instanceof THREE.Bone && c.name === bone) found = c
-              })
-              if (found) break
-            }
-          }
-          // Partial match fallback
-          if (!found) {
-            const partial = allBones.find(n => n.toLowerCase().includes('jaw') || n.toLowerCase().includes('mouth'))
-            if (partial) {
-              model.traverse((c) => {
-                if (!found && c instanceof THREE.Bone && c.name === partial) found = c
-              })
-            }
-          }
-          if (found) {
-            jawBoneRef.current = found
-            jawRestRotRef.current = (found as THREE.Bone).rotation.clone()
-            console.log(`[ThreeAvatar] Jaw bone found: "${(found as THREE.Bone).name}"`, jawRestRotRef.current)
-          } else {
-            console.log('[ThreeAvatar] No jaw bone matched – trying first head-area bone')
-          }
+        // Collect ALL named nodes (Bone or Object3D) for logging + search
+        const allNodes: THREE.Object3D[] = []
+        model.traverse((child) => { if (child.name) allNodes.push(child) })
+        console.log('[ThreeAvatar] All nodes:', allNodes.map(n => `${n.type}:${n.name}`))
+
+        let foundNode: THREE.Object3D | null = null
+        // Exact match
+        for (const pat of JAW_BONE_PATTERNS) {
+          foundNode = allNodes.find(n => n.name === pat) ?? null
+          if (foundNode) break
+        }
+        // Partial match
+        if (!foundNode) {
+          foundNode = allNodes.find(n =>
+            n.name.toLowerCase().includes('jaw') || n.name.toLowerCase().includes('mouth')
+          ) ?? null
+        }
+        if (foundNode) {
+          jawBoneRef.current = foundNode as THREE.Bone
+          jawRestRotRef.current = foundNode.rotation.clone()
+          console.log(`[ThreeAvatar] Jaw node found: "${foundNode.name}" (${foundNode.type})`)
+        } else {
+          console.log('[ThreeAvatar] No jaw node matched. Node list above — please report bone names.')
         }
 
         // Collect Oculus-viseme meshes as fallback
