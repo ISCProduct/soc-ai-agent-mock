@@ -241,8 +241,11 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const model = gltf.scene
 
         // ── Auto-normalize model size and position ────────────────────────
-        // Model front faces +X; rotate -90° around Y so it faces the camera at +Z
-        model.rotation.set(0, -Math.PI / 2, 0)
+        // RPM / standard glTF: front faces +Z (no rotation needed)
+        // Tripo3D static exports: front faces +X (needs -90° Y rotation)
+        // Detect by checking if model has a skeleton (RPM) or is a bare mesh (Tripo)
+        const hasSkeleton = (() => { let s = false; model.traverse(c => { if ((c as any).isBone) s = true }); return s })()
+        model.rotation.set(0, hasSkeleton ? 0 : -Math.PI / 2, 0)
         model.scale.set(1, 1, 1)
         model.position.set(0, 0, 0)
         model.updateMatrixWorld(true)
