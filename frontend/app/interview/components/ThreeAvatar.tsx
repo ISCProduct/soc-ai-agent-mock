@@ -227,9 +227,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const model = gltf.scene
 
         // ── Auto-normalize model size and position ────────────────────────
-        // Correct Z-up → Y-up: rotate -90° around X, then 180° around Y to face camera
-        model.rotation.x = -Math.PI / 2
-        model.rotation.y = Math.PI
+        // glTF is Y-up by spec – no rotation needed; Three.js loads it correctly
+        model.rotation.set(0, 0, 0)
         model.scale.set(1, 1, 1)
         model.position.set(0, 0, 0)
         model.updateMatrixWorld(true)
@@ -244,8 +243,9 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         model.scale.setScalar(s)
 
         // Center horizontally; shift up so head/torso fill the camera view
+        // Y offset: move model so its upper-body is in frame (camera looks at Y≈0.8)
         model.position.x = -center.x * s
-        model.position.y = -center.y * s + 0.3
+        model.position.y = -center.y * s + 0.3   // shift up so head/torso fill camera frame
         model.position.z = -center.z * s
 
         console.log(`[ThreeAvatar] model size=${JSON.stringify(size.toArray().map(v=>+v.toFixed(3)))} scale=${s.toFixed(3)}`)
