@@ -128,8 +128,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
 
     // ── Three.js scene ──────────────────────────────────────────────────────
     const scene    = new THREE.Scene()
-    const camera   = new THREE.PerspectiveCamera(34, width / height, 0.1, 20)
-    camera.position.set(0, 0.8, 2.5)
+    const camera   = new THREE.PerspectiveCamera(40, width / height, 0.1, 20)
+    camera.position.set(0, 0.8, 2.8)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -225,8 +225,31 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         if (disposed) return
 
         const model = gltf.scene
+
+        // ── Auto-normalize model size and position ────────────────────────
+        // Reset before measuring so scale/position don't skew the box
         model.scale.set(1, 1, 1)
-        model.position.set(0, -0.8, 0)
+        model.position.set(0, 0, 0)
+        model.updateMatrixWorld(true)
+
+        const box    = new THREE.Box3().setFromObject(model)
+        const size   = box.getSize(new THREE.Vector3())
+        const center = box.getCenter(new THREE.Vector3())
+
+        // Scale so the model is TARGET_HEIGHT units tall
+        // Camera sits at y=0.8, FOV=34°, z=2.5 → visible y ≈ [0.0, 1.6]
+        const TARGET_HEIGHT = 1.8
+        const s = size.y > 0 ? TARGET_HEIGHT / size.y : 1
+        model.scale.setScalar(s)
+
+        // Center horizontally; shift up so head/torso fill the camera view
+        model.position.x = -center.x * s
+        model.position.y = -center.y * s + 0.3  // +0.3 shifts upper body into frame
+        model.position.z = -center.z * s
+
+        console.log(`[ThreeAvatar] model size=${JSON.stringify(size.toArray().map(v=>+v.toFixed(3)))} scale=${s.toFixed(3)}`)
+        // ─────────────────────────────────────────────────────────────────
+
         avatarGroup.add(model)
         avatarMeshRef.current = model
 
