@@ -1316,12 +1316,6 @@ export default function InterviewPage() {
               </Typography>
             </Box>
 
-            {/* Subtitle overlay */}
-            {captionsVisible && latestAiText && (
-              <Box sx={{ position: 'absolute', bottom: 48, left: '50%', transform: 'translateX(-50%)', maxWidth: '85%', bgcolor: 'rgba(0,0,0,0.72)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
-                <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
-              </Box>
-            )}
 
             {/* Error overlay */}
             {status === 'error' && (
@@ -1342,6 +1336,13 @@ export default function InterviewPage() {
               </Box>
             )}
           </Box>
+
+          {/* Subtitle below avatar frame */}
+          {captionsVisible && latestAiText && (
+            <Box sx={{ mx: 1, mt: -0.5, mb: 0.5, bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
+              <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
+            </Box>
+          )}
 
           {/* User camera tile */}
           <Box sx={{ position: 'relative', aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden', bgcolor: '#3c4043', boxShadow: `0 0 0 2px rgba(236,91,19,0.3), 0 8px 32px rgba(0,0,0,0.4)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
