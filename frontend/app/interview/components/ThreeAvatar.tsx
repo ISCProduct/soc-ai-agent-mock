@@ -227,7 +227,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const model = gltf.scene
 
         // ── Auto-normalize model size and position ────────────────────────
-        // Reset before measuring so scale/position don't skew the box
+        // Correct Z-up → Y-up: rotate -90° around X axis
+        model.rotation.x = -Math.PI / 2
         model.scale.set(1, 1, 1)
         model.position.set(0, 0, 0)
         model.updateMatrixWorld(true)
@@ -237,14 +238,13 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const center = box.getCenter(new THREE.Vector3())
 
         // Scale so the model is TARGET_HEIGHT units tall
-        // Camera sits at y=0.8, FOV=34°, z=2.5 → visible y ≈ [0.0, 1.6]
         const TARGET_HEIGHT = 1.8
         const s = size.y > 0 ? TARGET_HEIGHT / size.y : 1
         model.scale.setScalar(s)
 
         // Center horizontally; shift up so head/torso fill the camera view
         model.position.x = -center.x * s
-        model.position.y = -center.y * s + 0.3  // +0.3 shifts upper body into frame
+        model.position.y = -center.y * s + 0.3
         model.position.z = -center.z * s
 
         console.log(`[ThreeAvatar] model size=${JSON.stringify(size.toArray().map(v=>+v.toFixed(3)))} scale=${s.toFixed(3)}`)
