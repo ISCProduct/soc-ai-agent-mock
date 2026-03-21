@@ -107,6 +107,10 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
   const lipsyncMgrRef   = useRef<LipsyncManager | null>(null)
   const avatarMeshRef   = useRef<THREE.Object3D | null>(null)
   const mouthTargetRef  = useRef<MouthTarget | null>(null)
+  // Jaw bone for models without morph targets
+  const jawBoneRef      = useRef<THREE.Bone | null>(null)
+  const jawRestRotRef   = useRef<THREE.Euler | null>(null)
+  const jawSmoothedRef  = useRef(0)
   // Morph meshes for Oculus viseme fallback (RPM-style models)
   const visemeMeshesRef = useRef<THREE.Mesh[]>([])
 
@@ -196,8 +200,18 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         mt.mesh.morphTargetInfluences[mt.index] = mt.smoothed
       }
 
+      // ── Jaw bone rotation (for models without morph targets) ───────────
+      const jaw = jawBoneRef.current
+      if (jaw && jawRestRotRef.current) {
+        const target = Math.min(1, levelRef.current * 1.4)
+        const prev = jawSmoothedRef.current
+        jawSmoothedRef.current = prev + (target - prev) * (target > prev ? MOUTH_SMOOTHING_ATTACK : MOUTH_SMOOTHING_RELEASE)
+        // Rotate jaw downward (positive X = mouth opens for typical rig)
+        jaw.rotation.x = jawRestRotRef.current.x + jawSmoothedRef.current * 0.35
+      }
+
       // ── Oculus viseme fallback (for RPM-style models with no mouth_open) ─
-      if (!mt && lipsyncMgrRef.current && visemeMeshesRef.current.length > 0) {
+      if (!mt && !jaw && lipsyncMgrRef.current && visemeMeshesRef.current.length > 0) {
         const visemes = lipsyncMgrRef.current.getCurrentVisemes()
         visemeMeshesRef.current.forEach((mesh) => {
           if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return
@@ -256,6 +270,51 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
 
         // Discover mouth shape key
         mouthTargetRef.current = findMouthTarget(model)
+
+        // ── Jaw bone detection (for models without morph targets) ─────────
+        jawBoneRef.current = null
+        jawRestRotRef.current = null
+        jawSmoothedRef.current = 0
+        const JAW_BONE_PATTERNS = [
+          'jaw', 'Jaw', 'JAW',
+          'mixamorigJaw', 'mixamorig:Jaw',
+          'jaw_master', 'lowerjaw', 'LowerJaw', 'lower_jaw',
+          'mouth', 'Mouth',
+        ]
+        const allBones: string[] = []
+        model.traverse((child) => {
+          if (child instanceof THREE.Bone) allBones.push(child.name)
+        })
+        if (allBones.length > 0) {
+          console.log('[ThreeAvatar] All bones:', allBones)
+          // Exact match first
+          let found: THREE.Bone | null = null
+          for (const pat of JAW_BONE_PATTERNS) {
+            const bone = allBones.find(n => n === pat)
+            if (bone) {
+              model.traverse((c) => {
+                if (!found && c instanceof THREE.Bone && c.name === bone) found = c
+              })
+              if (found) break
+            }
+          }
+          // Partial match fallback
+          if (!found) {
+            const partial = allBones.find(n => n.toLowerCase().includes('jaw') || n.toLowerCase().includes('mouth'))
+            if (partial) {
+              model.traverse((c) => {
+                if (!found && c instanceof THREE.Bone && c.name === partial) found = c
+              })
+            }
+          }
+          if (found) {
+            jawBoneRef.current = found
+            jawRestRotRef.current = (found as THREE.Bone).rotation.clone()
+            console.log(`[ThreeAvatar] Jaw bone found: "${(found as THREE.Bone).name}"`, jawRestRotRef.current)
+          } else {
+            console.log('[ThreeAvatar] No jaw bone matched – trying first head-area bone')
+          }
+        }
 
         // Collect Oculus-viseme meshes as fallback
         visemeMeshesRef.current = []
@@ -318,6 +377,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
       visemeMeshesRef.current = []
       avatarMeshRef.current   = null
       mouthTargetRef.current  = null
+      jawBoneRef.current      = null
+      jawRestRotRef.current   = null
       console.log('[ThreeAvatar] Cleanup complete')
     }
   }, [gender, useFallback]) // eslint-disable-line react-hooks/exhaustive-deps
