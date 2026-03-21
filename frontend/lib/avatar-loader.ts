@@ -62,27 +62,25 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
     console.log(`[AvatarLoader] Loading local avatar: ${localPath}`)
     const gltf = await loadWithTimeout(loader, localPath, 10000)
     console.log(`[AvatarLoader] Successfully loaded local avatar`)
-
-    // If local model has no morph targets (can't do lipsync), fall through to RPM
-    if (hasMorphTargets(gltf)) {
-      return gltf
+    if (!hasMorphTargets(gltf)) {
+      console.warn('[AvatarLoader] Avatar does not have morph targets. Lipsync will not work.')
     }
-    console.warn(`[AvatarLoader] Local avatar has no morph targets. Loading RPM avatar for lipsync support...`)
+    return gltf
   } catch {
-    console.warn(`[AvatarLoader] Local avatar not found (${localPath}). Trying Ready Player Me...`)
+    console.warn(`[AvatarLoader] Local avatar not found (${localPath}). Trying Ready Player Me fallback...`)
   }
 
-  // Ready Player Me avatars include Oculus Viseme morph targets for lipsync
+  // Fallback to Ready Player Me CDN
   const fallbackUrl = READY_PLAYER_ME_FALLBACK[gender]
   try {
-    console.log(`[AvatarLoader] Loading RPM avatar: ${fallbackUrl}`)
+    console.log(`[AvatarLoader] Loading RPM fallback: ${fallbackUrl}`)
     const gltf = await loadWithTimeout(loader, fallbackUrl, 15000)
-    console.log(`[AvatarLoader] Successfully loaded RPM avatar`)
+    console.log(`[AvatarLoader] Successfully loaded RPM fallback avatar`)
     return gltf
   } catch {
     throw new Error(
       `Avatar loading failed for "${gender}". ` +
-      `Check your network connection or add a lipsync-capable GLB to frontend/public/avatars/.`
+      `Add ${gender}-avatar.glb to frontend/public/avatars/ or check your network connection.`
     )
   }
 }
