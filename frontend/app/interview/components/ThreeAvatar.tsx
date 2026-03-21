@@ -227,8 +227,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const model = gltf.scene
 
         // ── Auto-normalize model size and position ────────────────────────
-        // glTF is Y-up; model front faces -Z in this export, rotate 180° around Y to face camera
-        model.rotation.set(0, Math.PI, 0)
+        // Model front faces +X; rotate -90° around Y so it faces the camera at +Z
+        model.rotation.set(0, -Math.PI / 2, 0)
         model.scale.set(1, 1, 1)
         model.position.set(0, 0, 0)
         model.updateMatrixWorld(true)
