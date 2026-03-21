@@ -227,8 +227,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const model = gltf.scene
 
         // ── Auto-normalize model size and position ────────────────────────
-        // glTF is Y-up by spec – no rotation needed; Three.js loads it correctly
-        model.rotation.set(0, 0, 0)
+        // glTF is Y-up; model front faces -Z in this export, rotate 180° around Y to face camera
+        model.rotation.set(0, Math.PI, 0)
         model.scale.set(1, 1, 1)
         model.position.set(0, 0, 0)
         model.updateMatrixWorld(true)
