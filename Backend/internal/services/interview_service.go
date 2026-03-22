@@ -252,6 +252,24 @@ func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint,
 	}, nil
 }
 
+func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.InterviewReport, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+	report, err := s.reportRepo.FindBySessionID(sessionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return report, nil
+}
+
 func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
@@ -541,14 +559,16 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		empty := &models.InterviewReport{
 			SessionID:         sessionID,
 			SummaryText:       "発話データがありませんでした。",
-			ScoresJSON:        `{"logic":0,"specificity":0,"ownership":0}`,
+			ScoresJSON:        `{"logic":0,"specificity":0,"ownership":0,"communication":0,"enthusiasm":0}`,
 			EvidenceJSON:      `{}`,
+			StrengthsJSON:     `[]`,
+			ImprovementsJSON:  `[]`,
 			TeacherReportJSON: `{}`,
 		}
 		return s.reportRepo.Upsert(empty)
 	}
 	transcript := buildTranscript(utterances)
-	systemPrompt := "あなたは就職面接の評価者です。面接ログを読んで、応募者の回答を客観的に評価し、JSONのみで返してください。"
+	systemPrompt := buildReportSystemPrompt(lang)
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
 
@@ -556,12 +576,22 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 - logic（論理性）: 回答が筋道立っているか、主張に一貫性があるか
 - specificity（具体性）: 具体的なエピソードや数値が含まれているか
 - ownership（主体性）: 「私が〜した」という自分起点の表現があるか
+- communication（コミュニケーション力）: 簡潔・明確に伝えられているか、聞き返しが少ないか
+- enthusiasm（積極性・熱意）: 志望動機や意欲が伝わっているか
 
 ## 出力フォーマット（このキーと型を厳守してください）
 {
-  "summary": ["生徒向け評価コメント1（やさしい言葉で）", "コメント2", "コメント3"],
-  "scores": {"logic": 3, "specificity": 2, "ownership": 4},
-  "evidence": {"logic": "根拠となった発言の引用", "specificity": "根拠となった発言の引用", "ownership": "根拠となった発言の引用"},
+  "summary": "面接全体の総合評価コメント（2〜3文、生徒向けのやさしい言葉で）",
+  "scores": {"logic": 3, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
+  "evidence": {
+    "logic": "論理性の根拠となった発言",
+    "specificity": "具体性の根拠となった発言",
+    "ownership": "主体性の根拠となった発言",
+    "communication": "コミュニケーション力の根拠となった発言",
+    "enthusiasm": "積極性・熱意の根拠となった発言"
+  },
+  "strengths": ["強み1", "強み2", "強み3"],
+  "improvements": ["改善点1", "改善点2", "改善点3"],
   "teacher": {
     "overall_comment": "教員向け総評（指導観点・クラス内での位置づけ等）",
     "detailed_evidence": {"logic": "詳細な根拠と指導ポイント", "specificity": "詳細な根拠と指導ポイント", "ownership": "詳細な根拠と指導ポイント"},
@@ -571,13 +601,15 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
   }
 }
 
-※ summaryは生徒が読むことを想定した励ましを含む文章。teacher以下は教員専用の詳細情報。scoresは実際の会話内容に基づいて正直に採点（全て同じ値は避ける）。
+※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
+※ teacher以下は教員専用の詳細情報として出力してください。
 
 Interview transcript:
 %s`, lang, transcript)
 
 	model := getEnv("INTERVIEW_REPORT_MODEL", "")
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 1500, model)
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 	if err != nil {
 		return err
 	}
@@ -589,19 +621,22 @@ Interview transcript:
 		NextSteps           []string          `json:"next_steps"`
 	}
 	type reportPayload struct {
-		Summary  []string          `json:"summary"`
-		Scores   map[string]int    `json:"scores"`
-		Evidence map[string]string `json:"evidence"`
-		Teacher  *teacherReport    `json:"teacher"`
+		Summary      string            `json:"summary"`
+		Scores       map[string]int    `json:"scores"`
+		Evidence     map[string]string `json:"evidence"`
+		Strengths    []string          `json:"strengths"`
+		Improvements []string          `json:"improvements"`
+		Teacher      *teacherReport    `json:"teacher"`
 	}
 	var payload reportPayload
 	cleaned := extractJSONObject(raw)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}
-	summaryText := strings.Join(payload.Summary, "\n")
 	scoresJSON, _ := json.Marshal(payload.Scores)
 	evidenceJSON, _ := json.Marshal(payload.Evidence)
+	strengthsJSON, _ := json.Marshal(payload.Strengths)
+	improvementsJSON, _ := json.Marshal(payload.Improvements)
 	teacherJSON := []byte("{}")
 	if payload.Teacher != nil {
 		teacherJSON, _ = json.Marshal(payload.Teacher)
@@ -609,9 +644,11 @@ Interview transcript:
 
 	report := &models.InterviewReport{
 		SessionID:         sessionID,
-		SummaryText:       summaryText,
+		SummaryText:       payload.Summary,
 		ScoresJSON:        string(scoresJSON),
 		EvidenceJSON:      string(evidenceJSON),
+		StrengthsJSON:     string(strengthsJSON),
+		ImprovementsJSON:  string(improvementsJSON),
 		TeacherReportJSON: string(teacherJSON),
 	}
 	return s.reportRepo.Upsert(report)

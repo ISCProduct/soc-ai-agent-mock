@@ -79,6 +79,10 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.StartTurn(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/report") {
+		c.GetReport(w, r)
+		return
+	}
 	if strings.HasSuffix(path, "/send-report") {
 		c.SendReport(w, r)
 		return
@@ -88,6 +92,43 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.Get(w, r)
+}
+
+func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/report")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	report, err := c.interviewService.GetReport(uint(userID), sessionID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "forbidden" {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if report == nil {
+		http.Error(w, "report not yet available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
 }
 
 func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request) {
