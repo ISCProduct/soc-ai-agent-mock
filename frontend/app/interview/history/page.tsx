@@ -7,9 +7,7 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Divider,
   IconButton,
-  LinearProgress,
   Paper,
   Stack,
   Typography,
@@ -18,6 +16,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewSession } from '@/lib/interview'
+import InterviewSummary from '../components/InterviewSummary'
 
 const PRIMARY = '#ec5b13'
 
@@ -26,8 +25,6 @@ const statusLabel = (s: string) => {
   if (s === 'in_progress') return <Chip label="進行中" color="warning" size="small" />
   return <Chip label="未開始" size="small" />
 }
-
-const parseJsonSafe = (v?: string) => { try { return v ? JSON.parse(v) : null } catch { return null } }
 
 export default function InterviewHistoryPage() {
   const router = useRouter()
@@ -156,43 +153,7 @@ export default function InterviewHistoryPage() {
             <Stack spacing={2}>
               {/* Report */}
               {selectedDetail.report ? (
-                <>
-                  <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${PRIMARY}30`, bgcolor: `${PRIMARY}05` }}>
-                    <Typography sx={{ fontWeight: 700, color: PRIMARY, mb: 1 }}>要約</Typography>
-                    <Typography variant="body2" sx={{ whiteSpace: 'pre-line', color: '#475569', lineHeight: 1.8 }}>
-                      {selectedDetail.report.summary_text || '—'}
-                    </Typography>
-                  </Paper>
-                  {(() => {
-                    const scores = parseJsonSafe(selectedDetail.report.scores_json)
-                    const evidence = parseJsonSafe(selectedDetail.report.evidence_json)
-                    return scores ? (
-                      <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
-                        <Typography sx={{ fontWeight: 700, mb: 1.5 }}>評価スコア</Typography>
-                        <Stack spacing={1}>
-                          {Object.entries(scores).map(([k, v]) => (
-                            <Box key={k}>
-                              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                <Typography variant="body2" color="text.secondary">{k}</Typography>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <LinearProgress
-                                    variant="determinate"
-                                    value={Number(v) * 20}
-                                    sx={{ width: 80, height: 6, borderRadius: 3, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
-                                  />
-                                  <Typography variant="body2" sx={{ fontWeight: 700, color: PRIMARY, minWidth: 24 }}>{String(v)}</Typography>
-                                </Box>
-                              </Stack>
-                              {evidence?.[k] && (
-                                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.3, display: 'block' }}>{evidence[k]}</Typography>
-                              )}
-                            </Box>
-                          ))}
-                        </Stack>
-                      </Paper>
-                    ) : null
-                  })()}
-                </>
+                <InterviewSummary report={selectedDetail.report} theme="light" />
               ) : (
                 <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
                   <Typography variant="body2" color="text.secondary">

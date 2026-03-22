@@ -242,6 +242,24 @@ func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*Inter
 	}, nil
 }
 
+func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.InterviewReport, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+	report, err := s.reportRepo.FindBySessionID(sessionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return report, nil
+}
+
 func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
@@ -529,15 +547,17 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if len(utterances) == 0 {
 		// utterances が0件の場合は空レポートを保存して正常終了
 		empty := &models.InterviewReport{
-			SessionID:    sessionID,
-			SummaryText:  "発話データがありませんでした。",
-			ScoresJSON:   `{"logic":0,"specificity":0,"ownership":0}`,
-			EvidenceJSON: `{}`,
+			SessionID:        sessionID,
+			SummaryText:      "発話データがありませんでした。",
+			ScoresJSON:       `{"logic":0,"specificity":0,"ownership":0,"communication":0,"enthusiasm":0}`,
+			EvidenceJSON:     `{}`,
+			StrengthsJSON:    `[]`,
+			ImprovementsJSON: `[]`,
 		}
 		return s.reportRepo.Upsert(empty)
 	}
 	transcript := buildTranscript(utterances)
-	systemPrompt := "あなたは就職面接の評価者です。面接ログを読んで、応募者の回答を客観的に評価し、JSONのみで返してください。"
+	systemPrompt := buildReportSystemPrompt(lang)
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
 
@@ -545,43 +565,59 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 - logic（論理性）: 回答が筋道立っているか、主張に一貫性があるか
 - specificity（具体性）: 具体的なエピソードや数値が含まれているか
 - ownership（主体性）: 「私が〜した」という自分起点の表現があるか
+- communication（コミュニケーション力）: 簡潔・明確に伝えられているか、聞き返しが少ないか
+- enthusiasm（積極性・熱意）: 志望動機や意欲が伝わっているか
 
 ## 出力フォーマット（このキーと型を厳守してください）
 {
-  "summary": ["評価コメント1", "評価コメント2", "評価コメント3"],
-  "scores": {"logic": 3, "specificity": 2, "ownership": 4},
-  "evidence": {"logic": "論理性の根拠となった発言", "specificity": "具体性の根拠となった発言", "ownership": "主体性の根拠となった発言"}
+  "summary": "面接全体の総合評価コメント（2〜3文）",
+  "scores": {"logic": 3, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
+  "evidence": {
+    "logic": "論理性の根拠となった発言",
+    "specificity": "具体性の根拠となった発言",
+    "ownership": "主体性の根拠となった発言",
+    "communication": "コミュニケーション力の根拠となった発言",
+    "enthusiasm": "積極性・熱意の根拠となった発言"
+  },
+  "strengths": ["強み1", "強み2", "強み3"],
+  "improvements": ["改善点1", "改善点2", "改善点3"]
 }
 
-※ summaryは最大5件で日本語の簡潔な文章。scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
 
 Interview transcript:
 %s`, lang, transcript)
 
 	model := getEnv("INTERVIEW_REPORT_MODEL", "")
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 1000, model)
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 1500, model)
 	if err != nil {
 		return err
 	}
 	type reportPayload struct {
-		Summary  []string          `json:"summary"`
-		Scores   map[string]int    `json:"scores"`
-		Evidence map[string]string `json:"evidence"`
+		Summary      string            `json:"summary"`
+		Scores       map[string]int    `json:"scores"`
+		Evidence     map[string]string `json:"evidence"`
+		Strengths    []string          `json:"strengths"`
+		Improvements []string          `json:"improvements"`
 	}
 	var payload reportPayload
 	cleaned := extractJSONObject(raw)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}
-	summaryText := strings.Join(payload.Summary, "\n")
 	scoresJSON, _ := json.Marshal(payload.Scores)
 	evidenceJSON, _ := json.Marshal(payload.Evidence)
+	strengthsJSON, _ := json.Marshal(payload.Strengths)
+	improvementsJSON, _ := json.Marshal(payload.Improvements)
 
 	report := &models.InterviewReport{
-		SessionID:    sessionID,
-		SummaryText:  summaryText,
-		ScoresJSON:   string(scoresJSON),
-		EvidenceJSON: string(evidenceJSON),
+		SessionID:        sessionID,
+		SummaryText:      payload.Summary,
+		ScoresJSON:       string(scoresJSON),
+		EvidenceJSON:     string(evidenceJSON),
+		StrengthsJSON:    string(strengthsJSON),
+		ImprovementsJSON: string(improvementsJSON),
 	}
 	return s.reportRepo.Upsert(report)
 }

@@ -7,7 +7,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Divider,
   Drawer,
   IconButton,
   InputBase,
@@ -38,6 +37,7 @@ import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
 import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import ThreeAvatar from './components/ThreeAvatar'
+import InterviewSummary from './components/InterviewSummary'
 
 const PRIMARY = '#ec5b13'
 const BG_LIGHT = '#f8f6f6'
@@ -583,8 +583,6 @@ export default function InterviewPage() {
   const isActive = status === 'connecting' || status === 'connected'
   const isConnected = status === 'connected'
   const progress = Math.min(100, Math.round(((interviewLimits.maxMinutes * 60 - remainingSeconds) / (interviewLimits.maxMinutes * 60)) * 100))
-  const scores = report ? parseJsonSafe(report.scores_json) : null
-  const evidence = report ? parseJsonSafe(report.evidence_json) : null
   const isFemale = avatarGender === 'female'
   const companyName = interviewCompany?.name || 'AI面接練習'
   const latestAiText = partialAi || (utterances.filter(u => u.role === 'ai').slice(-1)[0]?.text ?? '')
@@ -1112,41 +1110,7 @@ export default function InterviewPage() {
 
           {reportStatus === 'ready' && report && (
             <Stack spacing={2}>
-              <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-                <Typography sx={{ color: PRIMARY, fontWeight: 700, mb: 1 }}>要約</Typography>
-                <Typography variant="body2" sx={{ color: '#bdc1c6', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
-                  {report.summary_text || '要約がありません'}
-                </Typography>
-              </Paper>
-              <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-                <Typography sx={{ color: PRIMARY, fontWeight: 700, mb: 1.5 }}>評価スコア</Typography>
-                {scores ? (
-                  <Stack spacing={1}>
-                    {Object.entries(scores).map(([k, v]) => (
-                      <Box key={k} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ color: '#bdc1c6' }}>{k}</Typography>
-                        <Chip label={String(v)} size="small" sx={{ bgcolor: '#3c4043', color: '#e8eaed', fontWeight: 700 }} />
-                      </Box>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Typography variant="body2" sx={{ color: '#bdc1c6', whiteSpace: 'pre-line' }}>{report.scores_json}</Typography>
-                )}
-              </Paper>
-              {evidence && (
-                <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-                  <Typography sx={{ color: PRIMARY, fontWeight: 700, mb: 1.5 }}>根拠</Typography>
-                  <Stack spacing={1.5}>
-                    {Object.entries(evidence).map(([k, v]) => (
-                      <Box key={k}>
-                        <Typography variant="body2" sx={{ color: '#9aa0a6', fontWeight: 600 }}>{k}</Typography>
-                        <Typography variant="body2" sx={{ color: '#bdc1c6', lineHeight: 1.6 }}>{String(v)}</Typography>
-                        <Divider sx={{ mt: 1, borderColor: 'rgba(255,255,255,0.06)' }} />
-                      </Box>
-                    ))}
-                  </Stack>
-                </Paper>
-              )}
+              <InterviewSummary report={report} theme="dark" />
               <Button
                 variant="outlined"
                 fullWidth
