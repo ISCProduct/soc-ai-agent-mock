@@ -307,28 +307,84 @@ type githubAPIRepository struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// fetchRepositories GitHub APIからリポジトリ一覧を全ページ取得する（自分のリポジトリ + 所属組織のリポジトリ）
+// fetchRepositories 自分のリポジトリ + 所属組織のリポジトリを取得してマージする
 func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
+	// 1. 自分のリポジトリ
+	ownRepos, err := s.fetchRepoPages(ctx, client, token,
+		fmt.Sprintf("%s/user/repos?type=owner&sort=updated&per_page=100", githubAPIBase))
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. 所属組織の一覧を取得
+	orgs, err := s.fetchOrgs(ctx, client, token)
+	if err != nil {
+		// 組織取得失敗は警告のみ（個人リポジトリは返す）
+		log.Printf("[GitHubService] fetchOrgs warning: %v", err)
+		return ownRepos, nil
+	}
+
+	// 3. 各組織のリポジトリを取得してマージ（重複除去）
+	seen := make(map[string]struct{}, len(ownRepos))
+	for _, r := range ownRepos {
+		seen[r.FullName] = struct{}{}
+	}
+	allRepos := ownRepos
+
+	for _, org := range orgs {
+		orgRepos, err := s.fetchRepoPages(ctx, client, token,
+			fmt.Sprintf("%s/orgs/%s/repos?type=member&sort=updated&per_page=100", githubAPIBase, org))
+		if err != nil {
+			log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
+			continue
+		}
+		for _, r := range orgRepos {
+			if _, exists := seen[r.FullName]; !exists {
+				seen[r.FullName] = struct{}{}
+				allRepos = append(allRepos, r)
+			}
+		}
+	}
+
+	return allRepos, nil
+}
+
+// fetchOrgs 認証ユーザーの所属組織名一覧を取得する
+func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
+	body, err := s.doGet(ctx, client, token, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase))
+	if err != nil {
+		return nil, err
+	}
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(orgs))
+	for i, o := range orgs {
+		names[i] = o.Login
+	}
+	return names, nil
+}
+
+// fetchRepoPages ページネーションで全リポジトリを取得する
+func (s *GitHubService) fetchRepoPages(ctx context.Context, client *http.Client, token, baseURL string) ([]models.GitHubRepo, error) {
 	var allRepos []models.GitHubRepo
 	page := 1
-
 	for {
-		// /user/repos は認証済みユーザーの全リポジトリ（自分・組織メンバー）を返す
-		url := fmt.Sprintf("%s/user/repos?affiliation=owner,organization_member&sort=updated&per_page=100&page=%d", githubAPIBase, page)
+		url := fmt.Sprintf("%s&page=%d", baseURL, page)
 		body, err := s.doRequestWithRetry(ctx, client, token, url)
 		if err != nil {
 			return nil, err
 		}
-
 		var apiRepos []githubAPIRepository
 		if err := json.Unmarshal(body, &apiRepos); err != nil {
 			return nil, fmt.Errorf("unmarshal repos page %d: %w", page, err)
 		}
-
 		if len(apiRepos) == 0 {
 			break
 		}
-
 		for _, r := range apiRepos {
 			updatedAt, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 			allRepos = append(allRepos, models.GitHubRepo{
@@ -342,13 +398,11 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 				GitHubUpdatedAt: updatedAt,
 			})
 		}
-
 		if len(apiRepos) < 100 {
 			break
 		}
 		page++
 	}
-
 	return allRepos, nil
 }
 
