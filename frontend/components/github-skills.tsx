@@ -361,15 +361,28 @@ export default function GitHubSkills({ userId }: { userId: number }) {
             </Typography>
           )}
         </Box>
-        <Button
-          size="small"
-          startIcon={syncing ? <CircularProgress size={14} /> : <RefreshIcon />}
-          onClick={handleSync}
-          disabled={syncing}
-          sx={{ color: '#64748b', fontSize: '0.75rem' }}
-        >
-          {syncing ? '同期中...' : '同期'}
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {profile && (
+            <Button
+              size="small"
+              startIcon={connecting ? <CircularProgress size={14} /> : <GitHubIcon />}
+              onClick={handleConnect}
+              disabled={connecting || syncing}
+              sx={{ color: '#64748b', fontSize: '0.75rem' }}
+            >
+              {connecting ? '連携中...' : '権限を更新'}
+            </Button>
+          )}
+          <Button
+            size="small"
+            startIcon={syncing ? <CircularProgress size={14} /> : <RefreshIcon />}
+            onClick={handleSync}
+            disabled={syncing}
+            sx={{ color: '#64748b', fontSize: '0.75rem' }}
+          >
+            {syncing ? '同期中...' : '同期'}
+          </Button>
+        </Box>
       </Box>
 
       {/* プロフィール統計 */}
