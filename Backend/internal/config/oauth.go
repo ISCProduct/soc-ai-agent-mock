@@ -37,6 +37,7 @@ func LoadOAuthConfig() *OAuthConfig {
 			Scopes: []string{
 				"user:email",
 				"read:user",
+				"read:org",  // 所属組織のリポジトリを取得するために必要
 			},
 			Endpoint: github.Endpoint,
 		},
