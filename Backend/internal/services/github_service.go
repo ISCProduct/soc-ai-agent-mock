@@ -52,18 +52,20 @@ func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string)
 }
 
 // TriggerAsyncSync 非同期でGitHubデータ同期を開始する（ノンブロッキング）
-func (s *GitHubService) TriggerAsyncSync(userID uint) {
+// force=true でキャッシュを無視して強制同期する
+func (s *GitHubService) TriggerAsyncSync(userID uint, force bool) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if err := s.SyncUserData(ctx, userID); err != nil {
+		if err := s.SyncUserData(ctx, userID, force); err != nil {
 			log.Printf("[GitHubService] async sync failed for user %d: %v", userID, err)
 		}
 	}()
 }
 
 // SyncUserData GitHubからリポジトリ・言語比率・コントリビューション数を取得してDBに保存する
-func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
+// force=true でキャッシュを無視して強制同期する
+func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force bool) error {
 	profile, err := s.githubRepo.GetProfile(userID)
 	if err != nil {
 		return fmt.Errorf("get profile: %w", err)
@@ -72,8 +74,8 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 		return fmt.Errorf("github profile not found for user %d", userID)
 	}
 
-	// キャッシュチェック: 1時間以内に同期済みならスキップ
-	if profile.SyncedAt != nil && time.Since(*profile.SyncedAt) < syncCacheDuration {
+	// キャッシュチェック: 1時間以内に同期済みならスキップ（強制同期時はスキップしない）
+	if !force && profile.SyncedAt != nil && time.Since(*profile.SyncedAt) < syncCacheDuration {
 		log.Printf("[GitHubService] user %d: skipping sync (last synced %s ago)", userID, time.Since(*profile.SyncedAt).Round(time.Minute))
 		return nil
 	}

@@ -285,7 +285,8 @@ export default function GitHubSkills({ userId }: { userId: number }) {
   const handleSync = async () => {
     setSyncing(true)
     try {
-      await fetch(`${BACKEND_URL}/api/github/sync?user_id=${userId}`, { method: 'POST' })
+      // force=true でキャッシュを無視して強制同期
+      await fetch(`${BACKEND_URL}/api/github/sync?user_id=${userId}&force=true`, { method: 'POST' })
       // 非同期syncなので少し待ってから再取得
       setTimeout(() => {
         fetchAll().finally(() => setSyncing(false))
@@ -445,6 +446,18 @@ export default function GitHubSkills({ userId }: { userId: number }) {
       )}
 
       {/* リポジトリAI要約セクション */}
+      {profile && repos.length === 0 && !loading && (
+        <>
+          <Divider sx={{ borderColor: '#1e293b', my: 3 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <AutoAwesomeIcon sx={{ color: '#818cf8', fontSize: 18 }} />
+            <Typography variant="subtitle2" sx={{ color: '#94a3b8' }}>リポジトリAI要約</Typography>
+          </Box>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>
+            リポジトリが見つかりません。「同期」ボタンを押してGitHubデータを取得してください。
+          </Typography>
+        </>
+      )}
       {repos.length > 0 && (
         <>
           <Divider sx={{ borderColor: '#1e293b', my: 3 }} />
