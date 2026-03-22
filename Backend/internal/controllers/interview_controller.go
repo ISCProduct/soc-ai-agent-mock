@@ -455,7 +455,11 @@ func (c *InterviewController) Get(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid user_id", http.StatusBadRequest)
 		return
 	}
-	resp, err := c.interviewService.GetSessionDetail(uint(userID), sessionID)
+	role := r.URL.Query().Get("role")
+	if role == "" {
+		role = "student"
+	}
+	resp, err := c.interviewService.GetSessionDetailWithRole(uint(userID), sessionID, role)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
