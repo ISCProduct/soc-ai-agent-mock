@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -324,10 +325,15 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 		seen[r.FullName] = struct{}{}
 	}
 
-	// 2. read:orgがある場合は組織リポジトリも明示的に取得してマージ
+	// 2. 組織リポジトリも明示的に取得してマージ（repo + read:org スコープが必要）
 	orgs, err := s.fetchOrgs(ctx, client, token)
 	if err != nil {
-		log.Printf("[GitHubService] fetchOrgs warning (read:org scope may be missing): %v", err)
+		var scopeErr *InsufficientScopesError
+		if errors.As(err, &scopeErr) {
+			// スコープ不足は呼び出し元に伝播してユーザーに再認証を促す
+			return nil, scopeErr
+		}
+		log.Printf("[GitHubService] fetchOrgs warning: %v", err)
 	} else {
 		for _, org := range orgs {
 			orgRepos, err := s.fetchRepoPages(ctx, client, token,
@@ -348,9 +354,29 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 	return allRepos, nil
 }
 
+// InsufficientScopesError トークンのスコープ不足エラー型
+type InsufficientScopesError struct {
+	Missing []string
+}
+
+func (e *InsufficientScopesError) Error() string {
+	return fmt.Sprintf("GitHubトークンに必要なスコープが不足しています（%s）。GitHubアカウントを再連携してください。",
+		strings.Join(e.Missing, ", "))
+}
+
+// hasScopes トークンが必要なスコープをすべて持っているか確認する
+func hasScopes(scopeHeader string, required ...string) []string {
+	var missing []string
+	for _, r := range required {
+		if !strings.Contains(scopeHeader, r) {
+			missing = append(missing, r)
+		}
+	}
+	return missing
+}
+
 // fetchOrgs 認証ユーザーの所属組織名一覧を取得する
 func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
-	// X-OAuth-Scopes ヘッダーでトークンのスコープを確認
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -361,6 +387,12 @@ func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, toke
 	defer resp.Body.Close()
 	scopes := resp.Header.Get("X-OAuth-Scopes")
 	log.Printf("[GitHubService] token scopes: %q", scopes)
+
+	// repo と read:org の両方が必要
+	if missing := hasScopes(scopes, "repo", "read:org"); len(missing) > 0 {
+		return nil, &InsufficientScopesError{Missing: missing}
+	}
+
 	if resp.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))

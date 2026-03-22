@@ -195,6 +195,7 @@ export default function GitHubSkills({ userId }: { userId: number }) {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [notLinked, setNotLinked] = useState(false)
+  const [needsReauth, setNeedsReauth] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [summarizingRepo, setSummarizingRepo] = useState<string | null>(null)
@@ -284,14 +285,25 @@ export default function GitHubSkills({ userId }: { userId: number }) {
 
   const handleSync = async () => {
     setSyncing(true)
+    setError(null)
+    setNeedsReauth(false)
     try {
-      // force=true でキャッシュを無視して強制同期
-      await fetch(`${BACKEND_URL}/api/github/sync?user_id=${userId}&force=true`, { method: 'POST' })
-      // 非同期syncなので少し待ってから再取得
-      setTimeout(() => {
-        fetchAll().finally(() => setSyncing(false))
-      }, 3000)
+      // sync/wait で同期的に実行してスコープ不足エラーを検出する
+      const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, { method: 'POST' })
+      if (res.status === 403) {
+        const msg = await res.text()
+        setNeedsReauth(true)
+        setError(msg)
+        return
+      }
+      if (!res.ok) {
+        setError('同期に失敗しました')
+        return
+      }
+      await fetchAll()
     } catch {
+      setError('同期に失敗しました')
+    } finally {
       setSyncing(false)
     }
   }
@@ -434,7 +446,22 @@ export default function GitHubSkills({ userId }: { userId: number }) {
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mt: 2, mb: 1 }} onClose={() => setError(null)}>
+        <Alert
+          severity={needsReauth ? 'warning' : 'error'}
+          sx={{ mt: 2, mb: 1 }}
+          onClose={() => { setError(null); setNeedsReauth(false) }}
+          action={needsReauth ? (
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={connecting ? <CircularProgress size={14} /> : <GitHubIcon />}
+              onClick={handleConnect}
+              disabled={connecting}
+            >
+              再連携
+            </Button>
+          ) : undefined}
+        >
           {error}
         </Alert>
       )}

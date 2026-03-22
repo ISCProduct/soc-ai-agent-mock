@@ -4,6 +4,7 @@ import (
 	"Backend/internal/services"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -112,6 +113,11 @@ func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := c.githubService.SyncUserData(context.Background(), userID, true); err != nil {
+		var scopeErr *services.InsufficientScopesError
+		if errors.As(err, &scopeErr) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 		http.Error(w, "sync failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
