@@ -36,6 +36,7 @@ import ApartmentIcon from '@mui/icons-material/Apartment'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
+import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import ThreeAvatar from './components/ThreeAvatar'
 
 const PRIMARY = '#ec5b13'
@@ -288,9 +289,6 @@ export default function InterviewPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handsFreeMode, status])
 
-  const formatSeconds = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  const parseJsonSafe = (v?: string) => { try { return v ? JSON.parse(v) : null } catch { return null } }
-
   const cleanupConnection = () => {
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -314,51 +312,6 @@ export default function InterviewPage() {
       setEstimatedCost((elapsed / 60) * interviewLimits.costPerMinuteUSD)
       if (remaining <= 0) handleStop(true)
     }, 1000)
-  }
-
-  const parseStartError = (error: any): string => {
-    const msg: string = error?.message || ''
-    if (msg.includes('NotAllowedError') || msg.toLowerCase().includes('denied'))
-      return 'マイクとカメラへのアクセスが拒否されました。ブラウザのアドレスバー横から権限を許可してください。'
-    if (msg.includes('NotFoundError'))
-      return 'マイクまたはカメラが見つかりません。デバイスが正しく接続されているか確認してください。'
-    if (msg.toLowerCase().includes('unauthorized') || msg.includes('401'))
-      return 'AIサービスへの接続に失敗しました。（OpenAI APIキーを確認してください）'
-    return msg || '接続に失敗しました。ネットワークを確認して再試行してください。'
-  }
-
-  const parseMultipart = async (res: Response): Promise<{ meta: Record<string, string>; audio: Blob }> => {
-    const ct = res.headers.get('content-type') || ''
-    const m = ct.match(/boundary=([^\s;]+)/)
-    if (!m) throw new Error('No boundary in multipart response')
-    const boundary = '--' + m[1]
-    const buf = await res.arrayBuffer()
-    const bytes = new Uint8Array(buf)
-
-    const findPattern = (needle: Uint8Array, from: number): number => {
-      outer: for (let i = from; i <= bytes.length - needle.length; i++) {
-        for (let j = 0; j < needle.length; j++) { if (bytes[i + j] !== needle[j]) continue outer }
-        return i
-      }
-      return -1
-    }
-    const enc = new TextEncoder()
-    const boundaryBytes = enc.encode(boundary)
-    const crlfcrlf = enc.encode('\r\n\r\n')
-
-    const b1 = findPattern(boundaryBytes, 0)
-    const h1End = findPattern(crlfcrlf, b1 + boundaryBytes.length)
-    const b2 = findPattern(boundaryBytes, h1End + 4)
-    const jsonBytes = bytes.slice(h1End + 4, b2 - 2)
-    const meta = JSON.parse(new TextDecoder().decode(jsonBytes).trim())
-
-    const h2End = findPattern(crlfcrlf, b2 + boundaryBytes.length)
-    const endBound = enc.encode(boundary + '--')
-    const bEnd = findPattern(endBound, h2End + 4)
-    const audioEnd = bEnd !== -1 ? bEnd - 2 : bytes.length
-    const audio = new Blob([bytes.slice(h2End + 4, audioEnd)], { type: 'audio/mpeg' })
-
-    return { meta, audio }
   }
 
   const playAudioBlob = (blob: Blob): Promise<void> => {
@@ -427,7 +380,7 @@ export default function InterviewPage() {
       }),
     })
     if (!res.ok) throw new Error(await res.text())
-    const { meta, audio } = await parseMultipart(res)
+    const { meta, audio } = await parseMultipartResponse(res)
     const aiText: string = meta.ai_text || ''
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
@@ -487,7 +440,7 @@ export default function InterviewPage() {
       await doStartTurn(created.id, user.user_id)
     } catch (error: any) {
       setStatus('error')
-      setErrorMessage(parseStartError(error))
+      setErrorMessage(parseMediaError(error))
       cleanupConnection()
     }
   }
@@ -590,7 +543,7 @@ export default function InterviewPage() {
         body: formData,
       })
       if (!res.ok) throw new Error(await res.text())
-      const { meta, audio } = await parseMultipart(res)
+      const { meta, audio } = await parseMultipartResponse(res)
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
       if (userText) {

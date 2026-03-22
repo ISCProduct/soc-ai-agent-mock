@@ -481,6 +481,37 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 	return user.IsAdmin
 }
 
+// buildTranscript formats utterances into a plain-text transcript for the LLM prompt.
+// AI turns are labeled "Interviewer" and user turns are labeled "User".
+func buildTranscript(utterances []models.InterviewUtterance) string {
+	var b strings.Builder
+	for _, u := range utterances {
+		role := "User"
+		if u.Role == "ai" {
+			role = "Interviewer"
+		}
+		b.WriteString(role)
+		b.WriteString(": ")
+		b.WriteString(strings.TrimSpace(u.Text))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// extractJSONObject strips surrounding markdown code fences and extracts the
+// outermost JSON object from an LLM response.
+// Some models wrap their output in ```json ... ``` even when instructed not to.
+func extractJSONObject(raw string) string {
+	s := strings.TrimSpace(raw)
+	if start := strings.Index(s, "{"); start > 0 {
+		s = s[start:]
+	}
+	if end := strings.LastIndex(s, "}"); end >= 0 && end < len(s)-1 {
+		s = s[:end+1]
+	}
+	return s
+}
+
 func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) error {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
@@ -505,18 +536,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		}
 		return s.reportRepo.Upsert(empty)
 	}
-	var transcriptBuilder strings.Builder
-	for _, u := range utterances {
-		role := "User"
-		if u.Role == "ai" {
-			role = "Interviewer"
-		}
-		transcriptBuilder.WriteString(role)
-		transcriptBuilder.WriteString(": ")
-		transcriptBuilder.WriteString(strings.TrimSpace(u.Text))
-		transcriptBuilder.WriteString("\n")
-	}
-	transcript := transcriptBuilder.String()
+	transcript := buildTranscript(utterances)
 	systemPrompt := "あなたは就職面接の評価者です。面接ログを読んで、応募者の回答を客観的に評価し、JSONのみで返してください。"
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
@@ -548,15 +568,8 @@ Interview transcript:
 		Scores   map[string]int    `json:"scores"`
 		Evidence map[string]string `json:"evidence"`
 	}
-	// markdown コードブロック除去（モデルによっては ```json ... ``` で包まれることがある）
-	cleaned := strings.TrimSpace(raw)
-	if idx := strings.Index(cleaned, "{"); idx > 0 {
-		cleaned = cleaned[idx:]
-	}
-	if idx := strings.LastIndex(cleaned, "}"); idx >= 0 && idx < len(cleaned)-1 {
-		cleaned = cleaned[:idx+1]
-	}
 	var payload reportPayload
+	cleaned := extractJSONObject(raw)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}

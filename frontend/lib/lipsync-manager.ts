@@ -39,26 +39,27 @@ const FREQ_BANDS = {
   air:  [2500, 8000], // sibilants / fricatives
 } as const
 
+// RMS amplitude below this threshold is treated as silence (no speech detected)
+const SILENCE_RMS_THRESHOLD = 0.015
+
 export class LipsyncManager {
   private audioContext: AudioContext | null = null
   private analyser: AnalyserNode | null = null
   private sourceNode: MediaStreamAudioSourceNode | null = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private freqData: any = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private timeData: any = null
+  private freqData: Uint8Array | null = null
+  private timeData: Uint8Array | null = null
   private animationFrameId: number | null = null
 
-  // Current state with smoothing
+  // Current viseme state — smoothed toward target each frame
   private currentViseme: OculusViseme = 'viseme_sil'
   private currentWeight = 0
   private targetViseme: OculusViseme = 'viseme_sil'
   private targetWeight = 0
 
-  // Smoothing constants
-  private readonly WEIGHT_ATTACK  = 0.25   // how fast weight rises
-  private readonly WEIGHT_RELEASE = 0.18   // how fast weight falls
-  private readonly VISEME_HOLD_MS = 60     // minimum time to hold a viseme (ms)
+  // Smoothing constants — tune these to adjust lipsync responsiveness
+  private readonly WEIGHT_ATTACK  = 0.25   // how fast weight rises (0–1, higher = faster)
+  private readonly WEIGHT_RELEASE = 0.18   // how fast weight falls (0–1, higher = faster)
+  private readonly VISEME_HOLD_MS = 60     // minimum ms before switching to a different viseme
   private lastVisemeChangeTime = 0
 
   constructor(audioStream: MediaStream | null) {
@@ -121,7 +122,7 @@ export class LipsyncManager {
       const now = performance.now()
       const canChange = now - this.lastVisemeChangeTime > this.VISEME_HOLD_MS
 
-      if (rms < 0.015) {
+      if (rms < SILENCE_RMS_THRESHOLD) {
         this.targetViseme  = 'viseme_sil'
         this.targetWeight  = 0
       } else {
@@ -181,6 +182,10 @@ export class LipsyncManager {
     this.animationFrameId = requestAnimationFrame(tick)
   }
 
+  /**
+   * Returns a weight map for all Oculus visemes (0 = closed, 1 = fully open).
+   * All visemes are 0 except the currently active one.
+   */
   getCurrentVisemes(): VisemeWeights {
     const weights: VisemeWeights = {}
     for (const v of OCULUS_VISEMES) weights[v] = 0
@@ -195,6 +200,10 @@ export class LipsyncManager {
     return this.currentWeight
   }
 
+  /**
+   * Replaces the audio stream being analyzed.
+   * Disposes the current AudioContext and creates a new one for the given stream.
+   */
   updateAudioStream(audioStream: MediaStream | null): void {
     this.dispose()
     if (audioStream) this.initializeAudioAnalysis(audioStream)
