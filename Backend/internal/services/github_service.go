@@ -82,8 +82,8 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 	token := profile.AccessToken
 	login := profile.GitHubLogin
 
-	// 1. リポジトリ一覧取得
-	repos, err := s.fetchRepositories(ctx, client, token, login)
+	// 1. リポジトリ一覧取得（自分のリポジトリ + 所属組織のリポジトリ）
+	repos, err := s.fetchRepositories(ctx, client, token)
 	if err != nil {
 		return fmt.Errorf("fetch repositories: %w", err)
 	}
@@ -305,13 +305,14 @@ type githubAPIRepository struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// fetchRepositories GitHub APIからリポジトリ一覧を全ページ取得する
-func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token, login string) ([]models.GitHubRepo, error) {
+// fetchRepositories GitHub APIからリポジトリ一覧を全ページ取得する（自分のリポジトリ + 所属組織のリポジトリ）
+func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
 	var allRepos []models.GitHubRepo
 	page := 1
 
 	for {
-		url := fmt.Sprintf("%s/users/%s/repos?type=owner&sort=updated&per_page=100&page=%d", githubAPIBase, login, page)
+		// /user/repos は認証済みユーザーの全リポジトリ（自分・組織メンバー）を返す
+		url := fmt.Sprintf("%s/user/repos?affiliation=owner,organization_member&sort=updated&per_page=100&page=%d", githubAPIBase, page)
 		body, err := s.doRequestWithRetry(ctx, client, token, url)
 		if err != nil {
 			return nil, err
