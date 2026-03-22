@@ -309,39 +309,36 @@ type githubAPIRepository struct {
 
 // fetchRepositories 自分のリポジトリ + 所属組織のリポジトリを取得してマージする
 func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
-	// 1. 自分のリポジトリ
-	ownRepos, err := s.fetchRepoPages(ctx, client, token,
-		fmt.Sprintf("%s/user/repos?type=owner&sort=updated&per_page=100", githubAPIBase))
-	if err != nil {
-		return nil, err
-	}
+	seen := make(map[string]struct{})
 
-	// 2. 所属組織の一覧を取得
-	orgs, err := s.fetchOrgs(ctx, client, token)
+	// 1. /user/repos?type=all でアクセス可能な全リポジトリを取得（read:orgなしでも動く）
+	allTypeRepos, err := s.fetchRepoPages(ctx, client, token,
+		fmt.Sprintf("%s/user/repos?type=all&sort=updated&per_page=100", githubAPIBase))
 	if err != nil {
-		// 組織取得失敗は警告のみ（個人リポジトリは返す）
-		log.Printf("[GitHubService] fetchOrgs warning: %v", err)
-		return ownRepos, nil
+		log.Printf("[GitHubService] fetchRepos(type=all) warning: %v", err)
 	}
-
-	// 3. 各組織のリポジトリを取得してマージ（重複除去）
-	seen := make(map[string]struct{}, len(ownRepos))
-	for _, r := range ownRepos {
+	allRepos := allTypeRepos
+	for _, r := range allTypeRepos {
 		seen[r.FullName] = struct{}{}
 	}
-	allRepos := ownRepos
 
-	for _, org := range orgs {
-		orgRepos, err := s.fetchRepoPages(ctx, client, token,
-			fmt.Sprintf("%s/orgs/%s/repos?type=member&sort=updated&per_page=100", githubAPIBase, org))
-		if err != nil {
-			log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
-			continue
-		}
-		for _, r := range orgRepos {
-			if _, exists := seen[r.FullName]; !exists {
-				seen[r.FullName] = struct{}{}
-				allRepos = append(allRepos, r)
+	// 2. read:orgがある場合は組織リポジトリも明示的に取得してマージ
+	orgs, err := s.fetchOrgs(ctx, client, token)
+	if err != nil {
+		log.Printf("[GitHubService] fetchOrgs warning (read:org scope may be missing): %v", err)
+	} else {
+		for _, org := range orgs {
+			orgRepos, err := s.fetchRepoPages(ctx, client, token,
+				fmt.Sprintf("%s/orgs/%s/repos?type=member&sort=updated&per_page=100", githubAPIBase, org))
+			if err != nil {
+				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
+				continue
+			}
+			for _, r := range orgRepos {
+				if _, exists := seen[r.FullName]; !exists {
+					seen[r.FullName] = struct{}{}
+					allRepos = append(allRepos, r)
+				}
 			}
 		}
 	}
@@ -351,7 +348,22 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 
 // fetchOrgs 認証ユーザーの所属組織名一覧を取得する
 func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
-	body, err := s.doGet(ctx, client, token, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase))
+	// X-OAuth-Scopes ヘッダーでトークンのスコープを確認
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	scopes := resp.Header.Get("X-OAuth-Scopes")
+	log.Printf("[GitHubService] token scopes: %q", scopes)
+	if resp.StatusCode >= 400 {
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +551,8 @@ func (s *GitHubService) doGet(ctx context.Context, client *http.Client, token, u
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("github api error: status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github api error: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 
 	return io.ReadAll(resp.Body)
