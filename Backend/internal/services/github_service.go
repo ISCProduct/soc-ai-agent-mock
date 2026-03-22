@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -311,25 +312,32 @@ type githubAPIRepository struct {
 func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
 	seen := make(map[string]struct{})
 
-	// 1. /user/repos?type=all でアクセス可能な全リポジトリを取得（read:orgなしでも動く）
+	// 1. /user/repos?affiliation=owner,collaborator,organization_member で全リポジトリを取得
+	// affiliation を明示指定することで、オーナー・コラボレーター・組織メンバーとして参加している
+	// リポジトリをすべて取得する（read:orgなしでも動く）
 	allTypeRepos, err := s.fetchRepoPages(ctx, client, token,
-		fmt.Sprintf("%s/user/repos?type=all&sort=updated&per_page=100", githubAPIBase))
+		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100", githubAPIBase))
 	if err != nil {
-		log.Printf("[GitHubService] fetchRepos(type=all) warning: %v", err)
+		log.Printf("[GitHubService] fetchRepos(affiliation=all) warning: %v", err)
 	}
 	allRepos := allTypeRepos
 	for _, r := range allTypeRepos {
 		seen[r.FullName] = struct{}{}
 	}
 
-	// 2. read:orgがある場合は組織リポジトリも明示的に取得してマージ
+	// 2. 組織リポジトリも明示的に取得してマージ（repo + read:org スコープが必要）
 	orgs, err := s.fetchOrgs(ctx, client, token)
 	if err != nil {
-		log.Printf("[GitHubService] fetchOrgs warning (read:org scope may be missing): %v", err)
+		var scopeErr *InsufficientScopesError
+		if errors.As(err, &scopeErr) {
+			// スコープ不足は呼び出し元に伝播してユーザーに再認証を促す
+			return nil, scopeErr
+		}
+		log.Printf("[GitHubService] fetchOrgs warning: %v", err)
 	} else {
 		for _, org := range orgs {
 			orgRepos, err := s.fetchRepoPages(ctx, client, token,
-				fmt.Sprintf("%s/orgs/%s/repos?type=member&sort=updated&per_page=100", githubAPIBase, org))
+				fmt.Sprintf("%s/orgs/%s/repos?type=all&sort=updated&per_page=100", githubAPIBase, org))
 			if err != nil {
 				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
 				continue
@@ -343,12 +351,46 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 		}
 	}
 
+	// 3. GraphQL repositoriesContributedTo でコントリビュート済みリポジトリを追加取得
+	// REST APIの組織承認制限を回避し、参加しているすべての組織リポジトリを取得できる
+	contributedRepos, err := s.fetchContributedRepos(ctx, client, token)
+	if err != nil {
+		log.Printf("[GitHubService] fetchContributedRepos warning: %v", err)
+	} else {
+		for _, r := range contributedRepos {
+			if _, exists := seen[r.FullName]; !exists {
+				seen[r.FullName] = struct{}{}
+				allRepos = append(allRepos, r)
+			}
+		}
+	}
+
 	return allRepos, nil
+}
+
+// InsufficientScopesError トークンのスコープ不足エラー型
+type InsufficientScopesError struct {
+	Missing []string
+}
+
+func (e *InsufficientScopesError) Error() string {
+	return fmt.Sprintf("GitHubトークンに必要なスコープが不足しています（%s）。GitHubアカウントを再連携してください。",
+		strings.Join(e.Missing, ", "))
+}
+
+// hasScopes トークンが必要なスコープをすべて持っているか確認する
+func hasScopes(scopeHeader string, required ...string) []string {
+	var missing []string
+	for _, r := range required {
+		if !strings.Contains(scopeHeader, r) {
+			missing = append(missing, r)
+		}
+	}
+	return missing
 }
 
 // fetchOrgs 認証ユーザーの所属組織名一覧を取得する
 func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
-	// X-OAuth-Scopes ヘッダーでトークンのスコープを確認
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -359,6 +401,12 @@ func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, toke
 	defer resp.Body.Close()
 	scopes := resp.Header.Get("X-OAuth-Scopes")
 	log.Printf("[GitHubService] token scopes: %q", scopes)
+
+	// repo と read:org の両方が必要
+	if missing := hasScopes(scopes, "repo", "read:org"); len(missing) > 0 {
+		return nil, &InsufficientScopesError{Missing: missing}
+	}
+
 	if resp.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
@@ -448,6 +496,100 @@ func aggregateLanguages(userID uint, repos []models.GitHubRepo) []models.GitHubL
 		})
 	}
 	return stats
+}
+
+// contributedReposGraphQLResponse GraphQL repositoriesContributedTo レスポンス
+type contributedReposGraphQLResponse struct {
+	Data struct {
+		Viewer struct {
+			RepositoriesContributedTo struct {
+				Nodes []struct {
+					Name        string `json:"name"`
+					NameWithOwner string `json:"nameWithOwner"`
+					Description string `json:"description"`
+					PrimaryLanguage *struct {
+						Name string `json:"name"`
+					} `json:"primaryLanguage"`
+					StargazerCount int  `json:"stargazerCount"`
+					ForkCount      int  `json:"forkCount"`
+					IsFork         bool `json:"isFork"`
+					UpdatedAt      string `json:"updatedAt"`
+				} `json:"nodes"`
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"repositoriesContributedTo"`
+		} `json:"viewer"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+// fetchContributedRepos GraphQL APIで自分がコントリビュートしたリポジトリ一覧を取得する
+// REST APIと異なり組織のOAuthアプリ承認不要でプライベート組織リポジトリも取得できる
+func (s *GitHubService) fetchContributedRepos(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
+	var allRepos []models.GitHubRepo
+	after := ""
+
+	for {
+		var cursorPart string
+		if after != "" {
+			cursorPart = fmt.Sprintf(`, after: "%s"`, after)
+		}
+		query := fmt.Sprintf(`{"query":"{ viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY]%s) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }"}`, cursorPart)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewBufferString(query))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		var result contributedReposGraphQLResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("unmarshal contributedRepos: %w", err)
+		}
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("graphql error: %s", result.Errors[0].Message)
+		}
+
+		for _, n := range result.Data.Viewer.RepositoriesContributedTo.Nodes {
+			lang := ""
+			if n.PrimaryLanguage != nil {
+				lang = n.PrimaryLanguage.Name
+			}
+			updatedAt, _ := time.Parse(time.RFC3339, n.UpdatedAt)
+			allRepos = append(allRepos, models.GitHubRepo{
+				Name:            n.Name,
+				FullName:        n.NameWithOwner,
+				Description:     n.Description,
+				Language:        lang,
+				Stars:           n.StargazerCount,
+				Forks:           n.ForkCount,
+				IsForked:        n.IsFork,
+				GitHubUpdatedAt: updatedAt,
+			})
+		}
+
+		if !result.Data.Viewer.RepositoriesContributedTo.PageInfo.HasNextPage {
+			break
+		}
+		after = result.Data.Viewer.RepositoriesContributedTo.PageInfo.EndCursor
+	}
+
+	return allRepos, nil
 }
 
 // contributionsGraphQLResponse GraphQLレスポンス構造体

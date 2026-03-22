@@ -88,3 +88,32 @@ func (r *GitHubRepository) UpdateSyncedAt(userID uint, t time.Time) error {
 		Where("user_id = ?", userID).
 		Update("synced_at", t).Error
 }
+
+// GetRepoSummary ユーザーID+リポジトリ名でAI要約を取得
+func (r *GitHubRepository) GetRepoSummary(userID uint, fullName string) (*models.GitHubRepoSummary, error) {
+	var s models.GitHubRepoSummary
+	if err := r.db.Where("user_id = ? AND full_name = ?", userID, fullName).First(&s).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// ListRepoSummaries ユーザーの全AI要約を取得
+func (r *GitHubRepository) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
+	var summaries []models.GitHubRepoSummary
+	if err := r.db.Where("user_id = ?", userID).Order("updated_at desc").Find(&summaries).Error; err != nil {
+		return nil, err
+	}
+	return summaries, nil
+}
+
+// UpsertRepoSummary AI要約を保存/更新
+func (r *GitHubRepository) UpsertRepoSummary(s *models.GitHubRepoSummary) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "full_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"summary_text", "tech_reason", "challenge", "achievement", "updated_at"}),
+	}).Create(s).Error
+}
