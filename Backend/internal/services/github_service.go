@@ -351,6 +351,20 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 		}
 	}
 
+	// 3. GraphQL repositoriesContributedTo でコントリビュート済みリポジトリを追加取得
+	// REST APIの組織承認制限を回避し、参加しているすべての組織リポジトリを取得できる
+	contributedRepos, err := s.fetchContributedRepos(ctx, client, token)
+	if err != nil {
+		log.Printf("[GitHubService] fetchContributedRepos warning: %v", err)
+	} else {
+		for _, r := range contributedRepos {
+			if _, exists := seen[r.FullName]; !exists {
+				seen[r.FullName] = struct{}{}
+				allRepos = append(allRepos, r)
+			}
+		}
+	}
+
 	return allRepos, nil
 }
 
@@ -482,6 +496,100 @@ func aggregateLanguages(userID uint, repos []models.GitHubRepo) []models.GitHubL
 		})
 	}
 	return stats
+}
+
+// contributedReposGraphQLResponse GraphQL repositoriesContributedTo レスポンス
+type contributedReposGraphQLResponse struct {
+	Data struct {
+		Viewer struct {
+			RepositoriesContributedTo struct {
+				Nodes []struct {
+					Name        string `json:"name"`
+					NameWithOwner string `json:"nameWithOwner"`
+					Description string `json:"description"`
+					PrimaryLanguage *struct {
+						Name string `json:"name"`
+					} `json:"primaryLanguage"`
+					StargazerCount int  `json:"stargazerCount"`
+					ForkCount      int  `json:"forkCount"`
+					IsFork         bool `json:"isFork"`
+					UpdatedAt      string `json:"updatedAt"`
+				} `json:"nodes"`
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"repositoriesContributedTo"`
+		} `json:"viewer"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+// fetchContributedRepos GraphQL APIで自分がコントリビュートしたリポジトリ一覧を取得する
+// REST APIと異なり組織のOAuthアプリ承認不要でプライベート組織リポジトリも取得できる
+func (s *GitHubService) fetchContributedRepos(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
+	var allRepos []models.GitHubRepo
+	after := ""
+
+	for {
+		var cursorPart string
+		if after != "" {
+			cursorPart = fmt.Sprintf(`, after: "%s"`, after)
+		}
+		query := fmt.Sprintf(`{"query":"{ viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY]%s) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }"}`, cursorPart)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewBufferString(query))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		var result contributedReposGraphQLResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("unmarshal contributedRepos: %w", err)
+		}
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("graphql error: %s", result.Errors[0].Message)
+		}
+
+		for _, n := range result.Data.Viewer.RepositoriesContributedTo.Nodes {
+			lang := ""
+			if n.PrimaryLanguage != nil {
+				lang = n.PrimaryLanguage.Name
+			}
+			updatedAt, _ := time.Parse(time.RFC3339, n.UpdatedAt)
+			allRepos = append(allRepos, models.GitHubRepo{
+				Name:            n.Name,
+				FullName:        n.NameWithOwner,
+				Description:     n.Description,
+				Language:        lang,
+				Stars:           n.StargazerCount,
+				Forks:           n.ForkCount,
+				IsForked:        n.IsFork,
+				GitHubUpdatedAt: updatedAt,
+			})
+		}
+
+		if !result.Data.Viewer.RepositoriesContributedTo.PageInfo.HasNextPage {
+			break
+		}
+		after = result.Data.Viewer.RepositoriesContributedTo.PageInfo.EndCursor
+	}
+
+	return allRepos, nil
 }
 
 // contributionsGraphQLResponse GraphQLレスポンス構造体
