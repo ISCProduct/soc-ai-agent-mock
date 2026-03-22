@@ -311,11 +311,13 @@ type githubAPIRepository struct {
 func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
 	seen := make(map[string]struct{})
 
-	// 1. /user/repos?type=all でアクセス可能な全リポジトリを取得（read:orgなしでも動く）
+	// 1. /user/repos?affiliation=owner,collaborator,organization_member で全リポジトリを取得
+	// affiliation を明示指定することで、オーナー・コラボレーター・組織メンバーとして参加している
+	// リポジトリをすべて取得する（read:orgなしでも動く）
 	allTypeRepos, err := s.fetchRepoPages(ctx, client, token,
-		fmt.Sprintf("%s/user/repos?type=all&sort=updated&per_page=100", githubAPIBase))
+		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100", githubAPIBase))
 	if err != nil {
-		log.Printf("[GitHubService] fetchRepos(type=all) warning: %v", err)
+		log.Printf("[GitHubService] fetchRepos(affiliation=all) warning: %v", err)
 	}
 	allRepos := allTypeRepos
 	for _, r := range allTypeRepos {
@@ -329,7 +331,7 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 	} else {
 		for _, org := range orgs {
 			orgRepos, err := s.fetchRepoPages(ctx, client, token,
-				fmt.Sprintf("%s/orgs/%s/repos?type=member&sort=updated&per_page=100", githubAPIBase, org))
+				fmt.Sprintf("%s/orgs/%s/repos?type=all&sort=updated&per_page=100", githubAPIBase, org))
 			if err != nil {
 				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
 				continue
