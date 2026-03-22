@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Box, Typography, Chip, CircularProgress, Paper, Alert, Button } from '@mui/material'
+import { Box, Typography, Chip, CircularProgress, Paper, Alert, Button, Divider, Accordion, AccordionSummary, AccordionDetails } from '@mui/material'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
 
@@ -24,6 +26,15 @@ interface GitHubProfile {
   TotalContributions: number
   PublicRepos: number
   Followers: number
+}
+
+interface RepoSummary {
+  ID: number
+  FullName: string
+  SummaryText: string
+  TechReason: string
+  Challenge: string
+  Achievement: string
 }
 
 // カテゴリ別の表示色
@@ -171,11 +182,13 @@ export default function GitHubSkills({ userId }: { userId: number }) {
   const [scores, setScores] = useState<SkillScore[]>([])
   const [profile, setProfile] = useState<GitHubProfile | null>(null)
   const [langStats, setLangStats] = useState<LanguageStat[]>([])
+  const [summaries, setSummaries] = useState<RepoSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [notLinked, setNotLinked] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [summarizingRepo, setSummarizingRepo] = useState<string | null>(null)
 
   useEffect(() => {
     fetchAll()
@@ -186,9 +199,10 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     setError(null)
     setNotLinked(false)
     try {
-      const [skillsRes, profileRes] = await Promise.all([
+      const [skillsRes, profileRes, summariesRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`),
         fetch(`${BACKEND_URL}/api/github/profile?user_id=${userId}`),
+        fetch(`${BACKEND_URL}/api/github/repo/summaries?user_id=${userId}`),
       ])
 
       if (skillsRes.ok) {
@@ -207,10 +221,36 @@ export default function GitHubSkills({ userId }: { userId: number }) {
       } else if (profileRes.status === 404) {
         setNotLinked(true)
       }
+
+      if (summariesRes.ok) {
+        const data = await summariesRes.json()
+        setSummaries(Array.isArray(data) ? data : [])
+      }
     } catch {
       setError('データの取得に失敗しました')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSummarizeRepo = async (fullName: string) => {
+    setSummarizingRepo(fullName)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: fullName }),
+      })
+      if (!res.ok) throw new Error()
+      const newSummary: RepoSummary = await res.json()
+      setSummaries(prev => {
+        const filtered = prev.filter(s => s.FullName !== fullName)
+        return [newSummary, ...filtered]
+      })
+    } catch {
+      setError(`${fullName} の要約生成に失敗しました`)
+    } finally {
+      setSummarizingRepo(null)
     }
   }
 
@@ -389,6 +429,77 @@ export default function GitHubSkills({ userId }: { userId: number }) {
         <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', py: 2 }}>
           スキルデータがありません。「同期」ボタンでGitHubデータを取得してください。
         </Typography>
+      )}
+
+      {/* リポジトリAI要約セクション */}
+      {summaries.length > 0 && (
+        <>
+          <Divider sx={{ borderColor: '#1e293b', my: 3 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <AutoAwesomeIcon sx={{ color: '#818cf8', fontSize: 18 }} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#f1f5f9' }}>
+              リポジトリAI要約
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {summaries.map(s => (
+              <Accordion
+                key={s.ID}
+                sx={{ bgcolor: '#1e293b', color: '#e2e8f0', borderRadius: 1, '&:before': { display: 'none' } }}
+                disableGutters
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#64748b' }} />}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: '#94a3b8' }}>
+                    {s.FullName}
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ pt: 0 }}>
+                  <Typography variant="body2" sx={{ color: '#cbd5e1', mb: 1.5 }}>{s.SummaryText}</Typography>
+                  {[
+                    { label: '技術選定の理由', value: s.TechReason, color: '#4FC3F7' },
+                    { label: '解決した課題', value: s.Challenge, color: '#81C784' },
+                    { label: '成果', value: s.Achievement, color: '#FFB74D' },
+                  ].map(item => (
+                    <Box key={item.label} sx={{ mb: 1 }}>
+                      <Typography variant="caption" sx={{ color: item.color, fontWeight: 700 }}>
+                        {item.label}
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: '#94a3b8' }}>{item.value}</Typography>
+                    </Box>
+                  ))}
+                  <Button
+                    size="small"
+                    startIcon={summarizingRepo === s.FullName ? <CircularProgress size={12} /> : <AutoAwesomeIcon />}
+                    onClick={() => handleSummarizeRepo(s.FullName)}
+                    disabled={summarizingRepo !== null}
+                    sx={{ mt: 1, color: '#818cf8', fontSize: '0.7rem' }}
+                  >
+                    再生成
+                  </Button>
+                </AccordionDetails>
+              </Accordion>
+            ))}
+          </Box>
+        </>
+      )}
+
+      {/* リポジトリ要約生成ボタン（未生成時） */}
+      {profile && summaries.length === 0 && !loading && (
+        <>
+          <Divider sx={{ borderColor: '#1e293b', my: 3 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <AutoAwesomeIcon sx={{ color: '#818cf8', fontSize: 18 }} />
+            <Typography variant="subtitle2" sx={{ color: '#94a3b8' }}>
+              リポジトリAI要約
+            </Typography>
+          </Box>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            リポジトリのREADMEをAIが解析し、技術的強みを要約します。
+          </Typography>
+          <Typography variant="caption" sx={{ color: '#475569' }}>
+            個別リポジトリから要約を生成するには、プロフィールページのリポジトリ一覧から選択してください。
+          </Typography>
+        </>
       )}
     </Paper>
   )

@@ -104,7 +104,7 @@ func main() {
 	emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
-	githubService := services.NewGitHubService(githubRepo, skillScoreService)
+	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
