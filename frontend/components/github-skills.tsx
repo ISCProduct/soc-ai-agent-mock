@@ -246,20 +246,24 @@ export default function GitHubSkills({ userId }: { userId: number }) {
 
   const handleSummarizeRepo = async (fullName: string) => {
     setSummarizingRepo(fullName)
+    setError(null)
     try {
       const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ full_name: fullName }),
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        const msg = await res.text()
+        throw new Error(msg || `HTTP ${res.status}`)
+      }
       const newSummary: RepoSummary = await res.json()
       setSummaries(prev => {
         const filtered = prev.filter(s => s.FullName !== fullName)
         return [newSummary, ...filtered]
       })
-    } catch {
-      setError(`${fullName} の要約生成に失敗しました`)
+    } catch (e) {
+      setError(`要約生成に失敗しました: ${e instanceof Error ? e.message : '不明なエラー'}`)
     } finally {
       setSummarizingRepo(null)
     }
@@ -324,14 +328,6 @@ export default function GitHubSkills({ userId }: { userId: number }) {
           {connecting ? '連携中...' : 'GitHubと連携する'}
         </Button>
       </Paper>
-    )
-  }
-
-  if (error) {
-    return (
-      <Alert severity="error" sx={{ mt: 2 }}>
-        {error}
-      </Alert>
     )
   }
 
@@ -435,6 +431,12 @@ export default function GitHubSkills({ userId }: { userId: number }) {
           </Box>
         )}
       </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mt: 2, mb: 1 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
       {!hasScores && !loading && (
         <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', py: 2 }}>
