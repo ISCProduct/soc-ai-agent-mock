@@ -15,8 +15,9 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import { authService, User } from '@/lib/auth'
-import { interviewApi, InterviewDetail, InterviewSession } from '@/lib/interview'
+import { interviewApi, InterviewDetail, InterviewSession, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
+import { parseJsonSafe } from '@/lib/interview-utils'
 
 const PRIMARY = '#ec5b13'
 
@@ -53,12 +54,14 @@ export default function InterviewHistoryPage() {
       .finally(() => setLoading(false))
   }, [user, page])
 
+  const isTeacher = user?.role === 'teacher'
+
   const handleSelectSession = async (session: InterviewSession) => {
     if (!user) return
     setDetailLoading(true)
     setSelectedDetail(null)
     try {
-      const detail = await interviewApi.getDetail(session.id, user.user_id)
+      const detail = await interviewApi.getDetail(session.id, user.user_id, user.role)
       setSelectedDetail(detail)
     } catch { /* ignore */ }
     finally { setDetailLoading(false) }
@@ -73,6 +76,9 @@ export default function InterviewHistoryPage() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box sx={{ color: PRIMARY }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
           <Typography sx={{ fontWeight: 700, fontSize: 20, color: '#0f172a' }}>面接履歴</Typography>
+          {user?.role === 'teacher' && (
+            <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
+          )}
         </Box>
         <IconButton onClick={() => router.push('/interview')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
           <ArrowBackIcon />
@@ -153,7 +159,62 @@ export default function InterviewHistoryPage() {
             <Stack spacing={2}>
               {/* Report */}
               {selectedDetail.report ? (
-                <InterviewSummary report={selectedDetail.report} theme="light" />
+                <>
+                  <InterviewSummary report={selectedDetail.report} theme="light" />
+
+                  {/* 教員用レポートパネル */}
+                  {isTeacher && (() => {
+                    const tr: TeacherReport | null = parseJsonSafe(selectedDetail.report?.teacher_report_json) as TeacherReport | null
+                    if (!tr) return null
+                    return (
+                      <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '2px solid #3b82f6', bgcolor: '#eff6ff' }}>
+                        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#3b82f6' }} />
+                          <Typography sx={{ fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>教員用詳細レポート</Typography>
+                        </Stack>
+                        {tr.overall_comment && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#1d4ed8', display: 'block', mb: 0.5 }}>総評</Typography>
+                            <Typography variant="body2" sx={{ color: '#1e3a8a', lineHeight: 1.7 }}>{tr.overall_comment}</Typography>
+                          </Box>
+                        )}
+                        {tr.coaching_points?.length > 0 && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#1d4ed8', display: 'block', mb: 0.5 }}>指導ポイント</Typography>
+                            <Stack spacing={0.5}>
+                              {tr.coaching_points.map((p, i) => (
+                                <Typography key={i} variant="body2" sx={{ color: '#1e3a8a', pl: 1 }}>・{p}</Typography>
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
+                        {tr.next_steps?.length > 0 && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#1d4ed8', display: 'block', mb: 0.5 }}>次回に向けた課題</Typography>
+                            <Stack spacing={0.5}>
+                              {tr.next_steps.map((s, i) => (
+                                <Typography key={i} variant="body2" sx={{ color: '#1e3a8a', pl: 1 }}>・{s}</Typography>
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
+                        {tr.detailed_evidence && Object.keys(tr.detailed_evidence).length > 0 && (
+                          <Box>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#1d4ed8', display: 'block', mb: 0.5 }}>評価根拠（詳細）</Typography>
+                            <Stack spacing={0.5}>
+                              {Object.entries(tr.detailed_evidence).map(([k, v]) => (
+                                <Box key={k}>
+                                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#2563eb' }}>{k}: </Typography>
+                                  <Typography variant="caption" sx={{ color: '#1e3a8a' }}>{v}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
+                      </Paper>
+                    )
+                  })()}
+                </>
               ) : (
                 <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
                   <Typography variant="body2" color="text.secondary">

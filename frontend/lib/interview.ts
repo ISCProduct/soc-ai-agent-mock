@@ -42,6 +42,14 @@ export type InterviewUtterance = {
   created_at: string
 }
 
+export type TeacherReport = {
+  overall_comment: string
+  detailed_evidence: Record<string, string>
+  coaching_points: string[]
+  strengths_for_teacher: string[]
+  next_steps: string[]
+}
+
 export type InterviewReport = {
   session_id: number
   summary_text: string
@@ -49,7 +57,7 @@ export type InterviewReport = {
   evidence_json: string
   strengths_json?: string
   improvements_json?: string
-  teacher_report_json?: string
+  teacher_report_json?: string  // 教員のみ返却
   created_at: string
   updated_at: string
 }
@@ -100,8 +108,9 @@ export const interviewApi = {
     if (!res.ok) throw new Error(await res.text())
   },
 
-  async getDetail(sessionId: number, userId: number): Promise<InterviewDetail> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}`)
+  async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
+    const roleParam = role ? `&role=${role}` : ''
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`)
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },

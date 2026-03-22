@@ -216,6 +216,10 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 }
 
 func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*InterviewDetailResponse, error) {
+	return s.GetSessionDetailWithRole(userID, sessionID, "student")
+}
+
+func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*InterviewDetailResponse, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -234,6 +238,12 @@ func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*Inter
 			return nil, err
 		}
 		report = nil
+	}
+	// 教員以外には教員用レポートを返さない
+	if report != nil && role != "teacher" {
+		sanitized := *report
+		sanitized.TeacherReportJSON = ""
+		report = &sanitized
 	}
 	return &InterviewDetailResponse{
 		Session:    *toSessionResponse(session),
@@ -547,12 +557,13 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if len(utterances) == 0 {
 		// utterances が0件の場合は空レポートを保存して正常終了
 		empty := &models.InterviewReport{
-			SessionID:        sessionID,
-			SummaryText:      "発話データがありませんでした。",
-			ScoresJSON:       `{"logic":0,"specificity":0,"ownership":0,"communication":0,"enthusiasm":0}`,
-			EvidenceJSON:     `{}`,
-			StrengthsJSON:    `[]`,
-			ImprovementsJSON: `[]`,
+			SessionID:         sessionID,
+			SummaryText:       "発話データがありませんでした。",
+			ScoresJSON:        `{"logic":0,"specificity":0,"ownership":0,"communication":0,"enthusiasm":0}`,
+			EvidenceJSON:      `{}`,
+			StrengthsJSON:     `[]`,
+			ImprovementsJSON:  `[]`,
+			TeacherReportJSON: `{}`,
 		}
 		return s.reportRepo.Upsert(empty)
 	}
@@ -570,7 +581,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 
 ## 出力フォーマット（このキーと型を厳守してください）
 {
-  "summary": "面接全体の総合評価コメント（2〜3文）",
+  "summary": "面接全体の総合評価コメント（2〜3文、生徒向けのやさしい言葉で）",
   "scores": {"logic": 3, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
   "evidence": {
     "logic": "論理性の根拠となった発言",
@@ -580,19 +591,34 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
     "enthusiasm": "積極性・熱意の根拠となった発言"
   },
   "strengths": ["強み1", "強み2", "強み3"],
-  "improvements": ["改善点1", "改善点2", "改善点3"]
+  "improvements": ["改善点1", "改善点2", "改善点3"],
+  "teacher": {
+    "overall_comment": "教員向け総評（指導観点・クラス内での位置づけ等）",
+    "detailed_evidence": {"logic": "詳細な根拠と指導ポイント", "specificity": "詳細な根拠と指導ポイント", "ownership": "詳細な根拠と指導ポイント"},
+    "coaching_points": ["具体的な改善指導ポイント1", "ポイント2", "ポイント3"],
+    "strengths_for_teacher": ["指導者が把握すべき強み1", "強み2"],
+    "next_steps": ["次回面接に向けた具体的な課題1", "課題2"]
+  }
 }
 
 ※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
 ※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
+※ teacher以下は教員専用の詳細情報として出力してください。
 
 Interview transcript:
 %s`, lang, transcript)
 
 	model := getEnv("INTERVIEW_REPORT_MODEL", "")
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 1500, model)
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 	if err != nil {
 		return err
+	}
+	type teacherReport struct {
+		OverallComment      string            `json:"overall_comment"`
+		DetailedEvidence    map[string]string `json:"detailed_evidence"`
+		CoachingPoints      []string          `json:"coaching_points"`
+		StrengthsForTeacher []string          `json:"strengths_for_teacher"`
+		NextSteps           []string          `json:"next_steps"`
 	}
 	type reportPayload struct {
 		Summary      string            `json:"summary"`
@@ -600,6 +626,7 @@ Interview transcript:
 		Evidence     map[string]string `json:"evidence"`
 		Strengths    []string          `json:"strengths"`
 		Improvements []string          `json:"improvements"`
+		Teacher      *teacherReport    `json:"teacher"`
 	}
 	var payload reportPayload
 	cleaned := extractJSONObject(raw)
@@ -610,14 +637,19 @@ Interview transcript:
 	evidenceJSON, _ := json.Marshal(payload.Evidence)
 	strengthsJSON, _ := json.Marshal(payload.Strengths)
 	improvementsJSON, _ := json.Marshal(payload.Improvements)
+	teacherJSON := []byte("{}")
+	if payload.Teacher != nil {
+		teacherJSON, _ = json.Marshal(payload.Teacher)
+	}
 
 	report := &models.InterviewReport{
-		SessionID:        sessionID,
-		SummaryText:      payload.Summary,
-		ScoresJSON:       string(scoresJSON),
-		EvidenceJSON:     string(evidenceJSON),
-		StrengthsJSON:    string(strengthsJSON),
-		ImprovementsJSON: string(improvementsJSON),
+		SessionID:         sessionID,
+		SummaryText:       payload.Summary,
+		ScoresJSON:        string(scoresJSON),
+		EvidenceJSON:      string(evidenceJSON),
+		StrengthsJSON:     string(strengthsJSON),
+		ImprovementsJSON:  string(improvementsJSON),
+		TeacherReportJSON: string(teacherJSON),
 	}
 	return s.reportRepo.Upsert(report)
 }
