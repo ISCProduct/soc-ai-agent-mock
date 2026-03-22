@@ -9,6 +9,7 @@ type User struct {
 	Password                 string `gorm:"size:255"` // ハッシュ化されたパスワード (OAuth時は空)
 	Name                     string `gorm:"size:100"`
 	IsGuest                  bool   `gorm:"default:false"`                               // ゲストユーザーフラグ
+	Role                     string `gorm:"size:20;default:'student'" json:"role"`       // ユーザーロール: student / teacher
 	TargetLevel              string `gorm:"size:20;default:'新卒'"`                        // 新卒 or 中途
 	SchoolName               string `gorm:"size:255;column:school_name"`                 // 学校名
 	IsAdmin                  bool   `gorm:"default:false" json:"is_admin"`               // 管理者フラグ
