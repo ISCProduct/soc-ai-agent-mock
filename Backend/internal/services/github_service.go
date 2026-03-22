@@ -52,18 +52,20 @@ func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string)
 }
 
 // TriggerAsyncSync 非同期でGitHubデータ同期を開始する（ノンブロッキング）
-func (s *GitHubService) TriggerAsyncSync(userID uint) {
+// force=true でキャッシュを無視して強制同期する
+func (s *GitHubService) TriggerAsyncSync(userID uint, force bool) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if err := s.SyncUserData(ctx, userID); err != nil {
+		if err := s.SyncUserData(ctx, userID, force); err != nil {
 			log.Printf("[GitHubService] async sync failed for user %d: %v", userID, err)
 		}
 	}()
 }
 
 // SyncUserData GitHubからリポジトリ・言語比率・コントリビューション数を取得してDBに保存する
-func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
+// force=true でキャッシュを無視して強制同期する
+func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force bool) error {
 	profile, err := s.githubRepo.GetProfile(userID)
 	if err != nil {
 		return fmt.Errorf("get profile: %w", err)
@@ -72,8 +74,8 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 		return fmt.Errorf("github profile not found for user %d", userID)
 	}
 
-	// キャッシュチェック: 1時間以内に同期済みならスキップ
-	if profile.SyncedAt != nil && time.Since(*profile.SyncedAt) < syncCacheDuration {
+	// キャッシュチェック: 1時間以内に同期済みならスキップ（強制同期時はスキップしない）
+	if !force && profile.SyncedAt != nil && time.Since(*profile.SyncedAt) < syncCacheDuration {
 		log.Printf("[GitHubService] user %d: skipping sync (last synced %s ago)", userID, time.Since(*profile.SyncedAt).Round(time.Minute))
 		return nil
 	}
@@ -82,8 +84,8 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 	token := profile.AccessToken
 	login := profile.GitHubLogin
 
-	// 1. リポジトリ一覧取得
-	repos, err := s.fetchRepositories(ctx, client, token, login)
+	// 1. リポジトリ一覧取得（自分のリポジトリ + 所属組織のリポジトリ）
+	repos, err := s.fetchRepositories(ctx, client, token)
 	if err != nil {
 		return fmt.Errorf("fetch repositories: %w", err)
 	}
@@ -305,27 +307,96 @@ type githubAPIRepository struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// fetchRepositories GitHub APIからリポジトリ一覧を全ページ取得する
-func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token, login string) ([]models.GitHubRepo, error) {
+// fetchRepositories 自分のリポジトリ + 所属組織のリポジトリを取得してマージする
+func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
+	seen := make(map[string]struct{})
+
+	// 1. /user/repos?type=all でアクセス可能な全リポジトリを取得（read:orgなしでも動く）
+	allTypeRepos, err := s.fetchRepoPages(ctx, client, token,
+		fmt.Sprintf("%s/user/repos?type=all&sort=updated&per_page=100", githubAPIBase))
+	if err != nil {
+		log.Printf("[GitHubService] fetchRepos(type=all) warning: %v", err)
+	}
+	allRepos := allTypeRepos
+	for _, r := range allTypeRepos {
+		seen[r.FullName] = struct{}{}
+	}
+
+	// 2. read:orgがある場合は組織リポジトリも明示的に取得してマージ
+	orgs, err := s.fetchOrgs(ctx, client, token)
+	if err != nil {
+		log.Printf("[GitHubService] fetchOrgs warning (read:org scope may be missing): %v", err)
+	} else {
+		for _, org := range orgs {
+			orgRepos, err := s.fetchRepoPages(ctx, client, token,
+				fmt.Sprintf("%s/orgs/%s/repos?type=member&sort=updated&per_page=100", githubAPIBase, org))
+			if err != nil {
+				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
+				continue
+			}
+			for _, r := range orgRepos {
+				if _, exists := seen[r.FullName]; !exists {
+					seen[r.FullName] = struct{}{}
+					allRepos = append(allRepos, r)
+				}
+			}
+		}
+	}
+
+	return allRepos, nil
+}
+
+// fetchOrgs 認証ユーザーの所属組織名一覧を取得する
+func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
+	// X-OAuth-Scopes ヘッダーでトークンのスコープを確認
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	scopes := resp.Header.Get("X-OAuth-Scopes")
+	log.Printf("[GitHubService] token scopes: %q", scopes)
+	if resp.StatusCode >= 400 {
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(orgs))
+	for i, o := range orgs {
+		names[i] = o.Login
+	}
+	return names, nil
+}
+
+// fetchRepoPages ページネーションで全リポジトリを取得する
+func (s *GitHubService) fetchRepoPages(ctx context.Context, client *http.Client, token, baseURL string) ([]models.GitHubRepo, error) {
 	var allRepos []models.GitHubRepo
 	page := 1
-
 	for {
-		url := fmt.Sprintf("%s/users/%s/repos?type=owner&sort=updated&per_page=100&page=%d", githubAPIBase, login, page)
+		url := fmt.Sprintf("%s&page=%d", baseURL, page)
 		body, err := s.doRequestWithRetry(ctx, client, token, url)
 		if err != nil {
 			return nil, err
 		}
-
 		var apiRepos []githubAPIRepository
 		if err := json.Unmarshal(body, &apiRepos); err != nil {
 			return nil, fmt.Errorf("unmarshal repos page %d: %w", page, err)
 		}
-
 		if len(apiRepos) == 0 {
 			break
 		}
-
 		for _, r := range apiRepos {
 			updatedAt, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 			allRepos = append(allRepos, models.GitHubRepo{
@@ -339,13 +410,11 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 				GitHubUpdatedAt: updatedAt,
 			})
 		}
-
 		if len(apiRepos) < 100 {
 			break
 		}
 		page++
 	}
-
 	return allRepos, nil
 }
 
@@ -482,7 +551,8 @@ func (s *GitHubService) doGet(ctx context.Context, client *http.Client, token, u
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("github api error: status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github api error: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 
 	return io.ReadAll(resp.Body)

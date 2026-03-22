@@ -328,7 +328,7 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
 
                 <ListItem disablePadding>
                     <ListItemButton
-                        onClick={() => router.push('/profile')}
+                        onClick={() => router.push('/chat-history')}
                         sx={{
                             borderRadius: 1,
                         }}

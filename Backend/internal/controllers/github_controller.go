@@ -88,7 +88,8 @@ func (c *GitHubController) Sync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.githubService.TriggerAsyncSync(userID)
+	force := r.URL.Query().Get("force") == "true"
+	c.githubService.TriggerAsyncSync(userID, force)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -110,7 +111,7 @@ func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.githubService.SyncUserData(context.Background(), userID); err != nil {
+	if err := c.githubService.SyncUserData(context.Background(), userID, true); err != nil {
 		http.Error(w, "sync failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
