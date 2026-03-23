@@ -406,6 +406,13 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+# /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
+# /health は後方互換のため維持
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok"}
+
+
 @app.post("/resume/review", response_model=ReviewResponse)
 def review_resume(request: ReviewRequest) -> ReviewResponse:
     role_label = request.job_title or "指定なし"

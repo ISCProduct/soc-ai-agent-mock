@@ -172,10 +172,15 @@ func main() {
 	go crawlService.StartScheduler()
 
 	// ヘルスチェックエンドポイント
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
+	// /health は後方互換のため維持
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+		w.Write([]byte(`{"status":"ok"}`))
+	}
+	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/healthz", healthHandler)
 
 	// サーバー起動
 	port := cfg.ServerPort
