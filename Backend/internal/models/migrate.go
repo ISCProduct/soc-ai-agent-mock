@@ -51,6 +51,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&PendingRegistration{},
 		// 選考スケジュール
 		&ScheduleEvent{},
+		// APIコストモニタリング
+		&APICallLog{},
 		// GitHub連携
 		&GitHubProfile{},
 		&GitHubRepo{},

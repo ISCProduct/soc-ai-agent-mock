@@ -123,9 +123,16 @@ func main() {
 	// GitHub連携
 	githubRepo := repositories.NewGitHubRepository(db)
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
+	// APIコストモニタリング
+	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
+	apiCostService := services.NewAPICostService(apiCallLogRepo)
+	// OpenAI APIコール時にトークン使用量をロギング
+	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
+		apiCostService.LogCall(model, promptTokens, completionTokens)
+	}
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
 	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
@@ -179,6 +186,7 @@ func main() {
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
+	adminCostsController := controllers.NewAdminCostsController(apiCostService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
@@ -191,7 +199,7 @@ func main() {
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, userRepo)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, userRepo)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
