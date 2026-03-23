@@ -56,6 +56,7 @@ export default function ResumePage() {
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
+  const [ragReport, setRagReport] = useState('')
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -127,9 +128,12 @@ export default function ResumePage() {
       return
     }
     setReviewError('')
+    setReview(null)
+    setRagReport('')
     setReviewLoading(true)
+
     try {
-      const response = await fetch(`/api/resume/review?document_id=${documentId}`, {
+      const response = await fetch(`/api/resume/review/stream?document_id=${documentId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -138,22 +142,42 @@ export default function ResumePage() {
           candidate_type: candidateType,
         }),
       })
-      if (!response.ok) {
+
+      if (!response.ok || !response.body) {
         const errText = await response.text()
-        let message = errText
-        try {
-          const parsed = JSON.parse(errText)
-          message = parsed?.error || parsed?.message || errText
-        } catch {
-          message = errText || 'Review failed'
+        throw new Error(errText || 'Review failed')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.type === 'chunk') {
+              setRagReport((prev) => prev + data.text)
+            } else if (data.type === 'complete') {
+              setReview({ review: data.review, items: data.items })
+            } else if (data.type === 'error') {
+              throw new Error(data.message)
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof Error && parseErr.message !== 'Unexpected token') {
+              throw parseErr
+            }
+          }
         }
-        throw new Error(message)
       }
-      const data = await response.json()
-      if (!data || !data.review) {
-        throw new Error('Review response is empty')
-      }
-      setReview(data)
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : 'Review failed')
     } finally {
@@ -269,18 +293,42 @@ export default function ResumePage() {
             <Box>
               <LinearProgress />
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                レビューを生成中...（通常30〜60秒かかります）
+                {ragReport ? '企業別レビューレポートを生成中...' : 'PDFを解析中...（通常30〜60秒かかります）'}
               </Typography>
             </Box>
           )}
           {reviewError && (
             <Alert severity="error">{reviewError}</Alert>
           )}
-          {review && (
-            <Alert severity="success">レビューが完了しました。下の指摘事項ページをご確認ください。</Alert>
+          {review && !reviewLoading && (
+            <Alert severity="success">レビューが完了しました。下の指摘事項をご確認ください。</Alert>
           )}
         </Stack>
       </Paper>
+
+      {ragReport && (
+        <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            企業別レビューレポート
+            {reviewLoading && (
+              <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                生成中...
+              </Typography>
+            )}
+          </Typography>
+          <Box
+            sx={{
+              whiteSpace: 'pre-wrap',
+              fontFamily: 'inherit',
+              fontSize: '0.95rem',
+              lineHeight: 1.8,
+              color: 'text.primary',
+            }}
+          >
+            {ragReport}
+          </Box>
+        </Paper>
+      )}
 
       {review && (
         <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
