@@ -89,7 +89,7 @@ jobs:
       # ECS デプロイ
       # =========================
       - name: Deploy to Amazon ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
