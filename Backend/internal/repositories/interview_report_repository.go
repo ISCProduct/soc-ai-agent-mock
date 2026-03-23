@@ -25,3 +25,15 @@ func (r *InterviewReportRepository) FindBySessionID(sessionID uint) (*models.Int
 func (r *InterviewReportRepository) Upsert(report *models.InterviewReport) error {
 	return r.db.Save(report).Error
 }
+
+// FindBySessionIDs は複数セッションのレポートを一括取得する
+func (r *InterviewReportRepository) FindBySessionIDs(sessionIDs []uint) ([]models.InterviewReport, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	var reports []models.InterviewReport
+	if err := r.db.Where("session_id IN ?", sessionIDs).Find(&reports).Error; err != nil {
+		return nil, err
+	}
+	return reports, nil
+}
