@@ -149,16 +149,40 @@ export const interviewApi = {
     return res.json()
   },
 
-  async uploadVideo(sessionId: number, userId: number, blob: Blob): Promise<{ video_id: number; status: string }> {
-    const form = new FormData()
-    form.append('user_id', String(userId))
-    form.append('video', blob, `interview_${sessionId}.webm`)
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/upload-video`, {
-      method: 'POST',
-      body: form,
+  uploadVideo(
+    sessionId: number,
+    userId: number,
+    blob: Blob,
+    onProgress?: (percent: number) => void,
+  ): Promise<{ video_id: number; status: string }> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('user_id', String(userId))
+      form.append('video', blob, `interview_${sessionId}.webm`)
+
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${BACKEND_URL}/api/interviews/${sessionId}/upload-video`)
+
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 100))
+          }
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText))
+        } else {
+          reject(new Error(xhr.responseText || `アップロードに失敗しました (HTTP ${xhr.status})`))
+        }
+      }
+      xhr.onerror = () => reject(new Error('ネットワークエラーが発生しました。接続を確認してください'))
+      xhr.ontimeout = () => reject(new Error('アップロードがタイムアウトしました'))
+      xhr.timeout = 30 * 60 * 1000 // 30分
+      xhr.send(form)
     })
-    if (!res.ok) throw new Error(await res.text())
-    return res.json()
   },
 }
 

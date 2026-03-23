@@ -125,6 +125,8 @@ export default function InterviewPage() {
   const [turnPending, _setTurnPending] = useState(false)
 
   const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0)
+  const [videoSizeWarning, setVideoSizeWarning] = useState<string | null>(null)
 
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -429,7 +431,13 @@ export default function InterviewPage() {
         try {
           const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'
           videoChunksRef.current = []
-          const vr = new MediaRecorder(stream, { mimeType })
+          // ビットレートを制限して 10 分録画でも約 25 MB 以内に収める
+          // video: 300 kbps + audio: 32 kbps ≈ 332 kbps → 10 分 ≈ 24.9 MB
+          const vr = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: 300_000,
+            audioBitsPerSecond: 32_000,
+          })
           vr.ondataavailable = (e) => { if (e.data.size > 0) videoChunksRef.current.push(e.data) }
           vr.start(1000)
           videoRecorderRef.current = vr
@@ -475,9 +483,20 @@ export default function InterviewPage() {
 
       // Upload video asynchronously
       if (videoBlob) {
+        const MB = 1024 * 1024
+        const sizeMB = (videoBlob.size / MB).toFixed(1)
+        if (videoBlob.size > 200 * MB) {
+          setVideoSizeWarning(`動画サイズが ${sizeMB} MB と非常に大きいです。アップロードに時間がかかる場合があります。`)
+        }
         setVideoUploadStatus('uploading')
-        interviewApi.uploadVideo(currentSession.id, currentUser.user_id, videoBlob)
-          .then(() => setVideoUploadStatus('done'))
+        setVideoUploadProgress(0)
+        interviewApi.uploadVideo(
+          currentSession.id,
+          currentUser.user_id,
+          videoBlob,
+          (percent) => setVideoUploadProgress(percent),
+        )
+          .then(() => { setVideoUploadStatus('done'); setVideoSizeWarning(null) })
           .catch(() => setVideoUploadStatus('error'))
       }
     }
@@ -1143,11 +1162,23 @@ export default function InterviewPage() {
           {/* Video upload status */}
           {videoUploadStatus !== 'idle' && (
             <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
-              <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6' }}>
-                {videoUploadStatus === 'uploading' && '動画をGoogle Driveにアップロード中...'}
+              {videoSizeWarning && (
+                <Typography variant="caption" sx={{ color: '#fdd663', display: 'block', mb: 1 }}>
+                  ⚠ {videoSizeWarning}
+                </Typography>
+              )}
+              <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6', mb: videoUploadStatus === 'uploading' ? 1 : 0 }}>
+                {videoUploadStatus === 'uploading' && `動画をアップロード中... ${videoUploadProgress}%`}
                 {videoUploadStatus === 'done' && '✓ 動画のアップロードが完了しました'}
-                {videoUploadStatus === 'error' && '動画のアップロードに失敗しました'}
+                {videoUploadStatus === 'error' && '動画のアップロードに失敗しました。ネットワーク接続を確認してください'}
               </Typography>
+              {videoUploadStatus === 'uploading' && (
+                <LinearProgress
+                  variant="determinate"
+                  value={videoUploadProgress}
+                  sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
+                />
+              )}
             </Paper>
           )}
         </Box>
