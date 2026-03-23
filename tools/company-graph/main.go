@@ -92,9 +92,10 @@ func main() {
 		if err != nil && (result == nil || len(result.Nodes) == 0) {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			json.NewEncoder(w).Encode(map[string]any{
-				"ok":    false,
-				"error": err.Error(),
-				"logs":  logs,
+				"ok":       false,
+				"error":    err.Error(),
+				"logs":     logs,
+				"warnings": result.Warnings,
 			})
 			return
 		}
@@ -109,6 +110,7 @@ func main() {
 			"logs":        logs,
 			"nodes":       result.Nodes,
 			"target_year": targetYear,
+			"warnings":    result.Warnings,
 		})
 	})
 

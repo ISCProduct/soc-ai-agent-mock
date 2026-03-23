@@ -17,6 +17,14 @@ import (
 // RemoteURL, if set, is a Chrome DevTools WebSocket URL (e.g. "ws://chromedp:9222") and
 // causes the scraper to connect to an external Chrome instance.
 // When RemoteURL is empty, a local Chromium binary is launched via chromedp.NewExecAllocator.
+//
+// !! 利用規約リスク !!
+// マイナビの利用規約はスクレイピング・自動収集を禁止している可能性があります。
+// 本スクレイパーの運用前に必ず最新の利用規約（https://job.mynavi.jp/）を確認し、
+// 法務部門の承認を取得してください。
+// 違反した場合、サービス停止・法的措置のリスクがあります。
+// 代替手段として公式API・RSS・プレスリリース情報源への切り替えを検討してください。
+// 現在のセレクタバージョン: MynaviSelectorVersion（scraper.go 参照）
 type MynaviScraper struct {
 	RemoteURL string
 	UserAgent string
