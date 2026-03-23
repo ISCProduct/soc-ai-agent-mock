@@ -15,6 +15,7 @@ func SetupAdminRoutes(
 	adminAuditController *controllers.AdminAuditController,
 	adminCompanyGraphController *controllers.AdminCompanyGraphController,
 	adminInterviewController *controllers.AdminInterviewController,
+	adminDashboardController *controllers.AdminDashboardController,
 	userRepo *repositories.UserRepository,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
@@ -43,4 +44,9 @@ func SetupAdminRoutes(
 	// Interview management
 	http.HandleFunc("/api/admin/interviews", auth(adminInterviewController.ListSessions))
 	http.HandleFunc("/api/admin/interviews/", auth(adminInterviewController.Route))
+
+	// Dashboard
+	http.HandleFunc("/api/admin/dashboard/users", auth(adminDashboardController.ListUsers))
+	http.HandleFunc("/api/admin/dashboard/users/", auth(adminDashboardController.UserSessions))
+	http.HandleFunc("/api/admin/dashboard/export/csv", auth(adminDashboardController.ExportCSV))
 }
