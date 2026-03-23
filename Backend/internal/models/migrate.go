@@ -49,6 +49,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&InterviewReport{},
 		&InterviewVideo{},
 		&PendingRegistration{},
+		// 選考スケジュール
+		&ScheduleEvent{},
 		// GitHub連携
 		&GitHubProfile{},
 		&GitHubRepo{},
