@@ -81,19 +81,19 @@ func NewSkillScoreService(scoreRepo *repositories.SkillScoreRepository) *SkillSc
 	return &SkillScoreService{scoreRepo: scoreRepo}
 }
 
-// CalculateAndSave GitHubデータからスキルスコアを算出してDBに保存する
+// calculateScores GitHubデータからスキルスコアを算出する（テスト可能な純粋関数）
 //
 // スコア算出方式:
 //   - 言語使用比率 (0-100) × 0.60 → 言語スコア
 //   - カテゴリ内リポジトリのstar合計のlog換算 × 5 (上限30) → starボーナス
 //   - 年間コントリビューション数のlog換算 × 2 (上限20) → コントリビューションボーナス
 //   - 合計を min(100, 合算) でキャップ
-func (s *SkillScoreService) CalculateAndSave(
+func calculateScores(
 	userID uint,
 	langStats []models.GitHubLanguageStat,
 	repos []models.GitHubRepo,
 	totalContributions int,
-) error {
+) []models.SkillScore {
 	// カテゴリ別の言語比率合計
 	langScores := make(map[models.SkillCategory]float64)
 	for _, stat := range langStats {
@@ -113,7 +113,6 @@ func (s *SkillScoreService) CalculateAndSave(
 	// コントリビューションボーナス（全カテゴリ共通）
 	contribBonus := math.Min(20, math.Log1p(float64(totalContributions))*2)
 
-	// 全カテゴリに対してスコアを算出
 	allCategories := []models.SkillCategory{
 		models.SkillCategoryFrontend,
 		models.SkillCategoryBackend,
@@ -132,10 +131,20 @@ func (s *SkillScoreService) CalculateAndSave(
 		scores = append(scores, models.SkillScore{
 			UserID:   userID,
 			Category: cat,
-			Score:    math.Round(score*10) / 10, // 小数第1位に丸める
+			Score:    math.Round(score*10) / 10,
 		})
 	}
+	return scores
+}
 
+// CalculateAndSave GitHubデータからスキルスコアを算出してDBに保存する
+func (s *SkillScoreService) CalculateAndSave(
+	userID uint,
+	langStats []models.GitHubLanguageStat,
+	repos []models.GitHubRepo,
+	totalContributions int,
+) error {
+	scores := calculateScores(userID, langStats, repos, totalContributions)
 	return s.scoreRepo.ReplaceScores(scores)
 }
 

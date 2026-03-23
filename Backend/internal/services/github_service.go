@@ -31,6 +31,8 @@ const (
 type GitHubService struct {
 	githubRepo        *repositories.GitHubRepository
 	skillScoreService *SkillScoreService
+	apiBaseURL        string // テスト用オーバーライド（空なら githubAPIBase を使用）
+	graphQLURL        string // テスト用オーバーライド（空なら githubGraphQLURL を使用）
 	openaiClient      *openai.Client
 }
 
@@ -40,6 +42,20 @@ func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreServi
 		skillScoreService: skillScoreService,
 		openaiClient:      openaiClient,
 	}
+}
+
+func (s *GitHubService) getAPIBase() string {
+	if s.apiBaseURL != "" {
+		return s.apiBaseURL
+	}
+	return githubAPIBase
+}
+
+func (s *GitHubService) getGraphQLURL() string {
+	if s.graphQLURL != "" {
+		return s.graphQLURL
+	}
+	return githubGraphQLURL
 }
 
 // StoreAccessToken GitHubアクセストークンとプロフィール基本情報を保存する
@@ -612,7 +628,7 @@ type contributionsGraphQLResponse struct {
 func (s *GitHubService) fetchTotalContributions(ctx context.Context, client *http.Client, token, login string) (int, error) {
 	query := fmt.Sprintf(`{"query":"query{user(login:\"%s\"){contributionsCollection{contributionCalendar{totalContributions}}}}"}`, login)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewBufferString(query))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.getGraphQLURL(), bytes.NewBufferString(query))
 	if err != nil {
 		return 0, err
 	}
