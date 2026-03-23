@@ -120,6 +120,8 @@ export default function InterviewPage() {
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
   const [webSearchLoading, setWebSearchLoading] = useState(false)
   const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
+  const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[] } | null>(null)
+  const [hintsLoading, setHintsLoading] = useState(false)
 
   const [isRecording, _setIsRecording] = useState(false)
   const [turnPending, _setTurnPending] = useState(false)
@@ -181,6 +183,25 @@ export default function InterviewPage() {
     }, companySearch ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 企業別面接傾向ヒント取得
+  useEffect(() => {
+    if (!interviewCompany?.name) { setCompanyHints(null); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      setHintsLoading(true)
+      fetch('/api/companies/interview-hints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_name: interviewCompany.name, position: selectedPosition.title }),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (!cancelled && data) setCompanyHints(data) })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setHintsLoading(false) })
+    }, 600)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [interviewCompany?.name, selectedPosition.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // WEB検索
   useEffect(() => {
@@ -926,6 +947,52 @@ export default function InterviewPage() {
                     </Box>
                   </Stack>
                 </Paper>
+
+                {/* 企業別面接傾向ヒント */}
+                {interviewCompany && (
+                  <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #fcd34d', bgcolor: '#fffbeb' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <LightbulbIcon sx={{ fontSize: 18, color: '#d97706' }} />
+                      <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#92400e' }}>
+                        {interviewCompany.name} の面接傾向
+                      </Typography>
+                    </Box>
+                    {hintsLoading ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CircularProgress size={14} sx={{ color: '#d97706' }} />
+                        <Typography sx={{ fontSize: 12, color: '#92400e' }}>傾向を調査中...</Typography>
+                      </Box>
+                    ) : companyHints && (companyHints.style_tags.length > 0 || companyHints.top_questions.length > 0) ? (
+                      <Stack spacing={1.5}>
+                        {companyHints.style_tags.length > 0 && (
+                          <Box>
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>面接スタイル</Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {companyHints.style_tags.map((tag, i) => (
+                                <Chip key={i} label={tag} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, fontSize: 11, border: '1px solid #fcd34d' }} />
+                              ))}
+                            </Box>
+                          </Box>
+                        )}
+                        {companyHints.top_questions.length > 0 && (
+                          <Box>
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>よく聞かれる質問</Typography>
+                            <Stack spacing={0.5}>
+                              {companyHints.top_questions.map((q, i) => (
+                                <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                                  <Typography sx={{ fontSize: 11, fontWeight: 700, color: PRIMARY, minWidth: 16 }}>{i + 1}.</Typography>
+                                  <Typography sx={{ fontSize: 12, color: '#78350f', lineHeight: 1.5 }}>{q}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
+                      </Stack>
+                    ) : (
+                      <Typography sx={{ fontSize: 12, color: '#92400e' }}>企業を選択すると面接傾向を表示します。</Typography>
+                    )}
+                  </Paper>
+                )}
 
                 <Button
                   variant="contained"

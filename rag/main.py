@@ -401,6 +401,87 @@ def run_crewai(
     return str(crew.kickoff())
 
 
+class CompanyHintsRequest(BaseModel):
+    company_name: str = Field(min_length=1)
+    position: str = Field(default="")
+
+
+class CompanyHintsResponse(BaseModel):
+    style_tags: List[str]
+    top_questions: List[str]
+    cached: bool = False
+
+
+def _extract_hints_with_openai(company_name: str, position: str, context_docs: List[str]) -> CompanyHintsResponse:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
+    client = OpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+    context_text = "\n\n".join(context_docs) if context_docs else "（参考情報なし）"
+    role_text = position or "一般職"
+    system_prompt = (
+        "あなたは就活生向けの面接アドバイザーです。"
+        "提供された企業情報・口コミ・選考体験をもとに、以下の2項目をJSON形式で返してください。\n"
+        "1. style_tags: 面接スタイルの特徴を示す短いタグ（例: ケース面接あり, 志望動機深掘り, グループディスカッション, 逆質問重視）を最大5件\n"
+        "2. top_questions: よく聞かれる質問トップ5（日本語の質問文として）\n"
+        "JSONのみを返し、説明文は不要です。フォーマット: {\"style_tags\": [...], \"top_questions\": [...]}"
+    )
+    user_prompt = (
+        f"企業名: {company_name}\n"
+        f"職種: {role_text}\n\n"
+        f"参考情報:\n{context_text[:3000]}"
+    )
+    import json as _json
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=600,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        data = _json.loads(raw)
+        return CompanyHintsResponse(
+            style_tags=data.get("style_tags", [])[:5],
+            top_questions=data.get("top_questions", [])[:5],
+        )
+    except Exception as exc:
+        logger.warning("hints openai failed error=%s", exc)
+        return CompanyHintsResponse(style_tags=[], top_questions=[])
+
+
+@app.post("/company/hints", response_model=CompanyHintsResponse)
+def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
+    role_label = request.position or "一般職"
+    cache_key = "hints::{company}::{role}".format(
+        company=request.company_name, role=role_label
+    )
+    retrieved = get_cached_context(
+        cache_key, query=f"{request.company_name} 面接 よく聞かれる質問"
+    )
+    if retrieved:
+        result = _extract_hints_with_openai(request.company_name, role_label, retrieved)
+        result.cached = True
+        return result
+
+    docs: List[str] = []
+    if ALLOW_DDG_FALLBACK:
+        query = f"{request.company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
+        results, rate_limited = run_search(query, limit=6)
+        if results:
+            docs = build_context(results)
+            set_cached_context(cache_key, docs)
+        elif rate_limited:
+            logger.warning("duckduckgo rate limited for company hints company=%s", request.company_name)
+
+    return _extract_hints_with_openai(request.company_name, role_label, docs)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
