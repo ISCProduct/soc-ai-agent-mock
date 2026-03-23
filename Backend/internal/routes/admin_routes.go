@@ -16,6 +16,7 @@ func SetupAdminRoutes(
 	adminCompanyGraphController *controllers.AdminCompanyGraphController,
 	adminInterviewController *controllers.AdminInterviewController,
 	adminDashboardController *controllers.AdminDashboardController,
+	adminCostsController *controllers.AdminCostsController,
 	userRepo *repositories.UserRepository,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
@@ -49,4 +50,9 @@ func SetupAdminRoutes(
 	http.HandleFunc("/api/admin/dashboard/users", auth(adminDashboardController.ListUsers))
 	http.HandleFunc("/api/admin/dashboard/users/", auth(adminDashboardController.UserSessions))
 	http.HandleFunc("/api/admin/dashboard/export/csv", auth(adminDashboardController.ExportCSV))
+
+	// API Cost monitoring
+	http.HandleFunc("/api/admin/costs/summary", auth(adminCostsController.Summary))
+	http.HandleFunc("/api/admin/costs/daily", auth(adminCostsController.Daily))
+	http.HandleFunc("/api/admin/costs/monthly", auth(adminCostsController.Monthly))
 }
