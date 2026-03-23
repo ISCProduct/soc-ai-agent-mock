@@ -412,17 +412,54 @@ class CompanyHintsResponse(BaseModel):
     cached: bool = False
 
 
-def _extract_hints_with_openai(company_name: str, position: str, context_docs: List[str]) -> CompanyHintsResponse:
+def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
+    """OpenAI responses API + web_search ツールで面接傾向を調査する。"""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
+        return None
     client = OpenAI(api_key=api_key)
-    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-    context_text = "\n\n".join(context_docs) if context_docs else "（参考情報なし）"
+    if not hasattr(client, "responses"):
+        logger.warning("hints web search: responses API not available, skipping")
+        return None
+    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o")
+    role_text = position or "一般職"
+    prompt = (
+        f"以下の企業の面接について、実際の選考体験・口コミをウェブで調べて日本語で整理してください。\n\n"
+        f"企業名: {company_name}\n"
+        f"職種: {role_text}\n\n"
+        "以下の2点を簡潔にまとめてください:\n"
+        "1. 面接スタイルの特徴（例: ケース面接の有無、深掘り質問の傾向、グループディスカッションの有無など）\n"
+        "2. よく聞かれる質問トップ5\n\n"
+        "情報が見つからない場合は「情報なし」と返してください。"
+    )
+    try:
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            tools=[{"type": "web_search"}],
+            temperature=0.2,
+            max_output_tokens=800,
+        )
+        text = extract_output_text(response)
+        logger.info("hints web search finished company=%s chars=%d", company_name, len(text))
+        return text if text else None
+    except Exception as exc:
+        logger.warning("hints web search failed company=%s error=%s", company_name, exc)
+        return None
+
+
+def _parse_hints_from_text(company_name: str, position: str, research_text: str) -> CompanyHintsResponse:
+    """調査テキストから構造化ヒントを抽出する。"""
+    import json as _json
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return CompanyHintsResponse(style_tags=[], top_questions=[])
+    client = OpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o")
     role_text = position or "一般職"
     system_prompt = (
         "あなたは就活生向けの面接アドバイザーです。"
-        "提供された企業情報・口コミ・選考体験をもとに、以下の2項目をJSON形式で返してください。\n"
+        "提供されたリサーチ結果をもとに、以下の2項目をJSON形式で返してください。\n"
         "1. style_tags: 面接スタイルの特徴を示す短いタグ（例: ケース面接あり, 志望動機深掘り, グループディスカッション, 逆質問重視）を最大5件\n"
         "2. top_questions: よく聞かれる質問トップ5（日本語の質問文として）\n"
         "JSONのみを返し、説明文は不要です。フォーマット: {\"style_tags\": [...], \"top_questions\": [...]}"
@@ -430,9 +467,8 @@ def _extract_hints_with_openai(company_name: str, position: str, context_docs: L
     user_prompt = (
         f"企業名: {company_name}\n"
         f"職種: {role_text}\n\n"
-        f"参考情報:\n{context_text[:3000]}"
+        f"リサーチ結果:\n{research_text[:3000]}"
     )
-    import json as _json
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -440,7 +476,7 @@ def _extract_hints_with_openai(company_name: str, position: str, context_docs: L
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=600,
             response_format={"type": "json_object"},
         )
@@ -451,7 +487,7 @@ def _extract_hints_with_openai(company_name: str, position: str, context_docs: L
             top_questions=data.get("top_questions", [])[:5],
         )
     except Exception as exc:
-        logger.warning("hints openai failed error=%s", exc)
+        logger.warning("hints parse failed error=%s", exc)
         return CompanyHintsResponse(style_tags=[], top_questions=[])
 
 
@@ -461,25 +497,33 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
     cache_key = "hints::{company}::{role}".format(
         company=request.company_name, role=role_label
     )
+
+    # キャッシュヒット: そのまま構造化して返す
     retrieved = get_cached_context(
         cache_key, query=f"{request.company_name} 面接 よく聞かれる質問"
     )
     if retrieved:
-        result = _extract_hints_with_openai(request.company_name, role_label, retrieved)
+        result = _parse_hints_from_text(request.company_name, role_label, "\n\n".join(retrieved))
         result.cached = True
         return result
 
-    docs: List[str] = []
-    if ALLOW_DDG_FALLBACK:
+    # 1. OpenAI responses API + web_search（最新モデル）で調査
+    research_text = _run_hints_web_search(request.company_name, role_label)
+
+    # 2. responses API が使えない場合は DuckDuckGo フォールバック
+    if not research_text and ALLOW_DDG_FALLBACK:
         query = f"{request.company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
         results, rate_limited = run_search(query, limit=6)
         if results:
             docs = build_context(results)
-            set_cached_context(cache_key, docs)
+            research_text = "\n\n".join(docs)
         elif rate_limited:
             logger.warning("duckduckgo rate limited for company hints company=%s", request.company_name)
 
-    return _extract_hints_with_openai(request.company_name, role_label, docs)
+    if research_text:
+        set_cached_context(cache_key, [research_text])
+
+    return _parse_hints_from_text(request.company_name, role_label, research_text or "")
 
 
 @app.get("/health")
