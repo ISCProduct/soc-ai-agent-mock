@@ -413,15 +413,16 @@ class CompanyHintsResponse(BaseModel):
 
 
 def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
-    """OpenAI responses API + web_search ツールで面接傾向を調査する。"""
+    """Chat Completions API の web search 専用モデルで面接傾向を調査する。
+    参照: https://platform.openai.com/docs/guides/tools-web-search
+    """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
     client = OpenAI(api_key=api_key)
-    if not hasattr(client, "responses"):
-        logger.warning("hints web search: responses API not available, skipping")
-        return None
-    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o")
+    # web search 専用モデル (Chat Completions API) を使用
+    # 対応モデル: gpt-4o-search-preview, gpt-4o-mini-search-preview
+    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o-search-preview")
     role_text = position or "一般職"
     prompt = (
         f"以下の企業の面接について、実際の選考体験・口コミをウェブで調べて日本語で整理してください。\n\n"
@@ -433,18 +434,16 @@ def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
         "情報が見つからない場合は「情報なし」と返してください。"
     )
     try:
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=model,
-            input=prompt,
-            tools=[{"type": "web_search"}],
-            temperature=0.2,
-            max_output_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800,
         )
-        text = extract_output_text(response)
-        logger.info("hints web search finished company=%s chars=%d", company_name, len(text))
-        return text if text else None
+        text = response.choices[0].message.content or ""
+        logger.info("hints web search finished company=%s chars=%d model=%s", company_name, len(text), model)
+        return text.strip() if text.strip() else None
     except Exception as exc:
-        logger.warning("hints web search failed company=%s error=%s", company_name, exc)
+        logger.warning("hints web search failed company=%s model=%s error=%s", company_name, model, exc)
         return None
 
 
@@ -455,7 +454,8 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
     if not api_key:
         return CompanyHintsResponse(style_tags=[], top_questions=[])
     client = OpenAI(api_key=api_key)
-    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o")
+    # 構造化JSON抽出には通常の chat モデルを使用（search-preview は json_object 非対応）
+    model = os.getenv("OPENAI_HINTS_PARSE_MODEL", "gpt-4o")
     role_text = position or "一般職"
     system_prompt = (
         "あなたは就活生向けの面接アドバイザーです。"
