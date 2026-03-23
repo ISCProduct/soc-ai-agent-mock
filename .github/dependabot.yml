@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # RAG サービスの Python 依存を週次で自動更新
+  - package-ecosystem: pip
+    directory: /rag
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    # メジャーバージョンアップは手動で判断するため対象外
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions のバージョンを週次で自動更新
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
