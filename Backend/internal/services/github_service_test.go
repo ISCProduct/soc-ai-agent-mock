@@ -124,11 +124,7 @@ func TestCheckRateLimit_403WithRemainingNonZero(t *testing.T) {
 
 // --- fetchRepositories (httptest) ---
 
-func newTestGitHubService(baseURL string) *GitHubService {
-	return &GitHubService{apiBaseURL: baseURL}
-}
-
-func TestFetchRepositories_SinglePage(t *testing.T) {
+func TestFetchRepoPages_SinglePage(t *testing.T) {
 	apiRepos := []githubAPIRepository{
 		{Name: "repo1", FullName: "user/repo1", Language: "Go", StargazersCount: 5, UpdatedAt: "2024-01-01T00:00:00Z"},
 		{Name: "repo2", FullName: "user/repo2", Language: "Python", StargazersCount: 2, UpdatedAt: "2024-01-02T00:00:00Z"},
@@ -138,10 +134,10 @@ func TestFetchRepositories_SinglePage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := newTestGitHubService(server.URL)
+	svc := &GitHubService{}
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	repos, err := svc.fetchRepositories(context.Background(), client, "token", "user")
+	repos, err := svc.fetchRepoPages(context.Background(), client, "token", server.URL+"/repos?per_page=100")
 	require.NoError(t, err)
 	assert.Len(t, repos, 2)
 	assert.Equal(t, "repo1", repos[0].Name)
@@ -150,7 +146,7 @@ func TestFetchRepositories_SinglePage(t *testing.T) {
 	assert.Equal(t, 5, repos[0].Stars)
 }
 
-func TestFetchRepositories_MultiPage(t *testing.T) {
+func TestFetchRepoPages_MultiPage(t *testing.T) {
 	// 1ページ目: 100件、2ページ目: 50件
 	page1 := make([]githubAPIRepository, 100)
 	for i := range page1 {
@@ -172,43 +168,43 @@ func TestFetchRepositories_MultiPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := newTestGitHubService(server.URL)
+	svc := &GitHubService{}
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	repos, err := svc.fetchRepositories(context.Background(), client, "token", "user")
+	repos, err := svc.fetchRepoPages(context.Background(), client, "token", server.URL+"/repos?per_page=100")
 	require.NoError(t, err)
 	assert.Len(t, repos, 150)
 	assert.Equal(t, 2, callCount, "should have made 2 API calls for pagination")
 }
 
-func TestFetchRepositories_EmptyResponse(t *testing.T) {
+func TestFetchRepoPages_EmptyResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]githubAPIRepository{})
 	}))
 	defer server.Close()
 
-	svc := newTestGitHubService(server.URL)
+	svc := &GitHubService{}
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	repos, err := svc.fetchRepositories(context.Background(), client, "token", "user")
+	repos, err := svc.fetchRepoPages(context.Background(), client, "token", server.URL+"/repos?per_page=100")
 	require.NoError(t, err)
 	assert.Empty(t, repos)
 }
 
-func TestFetchRepositories_APIError(t *testing.T) {
+func TestFetchRepoPages_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
 
-	svc := newTestGitHubService(server.URL)
+	svc := &GitHubService{}
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	// コンテキストにタイムアウトを設定してリトライを早期終了させる
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	_, err := svc.fetchRepositories(ctx, client, "token", "user")
+	_, err := svc.fetchRepoPages(ctx, client, "token", server.URL+"/repos?per_page=100")
 	assert.Error(t, err)
 }
 

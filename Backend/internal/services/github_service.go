@@ -449,7 +449,6 @@ func (s *GitHubService) fetchRepoPages(ctx context.Context, client *http.Client,
 	var allRepos []models.GitHubRepo
 	page := 1
 	for {
-		url := fmt.Sprintf("%s/users/%s/repos?type=owner&sort=updated&per_page=100&page=%d", s.getAPIBase(), login, page)
 		url := fmt.Sprintf("%s&page=%d", baseURL, page)
 		body, err := s.doRequestWithRetry(ctx, client, token, url)
 		if err != nil {
