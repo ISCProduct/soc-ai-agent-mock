@@ -26,6 +26,7 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 
 	// ── Phase 1: collect ────────────────────────────────────────────────
 	var rawCompanies []*RawCompany
+	var warnings []ScrapeWarning
 
 	for _, site := range req.Sites {
 		switch site {
@@ -37,9 +38,24 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 			urls, err := p.Mynavi.Search(req.Query, year, req.MaxPages)
 			if err != nil {
 				log.Logf("[mynavi] 検索エラー: %v", err)
+				warnings = append(warnings, ScrapeWarning{
+					Site:    "mynavi",
+					Message: fmt.Sprintf("検索失敗（セレクタ v%d）: %v", MynaviSelectorVersion, err),
+				})
 				continue
 			}
 			log.Logf("[mynavi] %d 件の企業URLを取得", len(urls))
+			if len(urls) == 0 {
+				warnings = append(warnings, ScrapeWarning{
+					Site: "mynavi",
+					Message: fmt.Sprintf(
+						"企業URL取得件数が0件（セレクタ v%d）。DOM変更・ログイン要求・アクセス制限の可能性があります",
+						MynaviSelectorVersion,
+					),
+				})
+			}
+			before := len(rawCompanies)
+			emptyName := 0
 			for _, u := range urls {
 				select {
 				case <-ctx.Done():
@@ -52,10 +68,23 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 					continue
 				}
 				if company != nil {
+					if company.RawName == "" {
+						emptyName++
+					}
 					rawCompanies = append(rawCompanies, company)
 				}
 			}
-			log.Logf("[mynavi] %d 件取得完了", countSite(rawCompanies, "mynavi"))
+			collected := len(rawCompanies) - before
+			log.Logf("[mynavi] %d 件取得完了", collected)
+			if collected > 0 && emptyName*2 > collected {
+				warnings = append(warnings, ScrapeWarning{
+					Site: "mynavi",
+					Message: fmt.Sprintf(
+						"企業名空欄率が高い (%d/%d)（セレクタ v%d）。DOM変更の可能性があります",
+						emptyName, collected, MynaviSelectorVersion,
+					),
+				})
+			}
 
 		case "rikunabi":
 			if p.Rikunabi == nil {
@@ -65,10 +94,24 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 			urls, err := p.Rikunabi.Search(req.Query, req.MaxPages)
 			if err != nil {
 				log.Logf("[rikunabi] 検索エラー: %v", err)
+				warnings = append(warnings, ScrapeWarning{
+					Site:    "rikunabi",
+					Message: fmt.Sprintf("検索失敗（セレクタ v%d）: %v", RikunabiSelectorVersion, err),
+				})
 				continue
 			}
 			log.Logf("[rikunabi] %d 件の求人URLを取得", len(urls))
+			if len(urls) == 0 {
+				warnings = append(warnings, ScrapeWarning{
+					Site: "rikunabi",
+					Message: fmt.Sprintf(
+						"求人URL取得件数が0件（セレクタ v%d）。DOM変更・ログイン要求・アクセス制限の可能性があります",
+						RikunabiSelectorVersion,
+					),
+				})
+			}
 			before := len(rawCompanies)
+			emptyName := 0
 			for _, u := range urls {
 				select {
 				case <-ctx.Done():
@@ -81,10 +124,23 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 					continue
 				}
 				if company != nil {
+					if company.RawName == "" {
+						emptyName++
+					}
 					rawCompanies = append(rawCompanies, company)
 				}
 			}
-			log.Logf("[rikunabi] %d 件取得完了", len(rawCompanies)-before)
+			collected := len(rawCompanies) - before
+			log.Logf("[rikunabi] %d 件取得完了", collected)
+			if collected > 0 && emptyName*2 > collected {
+				warnings = append(warnings, ScrapeWarning{
+					Site: "rikunabi",
+					Message: fmt.Sprintf(
+						"企業名空欄率が高い (%d/%d)（セレクタ v%d）。DOM変更の可能性があります",
+						emptyName, collected, RikunabiSelectorVersion,
+					),
+				})
+			}
 
 		case "career_tasu":
 			if p.CareerTasu == nil {
@@ -94,10 +150,24 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 			urls, err := p.CareerTasu.Search(req.Query, req.MaxPages)
 			if err != nil {
 				log.Logf("[career_tasu] 検索エラー: %v", err)
+				warnings = append(warnings, ScrapeWarning{
+					Site:    "career_tasu",
+					Message: fmt.Sprintf("検索失敗（セレクタ v%d）: %v", CareerTasuSelectorVersion, err),
+				})
 				continue
 			}
 			log.Logf("[career_tasu] %d 件の企業URLを取得", len(urls))
+			if len(urls) == 0 {
+				warnings = append(warnings, ScrapeWarning{
+					Site: "career_tasu",
+					Message: fmt.Sprintf(
+						"企業URL取得件数が0件（セレクタ v%d）。DOM変更・ログイン要求・アクセス制限の可能性があります",
+						CareerTasuSelectorVersion,
+					),
+				})
+			}
 			before := len(rawCompanies)
+			emptyName := 0
 			for _, u := range urls {
 				select {
 				case <-ctx.Done():
@@ -110,10 +180,23 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 					continue
 				}
 				if company != nil {
+					if company.RawName == "" {
+						emptyName++
+					}
 					rawCompanies = append(rawCompanies, company)
 				}
 			}
-			log.Logf("[career_tasu] %d 件取得完了", len(rawCompanies)-before)
+			collected := len(rawCompanies) - before
+			log.Logf("[career_tasu] %d 件取得完了", collected)
+			if collected > 0 && emptyName*2 > collected {
+				warnings = append(warnings, ScrapeWarning{
+					Site: "career_tasu",
+					Message: fmt.Sprintf(
+						"企業名空欄率が高い (%d/%d)（セレクタ v%d）。DOM変更の可能性があります",
+						emptyName, collected, CareerTasuSelectorVersion,
+					),
+				})
+			}
 
 		default:
 			log.Logf("不明なサイト: %s (スキップ)", site)
@@ -122,11 +205,17 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 
 	log.Logf("合計 %d 件の企業を収集", len(rawCompanies))
 
+	// Log warnings to the run log as well
+	for _, w := range warnings {
+		log.Logf("[WARNING][%s] %s", w.Site, w.Message)
+	}
+
 	if len(rawCompanies) == 0 {
 		return &RunResult{
 			TargetYear: year,
 			Nodes:      map[string]*CompanyNode{},
 			Logs:       log.Lines(),
+			Warnings:   warnings,
 		}, fmt.Errorf("no companies collected")
 	}
 
@@ -171,6 +260,7 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 		TargetYear: year,
 		Nodes:      nodes,
 		Logs:       log.Lines(),
+		Warnings:   warnings,
 	}, nil
 }
 

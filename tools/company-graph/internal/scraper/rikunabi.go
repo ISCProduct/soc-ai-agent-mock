@@ -18,6 +18,14 @@ var jobDescRe = regexp.MustCompile(`/n/job_descriptions/([a-z0-9]+)/`)
 //
 // ParseDetail → /n/job_descriptions/{id}/
 //   → h2: "{会社名}｜{業種}"
+//
+// !! 利用規約リスク !!
+// リクナビの利用規約はスクレイピング・自動収集を禁止している可能性があります。
+// 本スクレイパーの運用前に必ず最新の利用規約（https://job.rikunabi.com/）を確認し、
+// 法務部門の承認を取得してください。
+// 違反した場合、サービス停止・法的措置のリスクがあります。
+// 代替手段として公式API・RSS・プレスリリース情報源への切り替えを検討してください。
+// 現在のセレクタバージョン: RikunabiSelectorVersion（scraper.go 参照）
 type RikunabiScraper struct {
 	BaseURL   string
 	SearchURL string
