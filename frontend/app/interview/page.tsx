@@ -1129,7 +1129,7 @@ export default function InterviewPage() {
 
           {reportStatus === 'ready' && report && (
             <Stack spacing={2}>
-              <InterviewSummary report={report} theme="dark" />
+              <InterviewSummary report={report} userId={user?.user_id} theme="dark" />
               <Button
                 variant="outlined"
                 fullWidth
