@@ -2,15 +2,19 @@ package services
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/repositories"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,12 +33,14 @@ type GitHubService struct {
 	skillScoreService *SkillScoreService
 	apiBaseURL        string // テスト用オーバーライド（空なら githubAPIBase を使用）
 	graphQLURL        string // テスト用オーバーライド（空なら githubGraphQLURL を使用）
+	openaiClient      *openai.Client
 }
 
-func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *SkillScoreService) *GitHubService {
+func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *SkillScoreService, openaiClient *openai.Client) *GitHubService {
 	return &GitHubService{
 		githubRepo:        githubRepo,
 		skillScoreService: skillScoreService,
+		openaiClient:      openaiClient,
 	}
 }
 
@@ -63,18 +69,20 @@ func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string)
 }
 
 // TriggerAsyncSync 非同期でGitHubデータ同期を開始する（ノンブロッキング）
-func (s *GitHubService) TriggerAsyncSync(userID uint) {
+// force=true でキャッシュを無視して強制同期する
+func (s *GitHubService) TriggerAsyncSync(userID uint, force bool) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if err := s.SyncUserData(ctx, userID); err != nil {
+		if err := s.SyncUserData(ctx, userID, force); err != nil {
 			log.Printf("[GitHubService] async sync failed for user %d: %v", userID, err)
 		}
 	}()
 }
 
 // SyncUserData GitHubからリポジトリ・言語比率・コントリビューション数を取得してDBに保存する
-func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
+// force=true でキャッシュを無視して強制同期する
+func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force bool) error {
 	profile, err := s.githubRepo.GetProfile(userID)
 	if err != nil {
 		return fmt.Errorf("get profile: %w", err)
@@ -83,8 +91,8 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 		return fmt.Errorf("github profile not found for user %d", userID)
 	}
 
-	// キャッシュチェック: 1時間以内に同期済みならスキップ
-	if profile.SyncedAt != nil && time.Since(*profile.SyncedAt) < syncCacheDuration {
+	// キャッシュチェック: 1時間以内に同期済みならスキップ（強制同期時はスキップしない）
+	if !force && profile.SyncedAt != nil && time.Since(*profile.SyncedAt) < syncCacheDuration {
 		log.Printf("[GitHubService] user %d: skipping sync (last synced %s ago)", userID, time.Since(*profile.SyncedAt).Round(time.Minute))
 		return nil
 	}
@@ -93,8 +101,8 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint) error {
 	token := profile.AccessToken
 	login := profile.GitHubLogin
 
-	// 1. リポジトリ一覧取得
-	repos, err := s.fetchRepositories(ctx, client, token, login)
+	// 1. リポジトリ一覧取得（自分のリポジトリ + 所属組織のリポジトリ）
+	repos, err := s.fetchRepositories(ctx, client, token)
 	if err != nil {
 		return fmt.Errorf("fetch repositories: %w", err)
 	}
@@ -159,6 +167,149 @@ func (s *GitHubService) GetLanguageStats(userID uint) ([]models.GitHubLanguageSt
 	return s.githubRepo.GetLanguageStats(userID)
 }
 
+// ListRepoSummaries DBからAI要約一覧を取得する
+func (s *GitHubService) ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error) {
+	return s.githubRepo.ListRepoSummaries(userID)
+}
+
+// SummarizeRepo リポジトリのREADMEをAIが解析し、技術的強みを要約する。
+// キャッシュがあれば再生成しない。forceRefresh=trueで強制再生成。
+func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool) (*models.GitHubRepoSummary, error) {
+	// キャッシュ確認
+	if !forceRefresh {
+		cached, err := s.githubRepo.GetRepoSummary(userID, fullName)
+		if err != nil {
+			return nil, err
+		}
+		if cached != nil {
+			return cached, nil
+		}
+	}
+
+	profile, err := s.githubRepo.GetProfile(userID)
+	if err != nil || profile == nil {
+		return nil, fmt.Errorf("github profile not found")
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// README取得
+	readme, err := s.fetchREADME(ctx, client, profile.AccessToken, fullName)
+	if err != nil {
+		log.Printf("[SummarizeRepo] README fetch warning for %s: %v", fullName, err)
+		readme = ""
+	}
+
+	// AI要約生成
+	summary, err := s.generateRepoSummary(ctx, fullName, readme)
+	if err != nil {
+		return nil, fmt.Errorf("AI summary generation failed: %w", err)
+	}
+
+	summary.UserID = userID
+	// DBに保存
+	if err := s.githubRepo.UpsertRepoSummary(summary); err != nil {
+		return nil, fmt.Errorf("save summary: %w", err)
+	}
+	return summary, nil
+}
+
+// fetchREADME GitHub API経由でリポジトリのREADMEを取得する
+func (s *GitHubService) fetchREADME(ctx context.Context, client *http.Client, token, fullName string) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/readme", githubAPIBase, fullName)
+	body, err := s.doGet(ctx, client, token, url)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", err
+	}
+	if resp.Encoding == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(resp.Content, "\n", ""))
+		if err != nil {
+			return "", err
+		}
+		text := string(decoded)
+		// 長すぎる場合は先頭4000文字に絞る
+		if len(text) > 4000 {
+			text = text[:4000]
+		}
+		return text, nil
+	}
+	return resp.Content, nil
+}
+
+// generateRepoSummary OpenAIを使ってリポジトリの技術的強みを要約する
+func (s *GitHubService) generateRepoSummary(ctx context.Context, fullName, readme string) (*models.GitHubRepoSummary, error) {
+	if s.openaiClient == nil {
+		return nil, fmt.Errorf("openai client not configured")
+	}
+
+	readmeSection := "（READMEなし）"
+	if readme != "" {
+		readmeSection = readme
+	}
+
+	systemPrompt := `あなたはエンジニア採用のキャリアアドバイザーです。
+GitHubリポジトリのREADMEを読み、技術的な強みを簡潔にまとめてください。JSONのみで返してください。`
+
+	userPrompt := fmt.Sprintf(`以下のGitHubリポジトリ「%s」のREADMEを読み、エンジニア採用担当者に伝わる技術的強みを3点でまとめてください。
+
+## README
+%s
+
+## 出力フォーマット（このキーと型を厳守）
+{
+  "summary_text": "技術的な強みの3行要約（全体を1段落で簡潔に）",
+  "tech_reason": "技術選定の理由（なぜその技術・言語・フレームワークを選んだか）",
+  "challenge": "解決した課題（どんな問題に取り組み、どう解決したか）",
+  "achievement": "成果（数値・具体的な改善・学んだこと）"
+}
+
+※ 情報が不足している場合はREADMEから推測して記述してください。各フィールドは1〜2文で簡潔に。`, fullName, readmeSection)
+
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 800)
+	if err != nil {
+		return nil, err
+	}
+
+	cleaned := extractRepoSummaryJSON(raw)
+	var payload struct {
+		SummaryText string `json:"summary_text"`
+		TechReason  string `json:"tech_reason"`
+		Challenge   string `json:"challenge"`
+		Achievement string `json:"achievement"`
+	}
+	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
+		return nil, fmt.Errorf("parse summary json: %w", err)
+	}
+
+	// FullName からユーザーIDは呼び出し元で設定するため0を仮置き
+	return &models.GitHubRepoSummary{
+		FullName:    fullName,
+		SummaryText: payload.SummaryText,
+		TechReason:  payload.TechReason,
+		Challenge:   payload.Challenge,
+		Achievement: payload.Achievement,
+	}, nil
+}
+
+// extractRepoSummaryJSON マークダウンコードフェンスを除去してJSONを抽出する
+func extractRepoSummaryJSON(raw string) string {
+	s := strings.TrimSpace(raw)
+	if start := strings.Index(s, "{"); start > 0 {
+		s = s[start:]
+	}
+	if end := strings.LastIndex(s, "}"); end >= 0 && end < len(s)-1 {
+		s = s[:end+1]
+	}
+	return s
+}
+
 // --- 内部ヘルパー ---
 
 // githubAPIRepository GitHub API レスポンスのリポジトリ構造体
@@ -173,27 +324,144 @@ type githubAPIRepository struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// fetchRepositories GitHub APIからリポジトリ一覧を全ページ取得する
-func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token, login string) ([]models.GitHubRepo, error) {
+// fetchRepositories 自分のリポジトリ + 所属組織のリポジトリを取得してマージする
+func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
+	seen := make(map[string]struct{})
+
+	// 1. /user/repos?affiliation=owner,collaborator,organization_member で全リポジトリを取得
+	// affiliation を明示指定することで、オーナー・コラボレーター・組織メンバーとして参加している
+	// リポジトリをすべて取得する（read:orgなしでも動く）
+	allTypeRepos, err := s.fetchRepoPages(ctx, client, token,
+		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100", githubAPIBase))
+	if err != nil {
+		log.Printf("[GitHubService] fetchRepos(affiliation=all) warning: %v", err)
+	}
+	allRepos := allTypeRepos
+	for _, r := range allTypeRepos {
+		seen[r.FullName] = struct{}{}
+	}
+
+	// 2. 組織リポジトリも明示的に取得してマージ（repo + read:org スコープが必要）
+	orgs, err := s.fetchOrgs(ctx, client, token)
+	if err != nil {
+		var scopeErr *InsufficientScopesError
+		if errors.As(err, &scopeErr) {
+			// スコープ不足は呼び出し元に伝播してユーザーに再認証を促す
+			return nil, scopeErr
+		}
+		log.Printf("[GitHubService] fetchOrgs warning: %v", err)
+	} else {
+		for _, org := range orgs {
+			orgRepos, err := s.fetchRepoPages(ctx, client, token,
+				fmt.Sprintf("%s/orgs/%s/repos?type=all&sort=updated&per_page=100", githubAPIBase, org))
+			if err != nil {
+				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
+				continue
+			}
+			for _, r := range orgRepos {
+				if _, exists := seen[r.FullName]; !exists {
+					seen[r.FullName] = struct{}{}
+					allRepos = append(allRepos, r)
+				}
+			}
+		}
+	}
+
+	// 3. GraphQL repositoriesContributedTo でコントリビュート済みリポジトリを追加取得
+	// REST APIの組織承認制限を回避し、参加しているすべての組織リポジトリを取得できる
+	contributedRepos, err := s.fetchContributedRepos(ctx, client, token)
+	if err != nil {
+		log.Printf("[GitHubService] fetchContributedRepos warning: %v", err)
+	} else {
+		for _, r := range contributedRepos {
+			if _, exists := seen[r.FullName]; !exists {
+				seen[r.FullName] = struct{}{}
+				allRepos = append(allRepos, r)
+			}
+		}
+	}
+
+	return allRepos, nil
+}
+
+// InsufficientScopesError トークンのスコープ不足エラー型
+type InsufficientScopesError struct {
+	Missing []string
+}
+
+func (e *InsufficientScopesError) Error() string {
+	return fmt.Sprintf("GitHubトークンに必要なスコープが不足しています（%s）。GitHubアカウントを再連携してください。",
+		strings.Join(e.Missing, ", "))
+}
+
+// hasScopes トークンが必要なスコープをすべて持っているか確認する
+func hasScopes(scopeHeader string, required ...string) []string {
+	var missing []string
+	for _, r := range required {
+		if !strings.Contains(scopeHeader, r) {
+			missing = append(missing, r)
+		}
+	}
+	return missing
+}
+
+// fetchOrgs 認証ユーザーの所属組織名一覧を取得する
+func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, token string) ([]string, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/user/orgs?per_page=100", githubAPIBase), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	scopes := resp.Header.Get("X-OAuth-Scopes")
+	log.Printf("[GitHubService] token scopes: %q", scopes)
+
+	// repo と read:org の両方が必要
+	if missing := hasScopes(scopes, "repo", "read:org"); len(missing) > 0 {
+		return nil, &InsufficientScopesError{Missing: missing}
+	}
+
+	if resp.StatusCode >= 400 {
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(orgs))
+	for i, o := range orgs {
+		names[i] = o.Login
+	}
+	return names, nil
+}
+
+// fetchRepoPages ページネーションで全リポジトリを取得する
+func (s *GitHubService) fetchRepoPages(ctx context.Context, client *http.Client, token, baseURL string) ([]models.GitHubRepo, error) {
 	var allRepos []models.GitHubRepo
 	page := 1
-
 	for {
 		url := fmt.Sprintf("%s/users/%s/repos?type=owner&sort=updated&per_page=100&page=%d", s.getAPIBase(), login, page)
+		url := fmt.Sprintf("%s&page=%d", baseURL, page)
 		body, err := s.doRequestWithRetry(ctx, client, token, url)
 		if err != nil {
 			return nil, err
 		}
-
 		var apiRepos []githubAPIRepository
 		if err := json.Unmarshal(body, &apiRepos); err != nil {
 			return nil, fmt.Errorf("unmarshal repos page %d: %w", page, err)
 		}
-
 		if len(apiRepos) == 0 {
 			break
 		}
-
 		for _, r := range apiRepos {
 			updatedAt, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 			allRepos = append(allRepos, models.GitHubRepo{
@@ -207,13 +475,11 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 				GitHubUpdatedAt: updatedAt,
 			})
 		}
-
 		if len(apiRepos) < 100 {
 			break
 		}
 		page++
 	}
-
 	return allRepos, nil
 }
 
@@ -247,6 +513,100 @@ func aggregateLanguages(userID uint, repos []models.GitHubRepo) []models.GitHubL
 		})
 	}
 	return stats
+}
+
+// contributedReposGraphQLResponse GraphQL repositoriesContributedTo レスポンス
+type contributedReposGraphQLResponse struct {
+	Data struct {
+		Viewer struct {
+			RepositoriesContributedTo struct {
+				Nodes []struct {
+					Name        string `json:"name"`
+					NameWithOwner string `json:"nameWithOwner"`
+					Description string `json:"description"`
+					PrimaryLanguage *struct {
+						Name string `json:"name"`
+					} `json:"primaryLanguage"`
+					StargazerCount int  `json:"stargazerCount"`
+					ForkCount      int  `json:"forkCount"`
+					IsFork         bool `json:"isFork"`
+					UpdatedAt      string `json:"updatedAt"`
+				} `json:"nodes"`
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"repositoriesContributedTo"`
+		} `json:"viewer"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+// fetchContributedRepos GraphQL APIで自分がコントリビュートしたリポジトリ一覧を取得する
+// REST APIと異なり組織のOAuthアプリ承認不要でプライベート組織リポジトリも取得できる
+func (s *GitHubService) fetchContributedRepos(ctx context.Context, client *http.Client, token string) ([]models.GitHubRepo, error) {
+	var allRepos []models.GitHubRepo
+	after := ""
+
+	for {
+		var cursorPart string
+		if after != "" {
+			cursorPart = fmt.Sprintf(`, after: "%s"`, after)
+		}
+		query := fmt.Sprintf(`{"query":"{ viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY]%s) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }"}`, cursorPart)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewBufferString(query))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		var result contributedReposGraphQLResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("unmarshal contributedRepos: %w", err)
+		}
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("graphql error: %s", result.Errors[0].Message)
+		}
+
+		for _, n := range result.Data.Viewer.RepositoriesContributedTo.Nodes {
+			lang := ""
+			if n.PrimaryLanguage != nil {
+				lang = n.PrimaryLanguage.Name
+			}
+			updatedAt, _ := time.Parse(time.RFC3339, n.UpdatedAt)
+			allRepos = append(allRepos, models.GitHubRepo{
+				Name:            n.Name,
+				FullName:        n.NameWithOwner,
+				Description:     n.Description,
+				Language:        lang,
+				Stars:           n.StargazerCount,
+				Forks:           n.ForkCount,
+				IsForked:        n.IsFork,
+				GitHubUpdatedAt: updatedAt,
+			})
+		}
+
+		if !result.Data.Viewer.RepositoriesContributedTo.PageInfo.HasNextPage {
+			break
+		}
+		after = result.Data.Viewer.RepositoriesContributedTo.PageInfo.EndCursor
+	}
+
+	return allRepos, nil
 }
 
 // contributionsGraphQLResponse GraphQLレスポンス構造体
@@ -350,7 +710,8 @@ func (s *GitHubService) doGet(ctx context.Context, client *http.Client, token, u
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("github api error: status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github api error: status %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 
 	return io.ReadAll(resp.Body)

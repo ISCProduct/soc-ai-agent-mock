@@ -104,7 +104,7 @@ func main() {
 	emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
-	githubService := services.NewGitHubService(githubRepo, skillScoreService)
+	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
@@ -156,6 +156,7 @@ func main() {
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
+	esRewriteController := controllers.NewESRewriteController(aiClient)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -165,6 +166,7 @@ func main() {
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
+	routes.SetupESRoutes(esRewriteController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()

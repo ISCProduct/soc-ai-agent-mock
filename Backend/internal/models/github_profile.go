@@ -43,3 +43,16 @@ type GitHubLanguageStat struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
+
+// GitHubRepoSummary リポジトリのAI要約キャッシュ
+type GitHubRepoSummary struct {
+	ID          uint   `gorm:"primaryKey"`
+	UserID      uint   `gorm:"uniqueIndex:idx_user_repo;not null"`
+	FullName    string `gorm:"size:500;uniqueIndex:idx_user_repo;not null"` // "owner/repo"
+	SummaryText string `gorm:"type:text"` // 3行の総合要約
+	TechReason  string `gorm:"type:text"` // 技術選定の理由
+	Challenge   string `gorm:"type:text"` // 解決した課題
+	Achievement string `gorm:"type:text"` // 成果
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
