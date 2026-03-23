@@ -88,7 +88,7 @@ func NewSkillScoreService(scoreRepo *repositories.SkillScoreRepository) *SkillSc
 //   - カテゴリ内リポジトリのstar合計のlog換算 × 5 (上限30) → starボーナス
 //   - 年間コントリビューション数のlog換算 × 2 (上限20) → コントリビューションボーナス
 //   - 合計を min(100, 合算) でキャップ
-func calculateScores(
+func CalculateScores(
 	userID uint,
 	langStats []models.GitHubLanguageStat,
 	repos []models.GitHubRepo,
@@ -144,7 +144,7 @@ func (s *SkillScoreService) CalculateAndSave(
 	repos []models.GitHubRepo,
 	totalContributions int,
 ) error {
-	scores := calculateScores(userID, langStats, repos, totalContributions)
+	scores := CalculateScores(userID, langStats, repos, totalContributions)
 	return s.scoreRepo.ReplaceScores(scores)
 }
 

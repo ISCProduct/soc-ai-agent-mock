@@ -91,6 +91,10 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.UploadVideo(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/phrase-suggestions") {
+		c.GetPhraseSuggestions(w, r)
+		return
+	}
 	c.Get(w, r)
 }
 
@@ -163,6 +167,41 @@ func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(report)
+}
+
+func (c *InterviewController) GetPhraseSuggestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/phrase-suggestions")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	suggestions, err := c.interviewService.GetPhraseSuggestions(r.Context(), uint(userID), sessionID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "forbidden" {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"suggestions": suggestions,
+	})
 }
 
 func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request) {

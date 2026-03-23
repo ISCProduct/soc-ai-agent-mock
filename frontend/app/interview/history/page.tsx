@@ -231,7 +231,7 @@ export default function InterviewHistoryPage() {
               {/* Report */}
               {selectedDetail.report ? (
                 <>
-                  <InterviewSummary report={selectedDetail.report} theme="light" />
+                  <InterviewSummary report={selectedDetail.report} userId={user?.user_id} theme="light" />
 
                   {/* 教員用レポートパネル */}
                   {isTeacher && (() => {

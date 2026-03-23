@@ -270,6 +270,63 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 	return report, nil
 }
 
+// PhraseSuggestion は面接回答中の弱い表現と言い換え候補を表す。
+type PhraseSuggestion struct {
+	Original    string   `json:"original"`
+	Suggestions []string `json:"suggestions"`
+}
+
+// GetPhraseSuggestions はセッションのユーザー発話を分析し、言い換え提案を返す。
+func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]PhraseSuggestion, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+	utterances, err := s.utterRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var userTexts []string
+	for _, u := range utterances {
+		if u.Role == "user" {
+			t := strings.TrimSpace(u.Text)
+			if t != "" {
+				userTexts = append(userTexts, t)
+			}
+		}
+	}
+	if len(userTexts) == 0 {
+		return []PhraseSuggestion{}, nil
+	}
+	transcript := strings.Join(userTexts, "\n")
+	systemPrompt := "あなたは就活面接コーチです。応募者の発言から改善すべき曖昧・抽象的・弱い表現を抽出し、より具体的・主体的・印象的な言い換えを提案してください。"
+	userPrompt := fmt.Sprintf(`以下は就活面接における応募者の発言です。
+改善が有効な表現を最大5件抽出し、それぞれに2〜3件の言い換え候補を提示してください。
+
+出力はJSONのみ（マークダウン不可）で以下の形式を厳守してください:
+{"suggestions": [{"original": "元の表現", "suggestions": ["言い換え1", "言い換え2"]}, ...]}
+
+応募者発言:
+%s`, transcript)
+
+	model := getEnv("INTERVIEW_REPORT_MODEL", "")
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 1000, model)
+	if err != nil {
+		return nil, err
+	}
+	raw = ExtractJSONObject(raw)
+	var payload struct {
+		Suggestions []PhraseSuggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse suggestions: %w", err)
+	}
+	return payload.Suggestions, nil
+}
+
 // InterviewTrendPoint は面接トレンド分析の1データポイント。
 type InterviewTrendPoint struct {
 	SessionID     uint      `json:"session_id"`
@@ -578,7 +635,7 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 
 // buildTranscript formats utterances into a plain-text transcript for the LLM prompt.
 // AI turns are labeled "Interviewer" and user turns are labeled "User".
-func buildTranscript(utterances []models.InterviewUtterance) string {
+func BuildTranscript(utterances []models.InterviewUtterance) string {
 	var b strings.Builder
 	for _, u := range utterances {
 		role := "User"
@@ -596,7 +653,7 @@ func buildTranscript(utterances []models.InterviewUtterance) string {
 // extractJSONObject strips surrounding markdown code fences and extracts the
 // outermost JSON object from an LLM response.
 // Some models wrap their output in ```json ... ``` even when instructed not to.
-func extractJSONObject(raw string) string {
+func ExtractJSONObject(raw string) string {
 	s := strings.TrimSpace(raw)
 	if start := strings.Index(s, "{"); start > 0 {
 		s = s[start:]
@@ -634,7 +691,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		}
 		return s.reportRepo.Upsert(empty)
 	}
-	transcript := buildTranscript(utterances)
+	transcript := BuildTranscript(utterances)
 	systemPrompt := buildReportSystemPrompt(lang)
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
@@ -696,7 +753,7 @@ Interview transcript:
 		Teacher      *teacherReport    `json:"teacher"`
 	}
 	var payload reportPayload
-	cleaned := extractJSONObject(raw)
+	cleaned := ExtractJSONObject(raw)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}

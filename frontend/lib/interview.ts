@@ -78,6 +78,11 @@ export type InterviewTrendPoint = {
   enthusiasm: number | null
 }
 
+export type PhraseSuggestion = {
+  original: string
+  suggestions: string[]
+}
+
 export const interviewApi = {
   async createSession(userId: number, language = 'ja'): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews`, {
@@ -147,6 +152,13 @@ export const interviewApi = {
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     return data.client_secret
+  },
+
+  async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    return data.suggestions as PhraseSuggestion[]
   },
 
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
