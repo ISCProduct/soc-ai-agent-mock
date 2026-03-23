@@ -194,9 +194,8 @@ func main() {
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
-	routes.SetupESRoutes(esRewriteController)
-	routes.SetupScheduleRoutes(scheduleController)
 	routes.SetupESRoutes(esRewriteController, esReviewController)
+	routes.SetupScheduleRoutes(scheduleController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
