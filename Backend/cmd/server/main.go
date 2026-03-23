@@ -181,6 +181,7 @@ func main() {
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
+	esReviewController := controllers.NewESReviewController()
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -190,7 +191,7 @@ func main() {
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
-	routes.SetupESRoutes(esRewriteController)
+	routes.SetupESRoutes(esRewriteController, esReviewController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()

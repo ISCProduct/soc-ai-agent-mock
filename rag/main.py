@@ -470,3 +470,115 @@ def review_resume(request: ReviewRequest) -> ReviewResponse:
     )
 
     return ReviewResponse(report=report)
+
+
+# ── ES添削エンドポイント ──────────────────────────────────────────────────────
+
+
+class ESReviewRequest(BaseModel):
+    es_text: str = Field(min_length=1)
+    question_type: str = Field(default="その他")
+    company_name: str = Field(default="")
+
+
+class ESReviewResponse(BaseModel):
+    specificity_score: int            # 1-10: 具体性
+    star_score: int                   # 1-10: STAR法準拠
+    company_fit_score: Optional[int]  # 1-10: 企業適合性（企業名なしは null）
+    length_balance_score: int         # 1-10: 文字数バランス
+    feedback: str                     # 全体フィードバック文
+    improved_text: str                # 改善後テキスト
+
+
+def _run_es_review(
+    es_text: str,
+    question_type: str,
+    company_name: str,
+    context_docs: List[str],
+) -> ESReviewResponse:
+    import json as _json
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
+    client = OpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
+    has_company = bool(company_name.strip())
+    context_text = "\n\n".join(context_docs) if context_docs else ""
+    company_section = (
+        f"\n\n【企業情報】\n{context_text[:2000]}" if context_text else ""
+    )
+    company_fit_key = (
+        '"company_fit_score": <1-10の整数: 企業の価値観・求める人物像との適合度>'
+        if has_company
+        else '"company_fit_score": null'
+    )
+    system_prompt = (
+        "あなたは就職活動の専門アドバイザーです。"
+        "学生のES文章を添削し、以下のJSONのみを返してください。説明文は不要です。"
+    )
+    user_prompt = (
+        f"【質問種別】{question_type}\n"
+        f"【ES文章】\n{es_text}"
+        + (f"\n\n【志望企業】{company_name}" if has_company else "")
+        + company_section
+        + f"""
+
+以下のJSONフォーマットで添削結果を返してください:
+{{
+  "specificity_score": <1-10の整数: 具体的な数値・エピソード・固有名詞が含まれているか>,
+  "star_score": <1-10の整数: Situation/Task/Action/Resultの構造が揃っているか>,
+  {company_fit_key},
+  "length_balance_score": <1-10の整数: 文字数・各要素のバランスが適切か>,
+  "feedback": "<具体性・STAR準拠・企業適合性・文字数について200字以内でアドバイス>",
+  "improved_text": "<元の文章を改善したバージョン（元の文字数の110〜130%を目安）>"
+}}"""
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1200,
+            response_format={"type": "json_object"},
+        )
+        data = _json.loads(resp.choices[0].message.content or "{}")
+        company_fit = data.get("company_fit_score")
+        if company_fit is not None:
+            company_fit = max(1, min(10, int(company_fit)))
+        return ESReviewResponse(
+            specificity_score=max(1, min(10, int(data.get("specificity_score", 5)))),
+            star_score=max(1, min(10, int(data.get("star_score", 5)))),
+            company_fit_score=company_fit,
+            length_balance_score=max(1, min(10, int(data.get("length_balance_score", 5)))),
+            feedback=str(data.get("feedback", "")),
+            improved_text=str(data.get("improved_text", "")),
+        )
+    except Exception as exc:
+        logger.warning("es review failed error=%s", exc)
+        raise HTTPException(status_code=500, detail=f"ES review failed: {exc}")
+
+
+@app.post("/es/review", response_model=ESReviewResponse)
+def es_review(request: ESReviewRequest) -> ESReviewResponse:
+    context_docs: List[str] = []
+    if request.company_name.strip():
+        cache_key = "{company}::es_review".format(company=request.company_name)
+        context_docs = get_cached_context(
+            cache_key, query=f"{request.company_name} 求める人物像 採用 価値観"
+        )
+        if not context_docs and ALLOW_DDG_FALLBACK:
+            query = f"{request.company_name} 求める人物像 大切にしている価値観 採用"
+            results, _ = run_search(query, limit=5)
+            if results:
+                context_docs = build_context(results)
+                set_cached_context(cache_key, context_docs)
+
+    return _run_es_review(
+        es_text=request.es_text,
+        question_type=request.question_type,
+        company_name=request.company_name,
+        context_docs=context_docs,
+    )
