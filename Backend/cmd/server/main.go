@@ -184,6 +184,7 @@ func main() {
 	scheduleRepo := repositories.NewScheduleRepository(db)
 	scheduleService := services.NewScheduleService(scheduleRepo)
 	scheduleController := controllers.NewScheduleController(scheduleService)
+	esReviewController := controllers.NewESReviewController()
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -195,6 +196,7 @@ func main() {
 	routes.SetupGitHubRoutes(githubController)
 	routes.SetupESRoutes(esRewriteController)
 	routes.SetupScheduleRoutes(scheduleController)
+	routes.SetupESRoutes(esRewriteController, esReviewController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
