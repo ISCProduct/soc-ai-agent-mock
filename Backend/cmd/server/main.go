@@ -11,6 +11,7 @@ import (
 	"Backend/internal/services"
 	"log"
 	"net/http"
+	"os"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -28,7 +29,30 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// checkAnnotationFont はサーバー起動時に PDF アノテーション用フォントの存在を確認し、
+// 設定に問題がある場合は警告ログを出力する。
+// フォントが存在しない場合もサーバー起動は継続するが、PDF 注釈が劣化する旨を明示する。
+func checkAnnotationFont() {
+	fontPath := os.Getenv("ANNOTATION_FONT_PATH")
+	if fontPath == "" {
+		log.Println("WARNING: ANNOTATION_FONT_PATH が設定されていません。" +
+			"フォールバックフォントを使用します（日本語注釈が正常に表示されない可能性があります）。" +
+			"環境変数 ANNOTATION_FONT_PATH にフォントパスを設定してください。")
+		return
+	}
+	if _, err := os.Stat(fontPath); os.IsNotExist(err) {
+		log.Printf("WARNING: ANNOTATION_FONT_PATH のフォントが見つかりません: %q\n"+
+			"PDF注釈の日本語レビューページが生成されない場合があります。\n"+
+			"Dockerfileで fonts-noto-cjk がインストールされているか確認してください。", fontPath)
+		return
+	}
+	log.Printf("INFO: PDF アノテーションフォント確認済み: %q", fontPath)
+}
+
 func main() {
+	// PDF アノテーションフォントの存在チェック（起動時警告）
+	checkAnnotationFont()
+
 	// 設定を読み込む（環境変数の読み込みはconfig.LoadConfig内で実施）
 	cfg, err := config.LoadConfig()
 	if err != nil {

@@ -3,6 +3,7 @@ import argparse
 import io
 import json
 import os
+import sys
 
 import fitz  # PyMuPDF
 from PIL import Image, ImageDraw, ImageFont
@@ -49,9 +50,25 @@ def get_color(severity):
 
 
 def resolve_japanese_font():
+    """日本語フォントのパスを解決する。
+
+    優先順位:
+    1. ANNOTATION_FONT_PATH 環境変数
+    2. 既知のフォントパス候補をフォールバック検索
+
+    Returns:
+        str | None: フォントファイルのパス。見つからない場合は None。
+    """
     env_path = os.getenv("ANNOTATION_FONT_PATH", "").strip()
-    if env_path and os.path.exists(env_path):
-        return env_path
+    if env_path:
+        if os.path.exists(env_path):
+            return env_path
+        # 環境変数が設定されているがファイルが存在しない場合は明示的に警告
+        print(
+            f"WARNING: ANNOTATION_FONT_PATH が設定されていますが、ファイルが存在しません: {env_path!r}\n"
+            "フォールバック候補を検索します。",
+            file=sys.stderr,
+        )
 
     candidates = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -70,7 +87,9 @@ def resolve_japanese_font():
 
     for path in candidates:
         if os.path.exists(path):
+            print(f"INFO: フォールバックフォントを使用: {path!r}", file=sys.stderr)
             return path
+
     return None
 
 
@@ -266,8 +285,23 @@ def main():
 
     doc = fitz.open(args.input)
     font_path = resolve_japanese_font()
+
     if not font_path:
-        raise SystemExit("Japanese font not found. Set ANNOTATION_FONT_PATH.")
+        # フォントが見つからない場合: 日本語レビューページはスキップし、
+        # 矩形アノテーションのみ付与してPDFを出力する（graceful degradation）
+        print(
+            "WARNING: 日本語フォントが見つかりません。\n"
+            "  - レビューサマリーページは生成されません（文字化け防止のため）。\n"
+            "  - アノテーション（矩形・バッジ）のみ付与して出力します。\n"
+            "  - 修正方法: ANNOTATION_FONT_PATH 環境変数にフォントパスを設定するか、\n"
+            "    fonts-noto-cjk パッケージをインストールしてください。",
+            file=sys.stderr,
+        )
+        if items:
+            annotate_pages(doc, items)
+        doc.save(args.output, garbage=4, deflate=True)
+        doc.close()
+        return
 
     if items:
         annotate_pages(doc, items)
