@@ -45,6 +45,13 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	return &Client{c: cli, DefaultModel: model, apiKey: key}, nil
 }
 
+// NewWithBaseURL はテスト用コンストラクタ。baseURL を差し替えてモックサーバーを利用できる。
+func NewWithBaseURL(baseURL, model string) *Client {
+	config := openai.DefaultConfig("test-key")
+	config.BaseURL = baseURL
+	return &Client{c: openai.NewClientWithConfig(config), DefaultModel: model, apiKey: "test-key"}
+}
+
 func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
 	if cli.apiKey == "" {
 		return "", errors.New("openai api key is not set")
