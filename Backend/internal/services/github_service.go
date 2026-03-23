@@ -44,6 +44,11 @@ func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreServi
 	}
 }
 
+// NewGitHubServiceForTest は graphQLURL を差し替えたテスト用 GitHubService を返します。
+func NewGitHubServiceForTest(graphQLURL string) *GitHubService {
+	return &GitHubService{graphQLURL: graphQLURL}
+}
+
 func (s *GitHubService) getAPIBase() string {
 	if s.apiBaseURL != "" {
 		return s.apiBaseURL
@@ -108,7 +113,7 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	}
 
 	// 2. 言語使用比率集計
-	langStats := aggregateLanguages(userID, repos)
+	langStats := AggregateLanguages(userID, repos)
 
 	// userIDをセット
 	for i := range repos {
@@ -116,7 +121,7 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	}
 
 	// 3. コントリビューション数取得（GraphQL）
-	contributions, err := s.fetchTotalContributions(ctx, client, token, login)
+	contributions, err := s.FetchTotalContributions(ctx, client, token, login)
 	if err != nil {
 		log.Printf("[GitHubService] fetch contributions warning: %v", err)
 		// コントリビューション取得失敗はwarn扱いで続行
@@ -331,7 +336,7 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 	// 1. /user/repos?affiliation=owner,collaborator,organization_member で全リポジトリを取得
 	// affiliation を明示指定することで、オーナー・コラボレーター・組織メンバーとして参加している
 	// リポジトリをすべて取得する（read:orgなしでも動く）
-	allTypeRepos, err := s.fetchRepoPages(ctx, client, token,
+	allTypeRepos, err := s.FetchRepoPages(ctx, client, token,
 		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100", githubAPIBase))
 	if err != nil {
 		log.Printf("[GitHubService] fetchRepos(affiliation=all) warning: %v", err)
@@ -352,7 +357,7 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 		log.Printf("[GitHubService] fetchOrgs warning: %v", err)
 	} else {
 		for _, org := range orgs {
-			orgRepos, err := s.fetchRepoPages(ctx, client, token,
+			orgRepos, err := s.FetchRepoPages(ctx, client, token,
 				fmt.Sprintf("%s/orgs/%s/repos?type=all&sort=updated&per_page=100", githubAPIBase, org))
 			if err != nil {
 				log.Printf("[GitHubService] fetchOrgRepos warning (%s): %v", org, err)
@@ -444,8 +449,8 @@ func (s *GitHubService) fetchOrgs(ctx context.Context, client *http.Client, toke
 	return names, nil
 }
 
-// fetchRepoPages ページネーションで全リポジトリを取得する
-func (s *GitHubService) fetchRepoPages(ctx context.Context, client *http.Client, token, baseURL string) ([]models.GitHubRepo, error) {
+// FetchRepoPages ページネーションで全リポジトリを取得する
+func (s *GitHubService) FetchRepoPages(ctx context.Context, client *http.Client, token, baseURL string) ([]models.GitHubRepo, error) {
 	var allRepos []models.GitHubRepo
 	page := 1
 	for {
@@ -485,8 +490,8 @@ func (s *GitHubService) fetchRepoPages(ctx context.Context, client *http.Client,
 // githubLanguagesResponse GitHub言語APIレスポンス（言語名→バイト数のmap）
 type githubLanguagesResponse map[string]int64
 
-// aggregateLanguages リポジトリ一覧から言語使用統計を集計する
-func aggregateLanguages(userID uint, repos []models.GitHubRepo) []models.GitHubLanguageStat {
+// AggregateLanguages リポジトリ一覧から言語使用統計を集計する
+func AggregateLanguages(userID uint, repos []models.GitHubRepo) []models.GitHubLanguageStat {
 	langBytes := make(map[string]int64)
 	var total int64
 
@@ -624,8 +629,8 @@ type contributionsGraphQLResponse struct {
 	} `json:"errors"`
 }
 
-// fetchTotalContributions GraphQL APIで年間コントリビューション数を取得する
-func (s *GitHubService) fetchTotalContributions(ctx context.Context, client *http.Client, token, login string) (int, error) {
+// FetchTotalContributions GraphQL APIで年間コントリビューション数を取得する
+func (s *GitHubService) FetchTotalContributions(ctx context.Context, client *http.Client, token, login string) (int, error) {
 	query := fmt.Sprintf(`{"query":"query{user(login:\"%s\"){contributionsCollection{contributionCalendar{totalContributions}}}}"}`, login)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.getGraphQLURL(), bytes.NewBufferString(query))
@@ -641,7 +646,7 @@ func (s *GitHubService) fetchTotalContributions(ctx context.Context, client *htt
 	}
 	defer resp.Body.Close()
 
-	if err := checkRateLimit(resp); err != nil {
+	if err := CheckRateLimit(resp); err != nil {
 		return 0, err
 	}
 
@@ -672,7 +677,7 @@ func (s *GitHubService) doRequestWithRetry(ctx context.Context, client *http.Cli
 		lastErr = err
 
 		// レート制限エラーの場合はリトライしない
-		if isRateLimitError(err) {
+		if IsRateLimitError(err) {
 			return nil, err
 		}
 
@@ -704,7 +709,7 @@ func (s *GitHubService) doGet(ctx context.Context, client *http.Client, token, u
 	}
 	defer resp.Body.Close()
 
-	if err := checkRateLimit(resp); err != nil {
+	if err := CheckRateLimit(resp); err != nil {
 		return nil, err
 	}
 
@@ -725,13 +730,13 @@ func (e *rateLimitError) Error() string {
 	return fmt.Sprintf("github rate limit exceeded, resets at %s", e.resetAt.Format(time.RFC3339))
 }
 
-func isRateLimitError(err error) bool {
+func IsRateLimitError(err error) bool {
 	_, ok := err.(*rateLimitError)
 	return ok
 }
 
-// checkRateLimit レスポンスヘッダーからレート制限を確認する
-func checkRateLimit(resp *http.Response) error {
+// CheckRateLimit レスポンスヘッダーからレート制限を確認する
+func CheckRateLimit(resp *http.Response) error {
 	if resp.StatusCode != 403 && resp.StatusCode != 429 {
 		return nil
 	}

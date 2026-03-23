@@ -1,4 +1,4 @@
-package services
+package services_test
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
 	openaiPkg "Backend/internal/openai"
+	"Backend/internal/services"
 
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
@@ -56,27 +57,25 @@ func (m *mockInterviewUtterRepo) FindBySessionID(sessionID uint) ([]models.Inter
 }
 
 // mockUserRepo は repository.UserRepository の最小モック実装。
-// GetUserByID のみ設定可能で、他は nil/エラーを返す。
-type mockUserRepo struct {
+type mockUserRepo2 struct {
 	user *entity.User
 	err  error
 }
 
-
-func (m *mockUserRepo) GetUserByID(id uint) (*entity.User, error)   { return m.user, m.err }
-func (m *mockUserRepo) CreateUser(u *entity.User) error             { return nil }
-func (m *mockUserRepo) GetUserByEmail(email string) (*entity.User, error) { return nil, nil }
-func (m *mockUserRepo) ListUsers() ([]entity.User, error)           { return nil, nil }
-func (m *mockUserRepo) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
+func (m *mockUserRepo2) GetUserByID(id uint) (*entity.User, error)   { return m.user, m.err }
+func (m *mockUserRepo2) CreateUser(u *entity.User) error             { return nil }
+func (m *mockUserRepo2) GetUserByEmail(email string) (*entity.User, error) { return nil, nil }
+func (m *mockUserRepo2) ListUsers() ([]entity.User, error)           { return nil, nil }
+func (m *mockUserRepo2) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockUserRepo) UpdateUser(u *entity.User) error                               { return nil }
-func (m *mockUserRepo) DeleteUser(id uint) error                                      { return nil }
-func (m *mockUserRepo) GetUserByVerificationToken(token string) (*entity.User, error) { return nil, nil }
-func (m *mockUserRepo) GetUserByPasswordResetToken(token string) (*entity.User, error) {
+func (m *mockUserRepo2) UpdateUser(u *entity.User) error                               { return nil }
+func (m *mockUserRepo2) DeleteUser(id uint) error                                      { return nil }
+func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*entity.User, error) { return nil, nil }
+func (m *mockUserRepo2) GetUserByPasswordResetToken(token string) (*entity.User, error) {
 	return nil, nil
 }
-func (m *mockUserRepo) GetUserByOAuth(provider, oauthID string) (*entity.User, error) {
+func (m *mockUserRepo2) GetUserByOAuth(provider, oauthID string) (*entity.User, error) {
 	return nil, nil
 }
 
@@ -86,18 +85,10 @@ func (m *mockUserRepo) GetUserByOAuth(provider, oauthID string) (*entity.User, e
 func newTestInterviewService(
 	sessionRepo *mockInterviewSessionRepo,
 	utterRepo *mockInterviewUtterRepo,
-	userRepo *mockUserRepo,
+	userRepo *mockUserRepo2,
 	aiClient *openaiPkg.Client,
-) *InterviewService {
-	return &InterviewService{
-		sessionRepo:  sessionRepo,
-		utterRepo:    utterRepo,
-		reportRepo:   nil,
-		userRepo:     userRepo,
-		emailService: nil,
-		openaiClient: aiClient,
-		jobCh:        make(chan uint, 1),
-	}
+) *services.InterviewService {
+	return services.NewInterviewService(sessionRepo, utterRepo, nil, userRepo, nil, aiClient)
 }
 
 // newOpenAITestServer はOpenAI Chat Completions レスポンスを返すテストHTTPサーバーを起動する。
@@ -124,10 +115,10 @@ func newOpenAITestServer(t *testing.T, responseBody string) (*httptest.Server, *
 	return srv, openaiPkg.NewWithBaseURL(srv.URL, "gpt-4o")
 }
 
-// ─── buildTranscript ─────────────────────────────────────────────────────────
+// ─── BuildTranscript ─────────────────────────────────────────────────────────
 
 func TestBuildTranscript_Empty(t *testing.T) {
-	result := buildTranscript(nil)
+	result := services.BuildTranscript(nil)
 	assert.Equal(t, "", result)
 }
 
@@ -136,7 +127,7 @@ func TestBuildTranscript_UserOnly(t *testing.T) {
 		{Role: "user", Text: "チームでの開発経験があります。"},
 		{Role: "user", Text: "リーダーを担当しました。"},
 	}
-	result := buildTranscript(utterances)
+	result := services.BuildTranscript(utterances)
 	assert.Contains(t, result, "User: チームでの開発経験があります。")
 	assert.Contains(t, result, "User: リーダーを担当しました。")
 }
@@ -148,7 +139,7 @@ func TestBuildTranscript_MixedRoles(t *testing.T) {
 		{Role: "ai", Text: "志望動機を聞かせてください。"},
 		{Role: "user", Text: "御社に興味があります。"},
 	}
-	result := buildTranscript(utterances)
+	result := services.BuildTranscript(utterances)
 	assert.Contains(t, result, "Interviewer: 自己紹介をお願いします。")
 	assert.Contains(t, result, "User: 田中と申します。")
 	assert.Contains(t, result, "Interviewer: 志望動機を聞かせてください。")
@@ -159,33 +150,33 @@ func TestBuildTranscript_TrimsWhitespace(t *testing.T) {
 	utterances := []models.InterviewUtterance{
 		{Role: "user", Text: "  スペースあり  "},
 	}
-	result := buildTranscript(utterances)
+	result := services.BuildTranscript(utterances)
 	assert.Contains(t, result, "User: スペースあり")
 }
 
-// ─── extractJSONObject ────────────────────────────────────────────────────────
+// ─── ExtractJSONObject ────────────────────────────────────────────────────────
 
 func TestExtractJSONObject_Clean(t *testing.T) {
 	input := `{"suggestions": [{"original": "頑張りました", "suggestions": ["尽力しました"]}]}`
-	result := extractJSONObject(input)
+	result := services.ExtractJSONObject(input)
 	assert.Equal(t, input, result)
 }
 
 func TestExtractJSONObject_WithMarkdownFence(t *testing.T) {
 	input := "```json\n{\"key\": \"value\"}\n```"
-	result := extractJSONObject(input)
+	result := services.ExtractJSONObject(input)
 	assert.Equal(t, `{"key": "value"}`, result)
 }
 
 func TestExtractJSONObject_WithLeadingText(t *testing.T) {
-	// extractJSONObject は先頭のテキストと末尾のテキストを両方除去する
+	// ExtractJSONObject は先頭のテキストと末尾のテキストを両方除去する
 	input := `以下がJSONです: {"key": "value"} 終わり`
-	result := extractJSONObject(input)
+	result := services.ExtractJSONObject(input)
 	assert.Equal(t, `{"key": "value"}`, result)
 }
 
 func TestExtractJSONObject_Empty(t *testing.T) {
-	result := extractJSONObject("")
+	result := services.ExtractJSONObject("")
 	assert.Equal(t, "", result)
 }
 
@@ -197,10 +188,9 @@ func TestGetPhraseSuggestions_Forbidden(t *testing.T) {
 		err:     nil,
 	}
 	utterRepo := &mockInterviewUtterRepo{}
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{err: errors.New("not found")}, nil)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{err: errors.New("not found")}, nil)
 
 	// userID=1 が ownerID=99 のセッションにアクセス → forbidden
-	// ただし isAllowed が userRepo を使うため、userRepo=nil の場合は forbidden になる
 	_, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.Error(t, err)
 	assert.Equal(t, "forbidden", err.Error())
@@ -212,7 +202,7 @@ func TestGetPhraseSuggestions_SessionNotFound(t *testing.T) {
 		err:     errors.New("record not found"),
 	}
 	utterRepo := &mockInterviewUtterRepo{}
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{err: errors.New("not found")}, nil)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{err: errors.New("not found")}, nil)
 
 	_, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.Error(t, err)
@@ -229,7 +219,7 @@ func TestGetPhraseSuggestions_NoUserUtterances(t *testing.T) {
 			{Role: "ai", Text: "自己紹介をお願いします。"},
 		},
 	}
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{err: errors.New("not found")}, nil)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{err: errors.New("not found")}, nil)
 
 	result, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.NoError(t, err)
@@ -243,7 +233,7 @@ func TestGetPhraseSuggestions_UtteranceFetchError(t *testing.T) {
 	utterRepo := &mockInterviewUtterRepo{
 		err: errors.New("db connection error"),
 	}
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{err: errors.New("not found")}, nil)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{err: errors.New("not found")}, nil)
 
 	_, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.Error(t, err)
@@ -265,7 +255,7 @@ func TestGetPhraseSuggestions_Success(t *testing.T) {
 	mockJSON := `{"suggestions": [{"original": "なんとなく頑張りました", "suggestions": ["KPIを20%改善しました", "週次レビューを主導しました"]}]}`
 	_, aiClient := newOpenAITestServer(t, mockJSON)
 
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{}, aiClient)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{}, aiClient)
 
 	result, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.NoError(t, err)
@@ -290,7 +280,7 @@ func TestGetPhraseSuggestions_MultipleSuggestions(t *testing.T) {
 	]}`
 	_, aiClient := newOpenAITestServer(t, mockJSON)
 
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{}, aiClient)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{}, aiClient)
 
 	result, err := svc.GetPhraseSuggestions(context.Background(), 2, 2)
 	require.NoError(t, err)
@@ -313,7 +303,7 @@ func TestGetPhraseSuggestions_InvalidJSON(t *testing.T) {
 	// 不正なJSONをOpenAIが返した場合
 	_, aiClient := newOpenAITestServer(t, `not a valid json`)
 
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{}, aiClient)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{}, aiClient)
 
 	_, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.Error(t, err)
@@ -332,10 +322,9 @@ func TestGetPhraseSuggestions_EmptySuggestionsArray(t *testing.T) {
 	// 提案なし（全て良い表現）
 	_, aiClient := newOpenAITestServer(t, `{"suggestions": []}`)
 
-	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo{}, aiClient)
+	svc := newTestInterviewService(sessionRepo, utterRepo, &mockUserRepo2{}, aiClient)
 
 	result, err := svc.GetPhraseSuggestions(context.Background(), 1, 1)
 	require.NoError(t, err)
 	assert.Empty(t, result)
 }
-

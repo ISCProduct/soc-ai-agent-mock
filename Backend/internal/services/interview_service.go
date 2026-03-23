@@ -317,7 +317,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 	if err != nil {
 		return nil, err
 	}
-	raw = extractJSONObject(raw)
+	raw = ExtractJSONObject(raw)
 	var payload struct {
 		Suggestions []PhraseSuggestion `json:"suggestions"`
 	}
@@ -635,7 +635,7 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 
 // buildTranscript formats utterances into a plain-text transcript for the LLM prompt.
 // AI turns are labeled "Interviewer" and user turns are labeled "User".
-func buildTranscript(utterances []models.InterviewUtterance) string {
+func BuildTranscript(utterances []models.InterviewUtterance) string {
 	var b strings.Builder
 	for _, u := range utterances {
 		role := "User"
@@ -653,7 +653,7 @@ func buildTranscript(utterances []models.InterviewUtterance) string {
 // extractJSONObject strips surrounding markdown code fences and extracts the
 // outermost JSON object from an LLM response.
 // Some models wrap their output in ```json ... ``` even when instructed not to.
-func extractJSONObject(raw string) string {
+func ExtractJSONObject(raw string) string {
 	s := strings.TrimSpace(raw)
 	if start := strings.Index(s, "{"); start > 0 {
 		s = s[start:]
@@ -691,7 +691,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		}
 		return s.reportRepo.Upsert(empty)
 	}
-	transcript := buildTranscript(utterances)
+	transcript := BuildTranscript(utterances)
 	systemPrompt := buildReportSystemPrompt(lang)
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
@@ -753,7 +753,7 @@ Interview transcript:
 		Teacher      *teacherReport    `json:"teacher"`
 	}
 	var payload reportPayload
-	cleaned := extractJSONObject(raw)
+	cleaned := ExtractJSONObject(raw)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}
