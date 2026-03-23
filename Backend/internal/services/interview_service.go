@@ -270,6 +270,73 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 	return report, nil
 }
 
+// InterviewTrendPoint は面接トレンド分析の1データポイント。
+type InterviewTrendPoint struct {
+	SessionID     uint      `json:"session_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	Logic         *float64  `json:"logic"`
+	Specificity   *float64  `json:"specificity"`
+	Ownership     *float64  `json:"ownership"`
+	Communication *float64  `json:"communication"`
+	Enthusiasm    *float64  `json:"enthusiasm"`
+}
+
+// GetTrend は指定ユーザーの完了済み面接セッションのスコア時系列を返す。
+// sessions は古い順（昇順）で返却されるため、フロントエンドでそのままグラフに使える。
+func (s *InterviewService) GetTrend(userID uint, limit int) ([]InterviewTrendPoint, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	// 新しい順で取得し、後で逆順にする（古い順でグラフ描画するため）
+	sessions, err := s.sessionRepo.ListFinishedByUser(userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	// 古い順に並べ替え
+	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
+		sessions[i], sessions[j] = sessions[j], sessions[i]
+	}
+
+	points := make([]InterviewTrendPoint, 0, len(sessions))
+	for _, session := range sessions {
+		report, err := s.reportRepo.FindBySessionID(session.ID)
+		if err != nil {
+			// レポート未生成のセッションはスキップ
+			continue
+		}
+		var scores map[string]float64
+		if err := json.Unmarshal([]byte(report.ScoresJSON), &scores); err != nil {
+			continue
+		}
+		pt := InterviewTrendPoint{
+			SessionID: session.ID,
+			CreatedAt: session.CreatedAt,
+		}
+		if v, ok := scores["logic"]; ok {
+			vv := v
+			pt.Logic = &vv
+		}
+		if v, ok := scores["specificity"]; ok {
+			vv := v
+			pt.Specificity = &vv
+		}
+		if v, ok := scores["ownership"]; ok {
+			vv := v
+			pt.Ownership = &vv
+		}
+		if v, ok := scores["communication"]; ok {
+			vv := v
+			pt.Communication = &vv
+		}
+		if v, ok := scores["enthusiasm"]; ok {
+			vv := v
+			pt.Enthusiasm = &vv
+		}
+		points = append(points, pt)
+	}
+	return points, nil
+}
+
 func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {

@@ -94,6 +94,40 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 	c.Get(w, r)
 }
 
+// GetTrend は GET /api/interviews/trend?user_id=X&limit=N を処理し、
+// 完了済みセッションのスコア時系列を返す。
+func (c *InterviewController) GetTrend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	points, err := c.interviewService.GetTrend(uint(userID), limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"points": points,
+	})
+}
+
 func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

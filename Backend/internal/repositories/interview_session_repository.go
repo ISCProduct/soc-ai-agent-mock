@@ -67,6 +67,18 @@ func (r *InterviewSessionRepository) CountAll() (int64, error) {
 	return count, err
 }
 
+func (r *InterviewSessionRepository) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {
+	var sessions []models.InterviewSession
+	query := r.db.Where("user_id = ? AND status = ?", userID, "finished").Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
 func (r *InterviewSessionRepository) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
 	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
 	end := start.Add(24 * time.Hour)

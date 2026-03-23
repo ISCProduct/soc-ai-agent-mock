@@ -10,12 +10,24 @@ import {
   IconButton,
   Paper,
   Stack,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts'
 import { authService, User } from '@/lib/auth'
-import { interviewApi, InterviewDetail, InterviewSession, TeacherReport } from '@/lib/interview'
+import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
 import { parseJsonSafe } from '@/lib/interview-utils'
 
@@ -36,6 +48,9 @@ export default function InterviewHistoryPage() {
   const [loading, setLoading] = useState(true)
   const [selectedDetail, setSelectedDetail] = useState<InterviewDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [trendPoints, setTrendPoints] = useState<InterviewTrendPoint[]>([])
+  const [trendLimit, setTrendLimit] = useState<number>(10)
+  const [trendLoading, setTrendLoading] = useState(false)
 
   const limit = 10
 
@@ -53,6 +68,15 @@ export default function InterviewHistoryPage() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [user, page])
+
+  useEffect(() => {
+    if (!user) return
+    setTrendLoading(true)
+    interviewApi.getTrend(user.user_id, trendLimit)
+      .then(points => setTrendPoints(points))
+      .catch(() => setTrendPoints([]))
+      .finally(() => setTrendLoading(false))
+  }, [user, trendLimit])
 
   const isTeacher = user?.role === 'teacher'
 
@@ -83,6 +107,53 @@ export default function InterviewHistoryPage() {
         <IconButton onClick={() => router.push('/interview')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
           <ArrowBackIcon />
         </IconButton>
+      </Box>
+
+      {/* Trend chart */}
+      <Box sx={{ maxWidth: 1100, mx: 'auto', px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: 0 }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }} flexWrap="wrap" gap={1}>
+            <Typography sx={{ fontWeight: 700, fontSize: 16 }}>パフォーマンストレンド</Typography>
+            <ToggleButtonGroup
+              value={trendLimit}
+              exclusive
+              onChange={(_, v) => { if (v !== null) setTrendLimit(v) }}
+              size="small"
+            >
+              <ToggleButton value={5} sx={{ fontSize: 12, px: 1.5 }}>直近5回</ToggleButton>
+              <ToggleButton value={10} sx={{ fontSize: 12, px: 1.5 }}>直近10回</ToggleButton>
+              <ToggleButton value={0} sx={{ fontSize: 12, px: 1.5 }}>全期間</ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
+          {trendLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={28} sx={{ color: PRIMARY }} />
+            </Box>
+          ) : trendPoints.length === 0 ? (
+            <Typography color="text.secondary" fontSize={14} sx={{ py: 3, textAlign: 'center' }}>
+              完了した面接がないためトレンドを表示できません。
+            </Typography>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={trendPoints.map((p, i) => ({
+                ...p,
+                label: `#${p.session_id}`,
+                index: i + 1,
+              }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#64748b' }} />
+                <YAxis domain={[0, 10]} tick={{ fontSize: 12, fill: '#64748b' }} width={28} />
+                <Tooltip formatter={(v: number) => v?.toFixed(1)} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="logic" name="論理性" stroke="#ec5b13" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                <Line type="monotone" dataKey="specificity" name="具体性" stroke="#3b82f6" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                <Line type="monotone" dataKey="ownership" name="主体性" stroke="#10b981" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                <Line type="monotone" dataKey="communication" name="コミュニケーション" stroke="#8b5cf6" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                <Line type="monotone" dataKey="enthusiasm" name="熱意" stroke="#f59e0b" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </Paper>
       </Box>
 
       <Box sx={{ display: 'flex', maxWidth: 1100, mx: 'auto', p: { xs: 2, md: 4 }, gap: 3, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
