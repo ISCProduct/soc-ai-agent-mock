@@ -42,6 +42,9 @@ FROM golang:1.24-bullseye
 WORKDIR /app
 
 ENV GOTOOLCHAIN=auto
+# フォントパスを明示的に設定（ランタイムステージで有効）
+# fonts-noto-cjk をインストール後のデフォルトパス
+ENV ANNOTATION_FONT_PATH=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 
 # Install runtime dependencies (OCR + PDF conversion)
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list \
