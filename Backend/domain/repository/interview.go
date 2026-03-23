@@ -13,6 +13,9 @@ type InterviewSessionRepository interface {
 	Update(session *models.InterviewSession) error
 	ListByUser(userID uint, limit int, offset int) ([]models.InterviewSession, error)
 	ListAll(limit int, offset int) ([]models.InterviewSession, error)
+	// ListFinishedByUser は完了済み（status="finished"）セッションを新しい順に最大 limit 件返す。
+	// トレンド分析用。
+	ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error)
 	CountByUser(userID uint) (int64, error)
 	CountAll() (int64, error)
 	CountByUserAndDay(userID uint, day time.Time) (int64, error)

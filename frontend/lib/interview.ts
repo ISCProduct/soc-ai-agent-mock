@@ -68,6 +68,16 @@ export type InterviewDetail = {
   report?: InterviewReport
 }
 
+export type InterviewTrendPoint = {
+  session_id: number
+  created_at: string
+  logic: number | null
+  specificity: number | null
+  ownership: number | null
+  communication: number | null
+  enthusiasm: number | null
+}
+
 export const interviewApi = {
   async createSession(userId: number, language = 'ja'): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews`, {
@@ -137,6 +147,14 @@ export const interviewApi = {
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     return data.client_secret
+  },
+
+  async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
+    const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
+    const res = await fetch(`${BACKEND_URL}/api/interviews/trend${params}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    return data.points as InterviewTrendPoint[]
   },
 
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
