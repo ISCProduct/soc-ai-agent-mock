@@ -50,6 +50,26 @@ type ModelRow = {
 type Summary = {
   current_month_cost_usd: number
   model_breakdown: ModelRow[]
+  realtime?: {
+    current_month_cost_usd: number
+    active_connections: number
+    user_breakdown: RealtimeUserRow[]
+  }
+}
+
+type RealtimeDailyRow = {
+  date: string
+  total_cost_usd: number
+  total_duration_seconds: number
+  session_count: number
+  user_count: number
+}
+
+type RealtimeUserRow = {
+  user_id: number
+  total_cost_usd: number
+  total_duration_seconds: number
+  session_count: number
 }
 
 function CostBar({ value, max }: { value: number; max: number }) {
@@ -109,6 +129,7 @@ export default function AdminCostsPage() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [daily, setDaily] = useState<DailyRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
+  const [realtimeDaily, setRealtimeDaily] = useState<RealtimeDailyRow[]>([])
   const [dailyDays, setDailyDays] = useState(30)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -139,6 +160,7 @@ export default function AdminCostsPage() {
       setSummary(sumData)
       setDaily(dailyData.daily ?? [])
       setMonthly(monthlyData.monthly ?? [])
+      setRealtimeDaily(dailyData.realtime_daily ?? [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -150,6 +172,7 @@ export default function AdminCostsPage() {
 
   const totalDailyCost = daily.reduce((s, r) => s + r.total_cost_usd, 0)
   const maxDailyModel = summary?.model_breakdown?.[0]?.total_cost_usd ?? 0.0001
+  const realtimeDailyCost = realtimeDaily.reduce((s, r) => s + r.total_cost_usd, 0)
 
   return (
     <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
@@ -199,6 +222,18 @@ export default function AdminCostsPage() {
             </Typography>
             <Typography variant="h4" fontWeight={700}>
               {daily.reduce((s, r) => s + r.call_count, 0).toLocaleString()}
+            </Typography>
+          </CardContent>
+        </Card>
+
+        <Card sx={{ flex: 1, minWidth: 200 }}>
+          <CardContent>
+            <Typography variant="body2" color="text.secondary">Realtime 今月コスト</Typography>
+            <Typography variant="h4" fontWeight={700}>
+              ${(summary?.realtime?.current_month_cost_usd ?? 0).toFixed(4)}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              active: {summary?.realtime?.active_connections ?? 0}
             </Typography>
           </CardContent>
         </Card>
@@ -282,6 +317,67 @@ export default function AdminCostsPage() {
                   </TableCell>
                 </TableRow>
               )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      {/* Realtime usage */}
+      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+        <Typography variant="h6" fontWeight={600} mb={1}>Realtime 利用状況</Typography>
+        <Typography variant="body2" color="text.secondary" mb={2}>
+          過去{dailyDays}日合計: ${realtimeDailyCost.toFixed(4)}
+        </Typography>
+        <MiniChart data={realtimeDaily} valueKey="total_cost_usd" labelKey="date" />
+        <Divider sx={{ my: 2 }} />
+        <TableContainer sx={{ maxHeight: 280 }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                <TableCell>日付</TableCell>
+                <TableCell align="right">コスト (USD)</TableCell>
+                <TableCell align="right">時間 (分)</TableCell>
+                <TableCell align="right">セッション数</TableCell>
+                <TableCell align="right">利用ユーザー数</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {[...realtimeDaily].reverse().map(row => (
+                <TableRow key={row.date} hover>
+                  <TableCell>{row.date}</TableCell>
+                  <TableCell align="right">${row.total_cost_usd.toFixed(4)}</TableCell>
+                  <TableCell align="right">{(row.total_duration_seconds / 60).toFixed(1)}</TableCell>
+                  <TableCell align="right">{row.session_count.toLocaleString()}</TableCell>
+                  <TableCell align="right">{row.user_count.toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      {/* Realtime users */}
+      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+        <Typography variant="h6" fontWeight={600} mb={2}>Realtime ユーザー別利用（過去30日）</Typography>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                <TableCell>User ID</TableCell>
+                <TableCell align="right">コスト (USD)</TableCell>
+                <TableCell align="right">時間 (分)</TableCell>
+                <TableCell align="right">セッション数</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(summary?.realtime?.user_breakdown ?? []).map(row => (
+                <TableRow key={row.user_id} hover>
+                  <TableCell>{row.user_id}</TableCell>
+                  <TableCell align="right">${row.total_cost_usd.toFixed(4)}</TableCell>
+                  <TableCell align="right">{(row.total_duration_seconds / 60).toFixed(1)}</TableCell>
+                  <TableCell align="right">{row.session_count.toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </TableContainer>

@@ -26,11 +26,11 @@ type mockInterviewSessionRepo struct {
 	err     error
 }
 
-func (m *mockInterviewSessionRepo) Create(s *models.InterviewSession) error        { return nil }
+func (m *mockInterviewSessionRepo) Create(s *models.InterviewSession) error { return nil }
 func (m *mockInterviewSessionRepo) FindByID(id uint) (*models.InterviewSession, error) {
 	return m.session, m.err
 }
-func (m *mockInterviewSessionRepo) Update(s *models.InterviewSession) error              { return nil }
+func (m *mockInterviewSessionRepo) Update(s *models.InterviewSession) error { return nil }
 func (m *mockInterviewSessionRepo) ListByUser(userID uint, limit, offset int) ([]models.InterviewSession, error) {
 	return nil, nil
 }
@@ -40,8 +40,8 @@ func (m *mockInterviewSessionRepo) ListAll(limit, offset int) ([]models.Intervie
 func (m *mockInterviewSessionRepo) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {
 	return nil, nil
 }
-func (m *mockInterviewSessionRepo) CountByUser(userID uint) (int64, error)  { return 0, nil }
-func (m *mockInterviewSessionRepo) CountAll() (int64, error)                { return 0, nil }
+func (m *mockInterviewSessionRepo) CountByUser(userID uint) (int64, error) { return 0, nil }
+func (m *mockInterviewSessionRepo) CountAll() (int64, error)               { return 0, nil }
 func (m *mockInterviewSessionRepo) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
 	return 0, nil
 }
@@ -62,16 +62,18 @@ type mockUserRepo2 struct {
 	err  error
 }
 
-func (m *mockUserRepo2) GetUserByID(id uint) (*entity.User, error)   { return m.user, m.err }
-func (m *mockUserRepo2) CreateUser(u *entity.User) error             { return nil }
+func (m *mockUserRepo2) GetUserByID(id uint) (*entity.User, error)         { return m.user, m.err }
+func (m *mockUserRepo2) CreateUser(u *entity.User) error                   { return nil }
 func (m *mockUserRepo2) GetUserByEmail(email string) (*entity.User, error) { return nil, nil }
-func (m *mockUserRepo2) ListUsers() ([]entity.User, error)           { return nil, nil }
+func (m *mockUserRepo2) ListUsers() ([]entity.User, error)                 { return nil, nil }
 func (m *mockUserRepo2) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockUserRepo2) UpdateUser(u *entity.User) error                               { return nil }
-func (m *mockUserRepo2) DeleteUser(id uint) error                                      { return nil }
-func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*entity.User, error) { return nil, nil }
+func (m *mockUserRepo2) UpdateUser(u *entity.User) error { return nil }
+func (m *mockUserRepo2) DeleteUser(id uint) error        { return nil }
+func (m *mockUserRepo2) GetUserByVerificationToken(token string) (*entity.User, error) {
+	return nil, nil
+}
 func (m *mockUserRepo2) GetUserByPasswordResetToken(token string) (*entity.User, error) {
 	return nil, nil
 }
@@ -88,7 +90,7 @@ func newTestInterviewService(
 	userRepo *mockUserRepo2,
 	aiClient *openaiPkg.Client,
 ) *services.InterviewService {
-	return services.NewInterviewService(sessionRepo, utterRepo, nil, userRepo, nil, aiClient)
+	return services.NewInterviewService(sessionRepo, utterRepo, nil, userRepo, nil, aiClient, nil)
 }
 
 // newOpenAITestServer はOpenAI Chat Completions レスポンスを返すテストHTTPサーバーを起動する。

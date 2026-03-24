@@ -48,6 +48,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&InterviewUtterance{},
 		&InterviewReport{},
 		&InterviewVideo{},
+		&RealtimeUsageLog{},
 		&PendingRegistration{},
 		// 選考スケジュール
 		&ScheduleEvent{},

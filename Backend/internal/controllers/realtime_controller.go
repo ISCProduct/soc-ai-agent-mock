@@ -4,6 +4,7 @@ import (
 	"Backend/internal/services"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type RealtimeController struct {
@@ -42,6 +43,9 @@ func (c *RealtimeController) Token(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
+		}
+		if strings.Contains(err.Error(), "realtime capacity exceeded") {
+			status = http.StatusTooManyRequests
 		}
 		http.Error(w, err.Error(), status)
 		return
