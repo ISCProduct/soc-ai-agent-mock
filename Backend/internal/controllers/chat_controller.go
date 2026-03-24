@@ -217,15 +217,29 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 	}
 
 	// フロントエンド用のレスポンス形式に変換
+	type CategoryScores struct {
+		Technical     float64 `json:"technical"`
+		Teamwork      float64 `json:"teamwork"`
+		Leadership    float64 `json:"leadership"`
+		Creativity    float64 `json:"creativity"`
+		Stability     float64 `json:"stability"`
+		Growth        float64 `json:"growth"`
+		WorkLife      float64 `json:"work_life"`
+		Challenge     float64 `json:"challenge"`
+		Detail        float64 `json:"detail"`
+		Communication float64 `json:"communication"`
+	}
+
 	type CompanyRecommendation struct {
-		ID           int      `json:"id"`
-		CategoryName string   `json:"category_name"` // 企業名
-		Score        int      `json:"score"`         // マッチスコア
-		Reason       string   `json:"reason"`        // マッチ理由
-		Industry     string   `json:"industry"`
-		Location     string   `json:"location"`
-		Employees    string   `json:"employees"`
-		TechStack    []string `json:"tech_stack"`
+		ID             int            `json:"id"`
+		CategoryName   string         `json:"category_name"` // 企業名
+		Score          int            `json:"score"`         // マッチスコア
+		Reason         string         `json:"reason"`        // マッチ理由
+		Industry       string         `json:"industry"`
+		Location       string         `json:"location"`
+		Employees      string         `json:"employees"`
+		TechStack      []string       `json:"tech_stack"`
+		CategoryScores CategoryScores `json:"category_scores"`
 	}
 
 	type RecommendationResponse struct {
@@ -268,6 +282,18 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 			Location:     match.Company.Location,
 			Employees:    employeeCount,
 			TechStack:    techStack,
+			CategoryScores: CategoryScores{
+				Technical:     match.TechnicalMatch,
+				Teamwork:      match.TeamworkMatch,
+				Leadership:    match.LeadershipMatch,
+				Creativity:    match.CreativityMatch,
+				Stability:     match.StabilityMatch,
+				Growth:        match.GrowthMatch,
+				WorkLife:      match.WorkLifeMatch,
+				Challenge:     match.ChallengeMatch,
+				Detail:        match.DetailMatch,
+				Communication: match.CommunicationMatch,
+			},
 		})
 	}
 

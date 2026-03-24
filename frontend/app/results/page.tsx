@@ -44,6 +44,19 @@ import {
   type MarketType,
 } from '@/lib/company-data'
 
+interface CategoryScores {
+  technical: number
+  teamwork: number
+  leadership: number
+  creativity: number
+  stability: number
+  growth: number
+  work_life: number
+  challenge: number
+  detail: number
+  communication: number
+}
+
 interface Company {
   id: string
   name: string
@@ -54,6 +67,7 @@ interface Company {
   matchScore: number
   tags: string[]
   techStack: string[]
+  categoryScores?: CategoryScores
 }
 
 const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
@@ -239,6 +253,7 @@ function ResultsContent() {
               matchScore: rec.score || 0,
               tags: rec.tags || [],
               techStack: rec.tech_stack || [],
+              categoryScores: rec.category_scores || undefined,
             }
           })
           console.log('[Results] Mapped companies:', mappedCompanies)
@@ -1077,6 +1092,41 @@ function ResultsContent() {
                     </Stack>
                   )}
                   
+                  {company.categoryScores && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                        カテゴリ別スコア（上位3項目）:
+                      </Typography>
+                      <Stack spacing={0.5}>
+                        {Object.entries({
+                          '技術力': company.categoryScores.technical,
+                          'チームワーク': company.categoryScores.teamwork,
+                          'リーダーシップ': company.categoryScores.leadership,
+                          '創造性': company.categoryScores.creativity,
+                          '安定志向': company.categoryScores.stability,
+                          '成長意欲': company.categoryScores.growth,
+                          'ワークライフ': company.categoryScores.work_life,
+                          '挑戦意欲': company.categoryScores.challenge,
+                          '緻密さ': company.categoryScores.detail,
+                          'コミュニケーション': company.categoryScores.communication,
+                        })
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 3)
+                          .map(([label, score]) => (
+                            <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="caption" sx={{ minWidth: 100, color: 'text.secondary' }}>{label}</Typography>
+                              <Box sx={{ flex: 1, bgcolor: 'grey.200', borderRadius: 1, height: 6, overflow: 'hidden' }}>
+                                <Box sx={{ width: `${Math.round(score)}%`, bgcolor: 'primary.main', height: '100%', borderRadius: 1 }} />
+                              </Box>
+                              <Typography variant="caption" sx={{ minWidth: 30, textAlign: 'right', fontWeight: 'bold', color: 'primary.main' }}>
+                                {Math.round(score)}
+                              </Typography>
+                            </Box>
+                          ))}
+                      </Stack>
+                    </Box>
+                  )}
+
                   <Box sx={{ mt: 2, textAlign: 'right' }}>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
