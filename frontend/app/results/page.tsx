@@ -1215,6 +1215,21 @@ function ResultsContent() {
                     >
                       関連企業を見る
                     </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="success"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const params = new URLSearchParams({
+                          company_name: company.name,
+                          industry: company.industry,
+                        })
+                        router.push(`/resume?${params.toString()}`)
+                      }}
+                    >
+                      ES・職務経歴書を添削
+                    </Button>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>

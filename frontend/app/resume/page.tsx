@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   Box,
   Button,
@@ -41,7 +42,8 @@ const severityConfig: Record<string, { color: 'error' | 'warning' | 'info'; labe
   info: { color: 'info', label: '情報', borderColor: '#0288d1' },
 }
 
-export default function ResumePage() {
+function ResumeContent() {
+  const searchParams = useSearchParams()
   const [userId, setUserId] = useState('')
   const [sessionId, setSessionId] = useState('')
   const [sourceType, setSourceType] = useState('pdf')
@@ -58,6 +60,9 @@ export default function ResumePage() {
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
 
+  const prefilledCompany = searchParams.get('company_name') || ''
+  const prefilledIndustry = searchParams.get('industry') || ''
+
   useEffect(() => {
     const user = authService.getStoredUser()
     if (user?.user_id) {
@@ -71,7 +76,10 @@ export default function ResumePage() {
         ''
       setSessionId(storedSession)
     }
-  }, [])
+    if (prefilledCompany) {
+      setCompanyName(prefilledCompany)
+    }
+  }, [prefilledCompany])
 
   const handleUpload = async () => {
     setUploadError('')
@@ -198,9 +206,19 @@ export default function ResumePage() {
       <Typography variant="h4" fontWeight="bold" gutterBottom>
         履歴書・エントリシート レビュー
       </Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: prefilledCompany ? 1.5 : 3 }}>
         PDF/DOCX/Google Docsをアップロードして、注釈付きPDFを生成します。
       </Typography>
+      {prefilledCompany && (
+        <Box sx={{ mb: 3, px: 2, py: 1.5, bgcolor: '#e8f5e9', borderRadius: 1, border: '1px solid #a5d6a7' }}>
+          <Typography sx={{ fontSize: 14, color: '#2e7d32', fontWeight: 600 }}>
+            {prefilledCompany}{prefilledIndustry ? `（${prefilledIndustry}）` : ''}向けに最適化されたフィードバックを提供します
+          </Typography>
+          <Typography sx={{ fontSize: 12, color: '#388e3c', mt: 0.5 }}>
+            企業の求める人材像を踏まえたアドバイスが反映されます
+          </Typography>
+        </Box>
+      )}
 
       <Paper sx={{ p: 3, mb: 3 }} elevation={2}>
         <Stack spacing={2}>
@@ -381,5 +399,13 @@ export default function ResumePage() {
         </Paper>
       )}
     </Box>
+  )
+}
+
+export default function ResumePage() {
+  return (
+    <Suspense fallback={null}>
+      <ResumeContent />
+    </Suspense>
   )
 }
