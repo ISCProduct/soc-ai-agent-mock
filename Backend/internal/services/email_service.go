@@ -468,3 +468,23 @@ func (s *EmailService) SendInterviewReport(user *entity.User, data InterviewRepo
 	fmt.Printf("[EmailService] Interview report email sent successfully to %s\n", user.Email)
 	return nil
 }
+
+// SendSystemAlertEmail sends a plain-text operational alert email to multiple recipients.
+func (s *EmailService) SendSystemAlertEmail(recipients []string, subject, body string) error {
+	if len(recipients) == 0 {
+		return nil
+	}
+	if s.host == "" || s.user == "" || s.password == "" || s.from == "" {
+		fmt.Printf("[EmailService] SMTP not configured. Simulating alert send to %v\n", recipients)
+		return nil
+	}
+
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
+		s.from, recipients[0], subject, body)
+	if err := smtp.SendMail(addr, auth, s.from, recipients, []byte(msg)); err != nil {
+		return fmt.Errorf("failed to send alert email: %w", err)
+	}
+	return nil
+}

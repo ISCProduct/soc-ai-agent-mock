@@ -18,14 +18,15 @@ import (
 )
 
 type InterviewService struct {
-	sessionRepo  repository.InterviewSessionRepository
-	utterRepo    repository.InterviewUtteranceRepository
-	reportRepo   repository.InterviewReportRepository
-	userRepo     repository.UserRepository
-	emailService *EmailService
-	openaiClient *openai.Client
-	jobCh        chan uint
-	workerOnce   sync.Once
+	sessionRepo          repository.InterviewSessionRepository
+	utterRepo            repository.InterviewUtteranceRepository
+	reportRepo           repository.InterviewReportRepository
+	userRepo             repository.UserRepository
+	emailService         *EmailService
+	openaiClient         *openai.Client
+	realtimeUsageService *RealtimeUsageService
+	jobCh                chan uint
+	workerOnce           sync.Once
 }
 
 func NewInterviewService(
@@ -35,15 +36,17 @@ func NewInterviewService(
 	userRepo repository.UserRepository,
 	emailService *EmailService,
 	openaiClient *openai.Client,
+	realtimeUsageService *RealtimeUsageService,
 ) *InterviewService {
 	return &InterviewService{
-		sessionRepo:  sessionRepo,
-		utterRepo:    utterRepo,
-		reportRepo:   reportRepo,
-		userRepo:     userRepo,
-		emailService: emailService,
-		openaiClient: openaiClient,
-		jobCh:        make(chan uint, 100),
+		sessionRepo:          sessionRepo,
+		utterRepo:            utterRepo,
+		reportRepo:           reportRepo,
+		userRepo:             userRepo,
+		emailService:         emailService,
+		openaiClient:         openaiClient,
+		realtimeUsageService: realtimeUsageService,
+		jobCh:                make(chan uint, 100),
 	}
 }
 
@@ -142,7 +145,15 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 		session.EndedAt = &now
 	}
 	session.Status = "finished"
-	session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
+	if s.realtimeUsageService != nil {
+		if durationSec, cost, err := s.realtimeUsageService.CloseSession(sessionID, *session.EndedAt); err == nil && durationSec >= 0 {
+			session.EstimatedCostUSD = cost
+		} else {
+			session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
+		}
+	} else {
+		session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
+	}
 	if err := s.sessionRepo.Update(session); err != nil {
 		return nil, err
 	}
@@ -405,6 +416,15 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	if session.Status == "finished" {
 		return "", errors.New("session already finished")
 	}
+	if s.realtimeUsageService != nil {
+		allowed, active, maxAllowed, err := s.realtimeUsageService.CanOpenNewConnection()
+		if err != nil {
+			return "", err
+		}
+		if !allowed {
+			return "", fmt.Errorf("realtime capacity exceeded: active=%d limit=%d", active, maxAllowed)
+		}
+	}
 	lang := session.Language
 	if lang == "" {
 		lang = "ja"
@@ -437,6 +457,11 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	resp, err := s.openaiClient.CreateRealtimeClientSecret(ctx, req)
 	if err != nil {
 		return "", err
+	}
+	if s.realtimeUsageService != nil {
+		if err := s.realtimeUsageService.EnsureSessionStarted(userID, sessionID); err != nil {
+			return "", err
+		}
 	}
 	return resp.ClientSecret.Value, nil
 }
