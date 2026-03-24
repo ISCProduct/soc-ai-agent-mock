@@ -15,6 +15,7 @@ func SetupChatRoutes(chatController *controllers.ChatController, questionControl
 	http.HandleFunc("/api/chat/analysis", chatController.GetAnalysisSummary)
 	http.HandleFunc("/api/chat/sessions", chatController.GetSessions)
 	http.HandleFunc("/api/chat/send-report", chatController.SendReport)
+	http.HandleFunc("/api/chat/favorite", chatController.ToggleFavorite)
 
 	// 質問管理エンドポイント
 	http.HandleFunc("/api/questions/generate", questionController.GenerateQuestions)

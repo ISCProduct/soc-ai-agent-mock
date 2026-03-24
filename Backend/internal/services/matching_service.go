@@ -139,6 +139,11 @@ func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessio
 	return s.matchRepo.FindTopMatchesByUserAndSession(userID, sessionID, limit)
 }
 
+// ToggleFavorite お気に入りをトグル
+func (s *MatchingService) ToggleFavorite(matchID uint) error {
+	return s.matchRepo.ToggleFavorite(matchID)
+}
+
 type MatchingDiagnostics struct {
 	UserScoreCount     int64 `json:"user_score_count"`
 	ActiveCompanyCount int64 `json:"active_company_count"`

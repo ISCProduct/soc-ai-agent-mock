@@ -232,6 +232,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	type CompanyRecommendation struct {
 		ID             int            `json:"id"`
+		MatchID        uint           `json:"match_id"`      // マッチングレコードID（お気に入り操作に使用）
 		CategoryName   string         `json:"category_name"` // 企業名
 		Score          int            `json:"score"`         // マッチスコア
 		Reason         string         `json:"reason"`        // マッチ理由
@@ -240,6 +241,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		Employees      string         `json:"employees"`
 		TechStack      []string       `json:"tech_stack"`
 		CategoryScores CategoryScores `json:"category_scores"`
+		IsFavorited    bool           `json:"is_favorited"`
 	}
 
 	type RecommendationResponse struct {
@@ -275,6 +277,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 		items = append(items, CompanyRecommendation{
 			ID:           int(match.Company.ID),
+			MatchID:      match.ID,
 			CategoryName: match.Company.Name,
 			Score:        int(match.MatchScore),
 			Reason:       services.BuildMatchReason(match, userScores),
@@ -282,6 +285,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 			Location:     match.Company.Location,
 			Employees:    employeeCount,
 			TechStack:    techStack,
+			IsFavorited:  match.IsFavorited,
 			CategoryScores: CategoryScores{
 				Technical:     match.TechnicalMatch,
 				Teamwork:      match.TeamworkMatch,
@@ -305,6 +309,30 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// ToggleFavorite お気に入りをトグル (POST /api/chat/favorite)
+func (c *ChatController) ToggleFavorite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		MatchID uint `json:"match_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "match_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := c.matchingService.ToggleFavorite(req.MatchID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 // GetAnalysisSummary 4分析スコアと進捗を取得
