@@ -97,9 +97,13 @@ const edgeTypes: EdgeTypes = {
     custom: CustomEdge,
 };
 
-export default function CorrelationDiagram() {
+interface CorrelationDiagramProps {
+    initialCompanyId?: number | null
+}
+
+export default function CorrelationDiagram({ initialCompanyId = null }: CorrelationDiagramProps) {
     const [diagramType, setDiagramType] = useState<DiagramType>('capital');
-    const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+    const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(initialCompanyId);
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);

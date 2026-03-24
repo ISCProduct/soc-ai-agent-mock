@@ -1,11 +1,15 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Box } from '@mui/material';
+import { Suspense } from 'react';
 import CorrelationDiagram from '@/components/Correlation-diagram';
 
-export default function Page() {
+function CorrelationDiagramContent() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const companyIdParam = searchParams.get('company_id');
+    const initialCompanyId = companyIdParam ? parseInt(companyIdParam, 10) : null;
 
     return (
         <Box sx={{ p: 2 }}>
@@ -13,7 +17,15 @@ export default function Page() {
                 戻る
             </Button>
 
-            <CorrelationDiagram />
+            <CorrelationDiagram initialCompanyId={initialCompanyId} />
         </Box>
+    );
+}
+
+export default function Page() {
+    return (
+        <Suspense fallback={null}>
+            <CorrelationDiagramContent />
+        </Suspense>
     );
 }

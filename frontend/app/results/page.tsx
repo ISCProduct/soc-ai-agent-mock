@@ -1205,6 +1205,16 @@ function ResultsContent() {
                     >
                       この企業の面接を練習する
                     </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        router.push(`/Correlation-diagram?company_id=${company.id}`)
+                      }}
+                    >
+                      関連企業を見る
+                    </Button>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>
