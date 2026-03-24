@@ -187,7 +187,7 @@ func main() {
 		s3UploadService = nil
 	}
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
-	realtimeController := controllers.NewRealtimeController(interviewService)
+	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService)

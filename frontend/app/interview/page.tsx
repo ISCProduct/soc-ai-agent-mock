@@ -103,7 +103,7 @@ function InterviewContent() {
   const [partialUser, setPartialUser] = useState('')
   const [partialAi, setPartialAi] = useState('')
   const [remainingSeconds, setRemainingSeconds] = useState(interviewLimits.maxMinutes * 60)
-  const [estimatedCost, setEstimatedCost] = useState(0)
+  const [sessionWarningShown, setSessionWarningShown] = useState(false)
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
   const [reportStatus, setReportStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle')
@@ -355,7 +355,7 @@ function InterviewContent() {
       const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000)
       const remaining = Math.max(0, interviewLimits.maxMinutes * 60 - elapsed)
       setRemainingSeconds(remaining)
-      setEstimatedCost((elapsed / 60) * interviewLimits.costPerMinuteUSD)
+      if (remaining <= 120 && !sessionWarningShown) setSessionWarningShown(true)
       if (remaining <= 0) handleStop(true)
     }, 1000)
   }
@@ -451,7 +451,7 @@ function InterviewContent() {
     setPartialUser(''); setPartialAi('')
     setReport(null); setReportStatus('idle')
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
-    setEstimatedCost(0)
+    setSessionWarningShown(false)
     setMicEnabled(true); setCameraEnabled(true)
     historyRef.current = []
 
@@ -1155,9 +1155,14 @@ function InterviewContent() {
               <Typography variant="h4" sx={{ fontWeight: 400, color: '#202124', mb: 1 }}>
                 準備はできましたか？
               </Typography>
-              <Typography sx={{ color: 'text.secondary', mb: 4, fontSize: 15 }}>
+              <Typography sx={{ color: 'text.secondary', mb: 1, fontSize: 15 }}>
                 {companyName}
               </Typography>
+              <Box sx={{ mb: 3, px: 2, py: 1, bgcolor: '#e3f2fd', borderRadius: 1, border: '1px solid #90caf9' }}>
+                <Typography sx={{ fontSize: 13, color: '#1565c0' }}>
+                  ⏱ このセッションは最大{interviewLimits.maxMinutes}分です
+                </Typography>
+              </Box>
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%', maxWidth: 340 }}>
                 <Button
@@ -1324,14 +1329,14 @@ function InterviewContent() {
         </Box>
       </Box>
 
-      {/* ── Cost alert ── */}
-      {isConnected && estimatedCost >= interviewLimits.maxCostUSD * 0.8 && (
+      {/* ── Time warning ── */}
+      {isConnected && sessionWarningShown && (
         <Box sx={{ px: 2, pt: 1, flexShrink: 0 }}>
-          <Box sx={{ bgcolor: estimatedCost >= interviewLimits.maxCostUSD ? 'rgba(234,67,53,0.2)' : 'rgba(251,188,4,0.15)', border: `1px solid ${estimatedCost >= interviewLimits.maxCostUSD ? '#ea4335' : '#fbbc04'}`, borderRadius: 1, px: 2, py: 0.8, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography sx={{ fontSize: 13, color: estimatedCost >= interviewLimits.maxCostUSD ? '#f28b82' : '#fdd663', fontWeight: 600 }}>
-              {estimatedCost >= interviewLimits.maxCostUSD
-                ? '⚠️ コスト上限に達しました。間もなく面接が終了します。'
-                : `⚠️ コスト上限の80%に達しました（$${estimatedCost.toFixed(2)} / $${interviewLimits.maxCostUSD.toFixed(2)}）`}
+          <Box sx={{ bgcolor: remainingSeconds <= 0 ? 'rgba(234,67,53,0.2)' : 'rgba(251,188,4,0.15)', border: `1px solid ${remainingSeconds <= 0 ? '#ea4335' : '#fbbc04'}`, borderRadius: 1, px: 2, py: 0.8, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontSize: 13, color: remainingSeconds <= 0 ? '#f28b82' : '#fdd663', fontWeight: 600 }}>
+              {remainingSeconds <= 0
+                ? 'セッションが終了しました。'
+                : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。セッションがまもなく終了します。`}
             </Typography>
           </Box>
         </Box>
@@ -1647,7 +1652,7 @@ function InterviewContent() {
             </IconButton>
           </Tooltip>
           <Typography variant="caption" sx={{ color: '#5f6368', ml: 1 }}>
-            推定 ${estimatedCost.toFixed(2)}
+            残り {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, '0')}
           </Typography>
         </Box>
       </Box>
