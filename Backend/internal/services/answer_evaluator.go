@@ -348,6 +348,11 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 	return HumanScoreResult{Action: PrecheckScore}
 }
 
+// InferCategory は質問文からカテゴリを推論する（テスト用に公開）
+func (e *AnswerEvaluator) InferCategory(question string) string {
+	return e.categorizeQuestion(question)
+}
+
 func (e *AnswerEvaluator) categorizeQuestion(question string) string {
 	q := strings.ToLower(question)
 	if containsAny(q, []string{"興味", "きっかけ", "理由", "魅力", "なぜ"}) {
