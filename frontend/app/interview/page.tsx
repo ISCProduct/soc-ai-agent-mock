@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useRef, useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Box,
   Button,
@@ -86,8 +86,9 @@ const POSITIONS: Position[] = [
   { id: 'qa', title: 'テスト・品質保証（QA）', department: 'SIer / QA', icon: '✅', questions: 6, category: 'sier' },
 ]
 
-export default function InterviewPage() {
+function InterviewContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState<'selection' | 'lobby' | 'connecting' | 'connected' | 'error' | 'finished'>('selection')
@@ -161,6 +162,20 @@ export default function InterviewPage() {
     setUser(storedUser)
     setLoading(false)
   }, [router])
+
+  // マッチング結果から遷移した場合: URL パラメータで企業を事前選択してロビーへ
+  useEffect(() => {
+    const companyName = searchParams.get('company_name')
+    const industry = searchParams.get('industry')
+    const companyId = searchParams.get('company_id')
+    if (!companyName || loading) return
+    setInterviewCompany({
+      id: companyId ? parseInt(companyId, 10) : 0,
+      name: companyName,
+      industry: industry || undefined,
+    })
+    setStatus('lobby')
+  }, [loading, searchParams])
 
   // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
@@ -1114,6 +1129,13 @@ export default function InterviewPage() {
 
             {/* Join panel */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'center', lg: 'flex-start' }, textAlign: { xs: 'center', lg: 'left' } }}>
+              {searchParams.get('company_name') && (
+                <Box sx={{ mb: 2, px: 2, py: 1, bgcolor: '#e8f5e9', borderRadius: 2, border: '1px solid #a5d6a7', width: '100%', maxWidth: 340 }}>
+                  <Typography sx={{ fontSize: 13, color: '#2e7d32', fontWeight: 600 }}>
+                    {interviewCompany?.name}（{interviewCompany?.industry || '業種未設定'}）向けの面接練習を始めます
+                  </Typography>
+                </Box>
+              )}
               <Typography variant="h4" sx={{ fontWeight: 400, color: '#202124', mb: 1 }}>
                 準備はできましたか？
               </Typography>
@@ -1629,4 +1651,12 @@ function getNextAvatarGender(): 'male' | 'female' {
   } catch {
     return 'male'
   }
+}
+
+export default function InterviewPage() {
+  return (
+    <Suspense fallback={null}>
+      <InterviewContent />
+    </Suspense>
+  )
 }

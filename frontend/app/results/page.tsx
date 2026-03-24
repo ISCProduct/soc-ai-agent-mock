@@ -1127,7 +1127,23 @@ function ResultsContent() {
                     </Box>
                   )}
 
-                  <Box sx={{ mt: 2, textAlign: 'right' }}>
+                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      color="secondary"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const params = new URLSearchParams({
+                          company_id: company.id,
+                          company_name: company.name,
+                          industry: company.industry,
+                        })
+                        router.push(`/interview?${params.toString()}`)
+                      }}
+                    >
+                      この企業の面接を練習する
+                    </Button>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>
