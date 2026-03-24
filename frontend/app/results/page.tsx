@@ -17,8 +17,10 @@ import {
   Tab,
   Snackbar,
   Alert,
+  IconButton,
+  Tooltip,
 } from '@mui/material'
-import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon, Refresh, Email } from '@mui/icons-material'
+import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon, Refresh, Email, Favorite, FavoriteBorder } from '@mui/icons-material'
 import { sendAnalysisReport } from '@/lib/api'
 import { authService } from '@/lib/auth'
 import ReactFlow, {
@@ -59,6 +61,7 @@ interface CategoryScores {
 
 interface Company {
   id: string
+  matchId?: number
   name: string
   industry: string
   location: string
@@ -68,6 +71,7 @@ interface Company {
   tags: string[]
   techStack: string[]
   categoryScores?: CategoryScores
+  isFavorited?: boolean
 }
 
 const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
@@ -159,6 +163,7 @@ function ResultsContent() {
   const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([])
   const [diagramLoading, setDiagramLoading] = useState(false)
   const [emailSending, setEmailSending] = useState(false)
+  const [favoritingId, setFavoritingId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -245,6 +250,7 @@ function ResultsContent() {
             console.log('[Results] Mapping company data:', rec)
             return {
               id: String(rec.id || rec.ID || index + 1),
+              matchId: rec.match_id || undefined,
               name: rec.category_name || rec.name || `企業 ${index + 1}`,
               industry: rec.industry || 'IT・ソフトウェア',
               location: rec.location || '東京都',
@@ -254,6 +260,7 @@ function ResultsContent() {
               tags: rec.tags || [],
               techStack: rec.tech_stack || [],
               categoryScores: rec.category_scores || undefined,
+              isFavorited: rec.is_favorited || false,
             }
           })
           console.log('[Results] Mapped companies:', mappedCompanies)
@@ -324,6 +331,27 @@ function ResultsContent() {
     localStorage.clear()
     sessionStorage.clear()
     router.push('/')
+  }
+
+  const handleToggleFavorite = async (e: React.MouseEvent, company: Company) => {
+    e.stopPropagation()
+    if (!company.matchId || favoritingId !== null) return
+    setFavoritingId(company.matchId)
+    try {
+      const res = await fetch('/api/chat/favorite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ match_id: company.matchId }),
+      })
+      if (res.ok) {
+        setCompanies(prev => prev.map(c =>
+          c.matchId === company.matchId ? { ...c, isFavorited: !c.isFavorited } : c
+        ))
+        setSnackbar({ open: true, message: company.isFavorited ? 'お気に入りを解除しました' : 'お気に入りに追加しました', severity: 'success' })
+      }
+    } finally {
+      setFavoritingId(null)
+    }
   }
 
   // 関係図のノードとエッジを生成
@@ -1001,10 +1029,31 @@ function ResultsContent() {
             </Card>
           )}
 
+          {/* おすすめの次のステップ サマリー */}
+          {companies.length > 0 && (
+            <Card elevation={1} sx={{ mb: 2, border: '1px solid', borderColor: 'primary.light', bgcolor: '#f8f4ff' }}>
+              <CardContent sx={{ py: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                  おすすめの次のステップ
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip label={`面接練習: ${companies[0].name}から始める`} color="primary" size="small" onClick={() => {
+                    const params = new URLSearchParams({ company_id: companies[0].id, company_name: companies[0].name, industry: companies[0].industry })
+                    router.push(`/interview?${params.toString()}`)
+                  }} />
+                  <Chip label="企業詳細を確認する" variant="outlined" size="small" onClick={() => setSelectedCompany(companies[0])} />
+                  {companies.some(c => !c.isFavorited) && (
+                    <Chip label="気になる企業をお気に入り登録" variant="outlined" size="small" color="error" />
+                  )}
+                </Stack>
+              </CardContent>
+            </Card>
+          )}
+
           <Stack spacing={3}>
             {companies.map((company, index) => (
-              <Card 
-                key={`${company.id}-${index}`} 
+              <Card
+                key={`${company.id}-${index}`}
                 elevation={3} 
                 sx={{ 
                   border: '2px solid', 
@@ -1034,10 +1083,22 @@ function ResultsContent() {
                         </Typography>
                       </Box>
                     </Box>
-                    <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="h4" color="primary.main" fontWeight="bold">
-                        {company.matchScore}
-                      </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Tooltip title={company.isFavorited ? 'お気に入り解除' : 'お気に入り登録'}>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => handleToggleFavorite(e, company)}
+                            disabled={favoritingId === company.matchId}
+                            sx={{ color: company.isFavorited ? 'error.main' : 'action.disabled' }}
+                          >
+                            {company.isFavorited ? <Favorite fontSize="small" /> : <FavoriteBorder fontSize="small" />}
+                          </IconButton>
+                        </Tooltip>
+                        <Typography variant="h4" color="primary.main" fontWeight="bold">
+                          {company.matchScore}
+                        </Typography>
+                      </Box>
                       <Typography variant="caption" color="text.secondary">
                         適合度
                       </Typography>
