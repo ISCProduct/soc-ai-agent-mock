@@ -41,11 +41,12 @@ type RealtimeUserSummary struct {
 }
 
 type RealtimeUsageService struct {
-	repo              *repositories.RealtimeUsageRepository
-	emailService      *EmailService
-	alertThresholdUSD float64
-	maxConcurrent     int64
-	ratePerMinuteUSD  float64
+	repo                    *repositories.RealtimeUsageRepository
+	emailService            *EmailService
+	alertThresholdUSD       float64
+	maxConcurrent           int64
+	ratePerMinuteUSD        float64
+	sessionDurationMinutes  int
 
 	mu               sync.Mutex
 	lastAlertMonthID string
@@ -58,13 +59,24 @@ func NewRealtimeUsageService(repo *repositories.RealtimeUsageRepository, emailSe
 		maxConcurrent = 30
 	}
 	rate := getFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18)
-	return &RealtimeUsageService{
-		repo:              repo,
-		emailService:      emailService,
-		alertThresholdUSD: threshold,
-		maxConcurrent:     maxConcurrent,
-		ratePerMinuteUSD:  rate,
+	sessionMinutes := getIntEnv("INTERVIEW_SESSION_MINUTES", 10)
+	if sessionMinutes <= 0 {
+		sessionMinutes = 10
 	}
+	return &RealtimeUsageService{
+		repo:                   repo,
+		emailService:           emailService,
+		alertThresholdUSD:      threshold,
+		maxConcurrent:          maxConcurrent,
+		ratePerMinuteUSD:       rate,
+		sessionDurationMinutes: sessionMinutes,
+	}
+}
+
+// SessionDurationMinutes はユーザー向けのセッション時間（分）を返す。
+// コスト上限は内部管理のみとし、UXには時間として公開する。
+func (s *RealtimeUsageService) SessionDurationMinutes() int {
+	return s.sessionDurationMinutes
 }
 
 func (s *RealtimeUsageService) CanOpenNewConnection() (bool, int64, int64, error) {

@@ -218,6 +218,4 @@ export const interviewApi = {
 
 export const interviewLimits = {
   maxMinutes: Number(process.env.NEXT_PUBLIC_INTERVIEW_MAX_MINUTES || 10),
-  maxCostUSD: Number(process.env.NEXT_PUBLIC_INTERVIEW_MAX_COST_USD || 1.8),
-  costPerMinuteUSD: Number(process.env.NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD || 0.18),
 }

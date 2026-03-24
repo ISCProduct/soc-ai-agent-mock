@@ -12,4 +12,5 @@ func SetupInterviewRoutes(interviewController *controllers.InterviewController, 
 	http.HandleFunc("/api/interviews", interviewController.ListOrCreate)
 	http.HandleFunc("/api/interviews/", interviewController.Route)
 	http.HandleFunc("/api/realtime/token", realtimeController.Token)
+	http.HandleFunc("/api/realtime/session-info", realtimeController.SessionInfo)
 }
