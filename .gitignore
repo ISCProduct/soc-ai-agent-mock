@@ -56,3 +56,4 @@ mysql/logs/
 /frontend/components/company-detail-modal.tsx
 /Backend/README_RESUME_REVIEW.md
 /frontend/tsconfig.tsbuildinfo
+/Backend/server
