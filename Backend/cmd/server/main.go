@@ -169,11 +169,12 @@ func main() {
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
+	// gBizINFO 公式 API を使った企業データ収集パイプライン
+	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
+	gbizToken := os.Getenv("GBIZINFO_API_TOKEN")
 	companyGraphPipeline := &scraper.Pipeline{
-		Mynavi:     scraper.NewMynaviScraper(""),
-		Rikunabi:   scraper.NewRikunabiScraper(),
-		CareerTasu: scraper.NewCareerTasuScraper(),
-		Threshold:  0.75,
+		GBiz:      scraper.NewGBizClient("", gbizToken),
+		Threshold: 0.75,
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)

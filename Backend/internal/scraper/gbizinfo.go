@@ -151,6 +151,69 @@ func (c *GBizClient) Match(ctx context.Context, raw *RawCompany, threshold float
 	}, nil
 }
 
+// SearchByKeyword は企業名キーワードで gBizINFO を検索し、CompanyNode のリストを返す。
+// スクレイピングに代わる公式データ取得手段として使用する。
+// gBizINFO が直接返す公式データのため、類似度判定は行わず MatchScore=1.0 で登録する。
+func (c *GBizClient) SearchByKeyword(ctx context.Context, keyword string, limit int) ([]*CompanyNode, []string, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if err := c.Limiter.Wait(ctx); err != nil {
+		return nil, nil, err
+	}
+
+	params := url.Values{"name": {keyword}, "limit": {fmt.Sprintf("%d", limit)}}
+	reqURL := c.BaseURL + "?" + params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if c.Token != "" {
+		req.Header.Set("X-hojinInfo-api-token", c.Token)
+	}
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gbizinfo request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, nil, fmt.Errorf("gbizinfo: 401 Unauthorized (check GBIZINFO_API_TOKEN)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("gbizinfo: HTTP %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Records []GBizRecord `json:"hojin-infos"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, nil, fmt.Errorf("gbizinfo decode: %w", err)
+	}
+
+	var nodes []*CompanyNode
+	var logs []string
+	for _, rec := range payload.Records {
+		if rec.CorporateNumber == "" {
+			continue
+		}
+		nodes = append(nodes, &CompanyNode{
+			CorporateNumber:  rec.CorporateNumber,
+			OfficialName:     rec.Name,
+			BusinessCategory: rec.BusinessSummary.MajorClassificationName,
+			Address:          rec.Location,
+			Website:          rec.CompanyURL,
+			MatchScore:       1.0,
+			NeedsReview:      false,
+		})
+		logs = append(logs, fmt.Sprintf("gBizINFO: %s [%s]", rec.Name, rec.CorporateNumber))
+	}
+	return nodes, logs, nil
+}
+
 func fallbackNode(raw *RawCompany) *CompanyNode {
 	return &CompanyNode{
 		CorporateNumber:      "UNKNOWN_" + NormalizeName(raw.RawName),
