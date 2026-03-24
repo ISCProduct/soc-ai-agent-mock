@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Box, Typography, Chip, CircularProgress, Paper, Alert, Button } from '@mui/material'
+import { Box, Typography, Chip, CircularProgress, Paper, Alert, Button, Divider } from '@mui/material'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
 
@@ -24,6 +26,23 @@ interface GitHubProfile {
   TotalContributions: number
   PublicRepos: number
   Followers: number
+}
+
+interface GitHubRepo {
+  FullName: string
+  Name: string
+  Language: string
+  Stars: number
+  IsForked: boolean
+}
+
+interface RepoSummary {
+  ID: number
+  FullName: string
+  SummaryText: string
+  TechReason: string
+  Challenge: string
+  Achievement: string
 }
 
 // カテゴリ別の表示色
@@ -171,11 +190,16 @@ export default function GitHubSkills({ userId }: { userId: number }) {
   const [scores, setScores] = useState<SkillScore[]>([])
   const [profile, setProfile] = useState<GitHubProfile | null>(null)
   const [langStats, setLangStats] = useState<LanguageStat[]>([])
+  const [repos, setRepos] = useState<GitHubRepo[]>([])
+  const [summaries, setSummaries] = useState<RepoSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [notLinked, setNotLinked] = useState(false)
+  const [needsReauth, setNeedsReauth] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [summarizingRepo, setSummarizingRepo] = useState<string | null>(null)
+  const [expandedRepo, setExpandedRepo] = useState<string | false>(false)
 
   useEffect(() => {
     fetchAll()
@@ -186,9 +210,10 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     setError(null)
     setNotLinked(false)
     try {
-      const [skillsRes, profileRes] = await Promise.all([
+      const [skillsRes, profileRes, summariesRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`),
         fetch(`${BACKEND_URL}/api/github/profile?user_id=${userId}`),
+        fetch(`${BACKEND_URL}/api/github/repo/summaries?user_id=${userId}`),
       ])
 
       if (skillsRes.ok) {
@@ -204,13 +229,44 @@ export default function GitHubSkills({ userId }: { userId: number }) {
             ? data.language_stats.sort((a: LanguageStat, b: LanguageStat) => b.Percentage - a.Percentage).slice(0, 8)
             : []
         )
+        setRepos(Array.isArray(data.repositories) ? data.repositories : [])
       } else if (profileRes.status === 404) {
         setNotLinked(true)
+      }
+
+      if (summariesRes.ok) {
+        const data = await summariesRes.json()
+        setSummaries(Array.isArray(data) ? data : [])
       }
     } catch {
       setError('データの取得に失敗しました')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSummarizeRepo = async (fullName: string) => {
+    setSummarizingRepo(fullName)
+    setError(null)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: fullName }),
+      })
+      if (!res.ok) {
+        const msg = await res.text()
+        throw new Error(msg || `HTTP ${res.status}`)
+      }
+      const newSummary: RepoSummary = await res.json()
+      setSummaries(prev => {
+        const filtered = prev.filter(s => s.FullName !== fullName)
+        return [newSummary, ...filtered]
+      })
+    } catch (e) {
+      setError(`要約生成に失敗しました: ${e instanceof Error ? e.message : '不明なエラー'}`)
+    } finally {
+      setSummarizingRepo(null)
     }
   }
 
@@ -229,13 +285,25 @@ export default function GitHubSkills({ userId }: { userId: number }) {
 
   const handleSync = async () => {
     setSyncing(true)
+    setError(null)
+    setNeedsReauth(false)
     try {
-      await fetch(`${BACKEND_URL}/api/github/sync?user_id=${userId}`, { method: 'POST' })
-      // 非同期syncなので少し待ってから再取得
-      setTimeout(() => {
-        fetchAll().finally(() => setSyncing(false))
-      }, 3000)
+      // sync/wait で同期的に実行してスコープ不足エラーを検出する
+      const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, { method: 'POST' })
+      if (res.status === 403) {
+        const msg = await res.text()
+        setNeedsReauth(true)
+        setError(msg)
+        return
+      }
+      if (!res.ok) {
+        setError('同期に失敗しました')
+        return
+      }
+      await fetchAll()
     } catch {
+      setError('同期に失敗しました')
+    } finally {
       setSyncing(false)
     }
   }
@@ -276,14 +344,6 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     )
   }
 
-  if (error) {
-    return (
-      <Alert severity="error" sx={{ mt: 2 }}>
-        {error}
-      </Alert>
-    )
-  }
-
   const hasScores = scores.some(s => s.Score > 0)
 
   return (
@@ -301,15 +361,28 @@ export default function GitHubSkills({ userId }: { userId: number }) {
             </Typography>
           )}
         </Box>
-        <Button
-          size="small"
-          startIcon={syncing ? <CircularProgress size={14} /> : <RefreshIcon />}
-          onClick={handleSync}
-          disabled={syncing}
-          sx={{ color: '#64748b', fontSize: '0.75rem' }}
-        >
-          {syncing ? '同期中...' : '同期'}
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {profile && (
+            <Button
+              size="small"
+              startIcon={connecting ? <CircularProgress size={14} /> : <GitHubIcon />}
+              onClick={handleConnect}
+              disabled={connecting || syncing}
+              sx={{ color: '#64748b', fontSize: '0.75rem' }}
+            >
+              {connecting ? '連携中...' : '権限を更新'}
+            </Button>
+          )}
+          <Button
+            size="small"
+            startIcon={syncing ? <CircularProgress size={14} /> : <RefreshIcon />}
+            onClick={handleSync}
+            disabled={syncing}
+            sx={{ color: '#64748b', fontSize: '0.75rem' }}
+          >
+            {syncing ? '同期中...' : '同期'}
+          </Button>
+        </Box>
       </Box>
 
       {/* プロフィール統計 */}
@@ -385,10 +458,155 @@ export default function GitHubSkills({ userId }: { userId: number }) {
         )}
       </Box>
 
+      {error && (
+        <Alert
+          severity={needsReauth ? 'warning' : 'error'}
+          sx={{ mt: 2, mb: 1 }}
+          onClose={() => { setError(null); setNeedsReauth(false) }}
+          action={needsReauth ? (
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={connecting ? <CircularProgress size={14} /> : <GitHubIcon />}
+              onClick={handleConnect}
+              disabled={connecting}
+            >
+              再連携
+            </Button>
+          ) : undefined}
+        >
+          {error}
+        </Alert>
+      )}
+
       {!hasScores && !loading && (
         <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', py: 2 }}>
           スキルデータがありません。「同期」ボタンでGitHubデータを取得してください。
         </Typography>
+      )}
+
+      {/* リポジトリAI要約セクション */}
+      {profile && repos.length === 0 && !loading && (
+        <>
+          <Divider sx={{ borderColor: '#1e293b', my: 3 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <AutoAwesomeIcon sx={{ color: '#818cf8', fontSize: 18 }} />
+            <Typography variant="subtitle2" sx={{ color: '#94a3b8' }}>リポジトリAI要約</Typography>
+          </Box>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>
+            リポジトリが見つかりません。「同期」ボタンを押してGitHubデータを取得してください。
+          </Typography>
+        </>
+      )}
+      {repos.length > 0 && (
+        <>
+          <Divider sx={{ borderColor: '#1e293b', my: 3 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <AutoAwesomeIcon sx={{ color: '#818cf8', fontSize: 18 }} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#f1f5f9' }}>
+              リポジトリAI要約
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#475569', ml: 1 }}>
+              {summaries.length}/{repos.length} 件生成済み
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {repos.map(repo => {
+              const summary = summaries.find(s => s.FullName === repo.FullName)
+              const isExpanded = expandedRepo === repo.FullName
+              const isSummarizing = summarizingRepo === repo.FullName
+
+              return (
+                <Box
+                  key={repo.FullName}
+                  sx={{ bgcolor: '#1e293b', borderRadius: 1, overflow: 'hidden', border: '1px solid #334155' }}
+                >
+                  {/* リポジトリ行 */}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      px: 2,
+                      py: 1.2,
+                      gap: 1,
+                      cursor: summary ? 'pointer' : 'default',
+                    }}
+                    onClick={() => summary && setExpandedRepo(isExpanded ? false : repo.FullName)}
+                  >
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#94a3b8' }} noWrap>
+                          {repo.Name}
+                        </Typography>
+                        {repo.Language && (
+                          <Chip
+                            label={repo.Language}
+                            size="small"
+                            sx={{ bgcolor: '#0f172a', color: '#64748b', border: '1px solid #334155', fontSize: '0.65rem', height: 18 }}
+                          />
+                        )}
+                        {summary && (
+                          <Chip
+                            label="要約済み"
+                            size="small"
+                            sx={{ bgcolor: '#1e3a5f', color: '#60a5fa', fontSize: '0.65rem', height: 18 }}
+                          />
+                        )}
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+                      {summary && (
+                        <ExpandMoreIcon
+                          sx={{
+                            color: '#475569',
+                            fontSize: 18,
+                            transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                            transition: 'transform 0.2s',
+                          }}
+                        />
+                      )}
+                      <Button
+                        size="small"
+                        startIcon={isSummarizing ? <CircularProgress size={12} /> : <AutoAwesomeIcon />}
+                        onClick={e => { e.stopPropagation(); handleSummarizeRepo(repo.FullName) }}
+                        disabled={summarizingRepo !== null}
+                        sx={{
+                          color: summary ? '#475569' : '#818cf8',
+                          fontSize: '0.7rem',
+                          minWidth: 'unset',
+                          px: 1,
+                        }}
+                      >
+                        {isSummarizing ? '生成中...' : summary ? '再生成' : 'AI要約を生成'}
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  {/* 要約内容（展開時） */}
+                  {isExpanded && summary && (
+                    <Box sx={{ px: 2, pb: 2, borderTop: '1px solid #334155' }}>
+                      <Typography variant="body2" sx={{ color: '#cbd5e1', mt: 1.5, mb: 1.5 }}>
+                        {summary.SummaryText}
+                      </Typography>
+                      {[
+                        { label: '技術選定の理由', value: summary.TechReason, color: '#4FC3F7' },
+                        { label: '解決した課題', value: summary.Challenge, color: '#81C784' },
+                        { label: '成果', value: summary.Achievement, color: '#FFB74D' },
+                      ].map(item => (
+                        <Box key={item.label} sx={{ mb: 1 }}>
+                          <Typography variant="caption" sx={{ color: item.color, fontWeight: 700 }}>
+                            {item.label}
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: '#94a3b8' }}>{item.value}</Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              )
+            })}
+          </Box>
+        </>
       )}
     </Paper>
   )

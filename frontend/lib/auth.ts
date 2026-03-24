@@ -24,6 +24,7 @@ export interface User {
   email: string
   name: string
   is_guest: boolean
+  role?: 'student' | 'teacher'
   target_level?: string
   school_name?: string
   is_admin?: boolean

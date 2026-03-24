@@ -178,26 +178,36 @@ export default function AdminCompaniesPage() {
                       {company.industry || '業種未設定'} / {company.location || '所在地未設定'}
                     </Typography>
                   </Box>
-                  {company.data_status !== 'published' && (
-                    <Stack direction="row" spacing={1}>
-                      <Button
-                        variant="contained"
-                        color="success"
-                        size="small"
-                        onClick={() => handlePublish(company.id)}
-                      >
-                        承認
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        color="error"
-                        size="small"
-                        onClick={() => handleReject(company.id)}
-                      >
-                        却下
-                      </Button>
-                    </Stack>
-                  )}
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      component={Link}
+                      href={`/admin/companies/${company.id}/edit`}
+                    >
+                      編集
+                    </Button>
+                    {company.data_status !== 'published' && (
+                      <>
+                        <Button
+                          variant="contained"
+                          color="success"
+                          size="small"
+                          onClick={() => handlePublish(company.id)}
+                        >
+                          承認
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          color="error"
+                          size="small"
+                          onClick={() => handleReject(company.id)}
+                        >
+                          却下
+                        </Button>
+                      </>
+                    )}
+                  </Stack>
                 </Stack>
               </Box>
             ))}

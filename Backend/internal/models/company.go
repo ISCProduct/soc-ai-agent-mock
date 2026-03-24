@@ -30,8 +30,10 @@ type Company struct {
 	WelfareDetails string `gorm:"type:text" json:"welfare_details"`    // 福利厚生の詳細
 
 	// 技術情報
-	TechStack        string `gorm:"type:text" json:"tech_stack"`                // 使用技術スタック（JSON形式）
-	DevelopmentStyle string `gorm:"type:varchar(100)" json:"development_style"` // アジャイル、ウォーターフォールなど
+	TechStack        string `gorm:"type:text" json:"tech_stack"`                // 使用技術スタック（JSON形式: 言語・フレームワーク）
+	InfraStack       string `gorm:"type:text" json:"infra_stack"`               // インフラ構成（JSON形式: AWS/GCP/Azure等）
+	CicdTools        string `gorm:"type:text" json:"cicd_tools"`                // CI/CDツール（JSON形式: GitHub Actions/Jenkins等）
+	DevelopmentStyle string `gorm:"type:varchar(100)" json:"development_style"` // 開発手法（スクラム/ウォーターフォール等）
 
 	// ビジネス情報
 	MainBusiness string  `gorm:"type:text" json:"main_business"` // 主要事業内容

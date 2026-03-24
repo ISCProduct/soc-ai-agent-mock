@@ -4,6 +4,7 @@ import (
 	"Backend/internal/services"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -88,7 +89,8 @@ func (c *GitHubController) Sync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.githubService.TriggerAsyncSync(userID)
+	force := r.URL.Query().Get("force") == "true"
+	c.githubService.TriggerAsyncSync(userID, force)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -110,7 +112,12 @@ func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.githubService.SyncUserData(context.Background(), userID); err != nil {
+	if err := c.githubService.SyncUserData(context.Background(), userID, true); err != nil {
+		var scopeErr *services.InsufficientScopesError
+		if errors.As(err, &scopeErr) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 		http.Error(w, "sync failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -143,6 +150,64 @@ func (c *GitHubController) GetSkills(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(scores)
+}
+
+// ListRepoSummaries ユーザーのリポジトリAI要約一覧を取得する
+// GET /api/github/repo/summaries?user_id=<id>
+func (c *GitHubController) ListRepoSummaries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := parseUserID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	summaries, err := c.githubService.ListRepoSummaries(userID)
+	if err != nil {
+		http.Error(w, "failed to get repo summaries", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summaries)
+}
+
+// SummarizeRepo リポジトリのAI要約を生成・キャッシュする
+// POST /api/github/repo/summarize?user_id=<id>
+// Body: { "full_name": "owner/repo", "force_refresh": false }
+func (c *GitHubController) SummarizeRepo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := parseUserID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		FullName     string `json:"full_name"`
+		ForceRefresh bool   `json:"force_refresh"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FullName == "" {
+		http.Error(w, "full_name is required", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := c.githubService.SummarizeRepo(r.Context(), userID, body.FullName, body.ForceRefresh)
+	if err != nil {
+		http.Error(w, "summarize failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
 }
 
 func parseUserID(r *http.Request) (uint, error) {

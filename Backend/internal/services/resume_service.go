@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -676,6 +677,180 @@ func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string)
 	return response.Report, nil
 }
 
+// fetchRAGReportStream は FastAPI ストリーミングエンドポイントを呼び出し、
+// SSE レスポンスボディ (io.ReadCloser) を返す。呼び出し元がクローズする責務を持つ。
+func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, companyName, jobTitle string) (io.ReadCloser, error) {
+	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
+	if baseURL == "" {
+		return nil, errors.New("RAG_REVIEW_URL is not set")
+	}
+
+	payload := ragReviewRequest{
+		ResumeText:  resumeText,
+		CompanyName: companyName,
+		JobTitle:    jobTitle,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	url := strings.TrimRight(baseURL, "/") + "/resume/review/stream"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	// ストリーミングのためタイムアウトなし
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("rag stream request failed: status %d", resp.StatusCode)
+	}
+	return resp.Body, nil
+}
+
+// ReviewDocumentStream はドキュメントを前処理した後、SSEでRAGレポートをストリーミングし、
+// 最後にスコア・指摘事項を complete イベントとして送信する。
+func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming not supported")
+	}
+
+	sendEvent := func(v map[string]interface{}) {
+		data, _ := json.Marshal(v)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	doc, err := s.repo.FindDocumentByID(documentID)
+	if err != nil {
+		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		return err
+	}
+	if s.s3 == nil || !s.s3.isEnabled() {
+		sendEvent(map[string]interface{}{"type": "error", "message": "s3 is required"})
+		return errors.New("s3 is required")
+	}
+	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
+		msg := "応募企業名または応募職種を入力してください"
+		sendEvent(map[string]interface{}{"type": "error", "message": msg})
+		return errors.New(msg)
+	}
+
+	workDir, err := s.ensureWorkingDir(doc.ID)
+	if err != nil {
+		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		return err
+	}
+	defer os.RemoveAll(workDir)
+
+	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
+	if err != nil {
+		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		return err
+	}
+	doc.NormalizedPath = normalizedStored
+	doc.Status = "normalized"
+	_ = s.repo.UpdateDocument(doc)
+
+	blocks, err := s.extractTextBlocks(doc, pdfPath)
+	if err != nil {
+		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		return err
+	}
+	hasText := false
+	for _, b := range blocks {
+		if strings.TrimSpace(b.Text) != "" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		msg := "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"
+		sendEvent(map[string]interface{}{"type": "error", "message": msg})
+		return errors.New(msg)
+	}
+	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
+
+	text := buildResumeText(blocks, 30000)
+
+	// RAGレポートをストリーミングしつつ全文を収集する
+	var ragReport string
+	if strings.TrimSpace(companyName) != "" {
+		ragBody, ragErr := s.fetchRAGReportStream(ctx, text, companyName, jobTitle)
+		if ragErr == nil {
+			ragReport, _ = relaySSEChunks(ragBody, w, flusher)
+			ragBody.Close()
+		} else {
+			log.Printf("resume_review_stream: rag stream failed: %v", ragErr)
+		}
+	}
+
+	// スコア・指摘事項を生成
+	review, items, err := s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, ragReport)
+	if err != nil {
+		log.Printf("resume_review_stream: build score failed: %v", err)
+		var ve *ValidationError
+		if errors.As(err, &ve) {
+			sendEvent(map[string]interface{}{"type": "error", "message": ve.Message})
+		} else {
+			sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		}
+		return err
+	}
+
+	sendEvent(map[string]interface{}{
+		"type":   "complete",
+		"review": review,
+		"items":  items,
+	})
+	return nil
+}
+
+// relaySSEChunks はFastAPIからのSSEストリームを読み取り、chunk イベントをそのまま
+// クライアントに転送しつつ、全テキストを返す。
+func relaySSEChunks(body io.Reader, w io.Writer, flusher http.Flusher) (string, error) {
+	var accum strings.Builder
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := line[6:]
+
+		var event struct {
+			Type    string `json:"type"`
+			Text    string `json:"text"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "chunk":
+			accum.WriteString(event.Text)
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+			flusher.Flush()
+		case "done":
+			return accum.String(), nil
+		case "error":
+			return accum.String(), fmt.Errorf("rag stream error: %s", event.Message)
+		}
+	}
+	return accum.String(), scanner.Err()
+}
+
 func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, 30000)
 	if strings.TrimSpace(text) == "" {
@@ -693,6 +868,16 @@ func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock,
 			log.Printf("resume_review: rag report failed: %v", err)
 		}
 	}
+	return s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, companyInfo)
+}
+
+// buildReviewScoreItems はcompanyInfoを受け取りOpenAIでスコア・指摘事項を生成する。
+// fetchRAGReportStream など外部から取得したRAGレポートを直接渡す場合に使用する。
+func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+	if s.aiClient == nil {
+		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
+	}
+	text := buildResumeText(blocks, 30000)
 	if strings.TrimSpace(companyName) != "" && strings.TrimSpace(companyInfo) == "" {
 		companyPrompt := fmt.Sprintf(`企業名: %s
 採用観点（求める人物像・評価軸・事業領域）を簡潔に整理してください。

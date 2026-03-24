@@ -32,7 +32,8 @@ import {
     Description,
     AdminPanelSettings,
     RecordVoiceOver,
-
+    EditNote,
+    CalendarMonth,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
@@ -328,7 +329,7 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
 
                 <ListItem disablePadding>
                     <ListItemButton
-                        onClick={() => router.push('/profile')}
+                        onClick={() => router.push('/chat-history')}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -378,6 +379,46 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
                         </ListItemIcon>
                         <ListItemText
                             primary="面接練習"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/es-rewrite')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <EditNote color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="ESリライト・添削"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/schedule')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <CalendarMonth color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="選考スケジュール"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,

@@ -29,10 +29,14 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
+	// /health は後方互換のため維持
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
+	}
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/healthz", healthHandler)
 
 	mux.HandleFunc("/target-year", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -92,9 +96,10 @@ func main() {
 		if err != nil && (result == nil || len(result.Nodes) == 0) {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			json.NewEncoder(w).Encode(map[string]any{
-				"ok":    false,
-				"error": err.Error(),
-				"logs":  logs,
+				"ok":       false,
+				"error":    err.Error(),
+				"logs":     logs,
+				"warnings": result.Warnings,
 			})
 			return
 		}
@@ -109,6 +114,7 @@ func main() {
 			"logs":        logs,
 			"nodes":       result.Nodes,
 			"target_year": targetYear,
+			"warnings":    result.Warnings,
 		})
 	})
 

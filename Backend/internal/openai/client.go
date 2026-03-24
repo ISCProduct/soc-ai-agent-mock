@@ -15,11 +15,16 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// UsageHook はAPIコール成功時に呼ばれるコールバック。
+// model: 使用モデル名, promptTokens: 入力トークン数, completionTokens: 出力トークン数
+type UsageHook func(model string, promptTokens, completionTokens int)
+
 // Client は go-openai SDK をラップします。
 type Client struct {
 	c            *openai.Client
 	DefaultModel string
 	apiKey       string
+	OnUsage      UsageHook // オプション: コール成功時にトークン使用量を通知
 }
 
 func init() {
@@ -43,6 +48,13 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 
 	cli := openai.NewClient(key)
 	return &Client{c: cli, DefaultModel: model, apiKey: key}, nil
+}
+
+// NewWithBaseURL はテスト用コンストラクタ。baseURL を差し替えてモックサーバーを利用できる。
+func NewWithBaseURL(baseURL, model string) *Client {
+	config := openai.DefaultConfig("test-key")
+	config.BaseURL = baseURL
+	return &Client{c: openai.NewClientWithConfig(config), DefaultModel: model, apiKey: "test-key"}
 }
 
 func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
@@ -112,9 +124,14 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 	type responsesOutput struct {
 		Content []responsesContent `json:"content"`
 	}
+	type responsesUsage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
 	type responsesResponse struct {
 		Output            []responsesOutput `json:"output"`
 		OutputText        string            `json:"output_text"`
+		Usage             responsesUsage    `json:"usage"`
 		IncompleteDetails struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
@@ -129,6 +146,9 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 	var parsed responsesResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
+	}
+	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
+		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 	}
 	if strings.TrimSpace(parsed.OutputText) != "" {
 		return strings.TrimSpace(parsed.OutputText), nil
@@ -435,6 +455,9 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		if err == nil && len(resp.Choices) > 0 {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content != "" {
+				if cli.OnUsage != nil {
+					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+				}
 				return content, nil
 			}
 			lastErr = errors.New("empty response from model")

@@ -55,11 +55,31 @@ type RunRequest struct {
 	Year     int // 0 = auto-calculate
 }
 
+// ScrapeWarning represents a warning emitted during a pipeline run.
+// It is used to surface DOM-change alerts and site-level failures
+// without aborting the entire pipeline (graceful degradation).
+type ScrapeWarning struct {
+	Site    string
+	Message string
+}
+
+// Selector version constants track the CSS/JS selector schema for each scraper.
+// Increment the version whenever selectors are intentionally updated,
+// so that monitoring can distinguish intentional changes from unexpected breakage.
+const (
+	MynaviSelectorVersion     = 1 // last updated: 2024
+	RikunabiSelectorVersion   = 1 // last updated: 2024
+	CareerTasuSelectorVersion = 1 // last updated: 2024
+)
+
 // RunResult is returned by Pipeline.Run.
 type RunResult struct {
 	TargetYear int
 	Nodes      map[string]*CompanyNode // keyed by corporate_number
 	Logs       []string
+	// Warnings contains non-fatal issues such as possible DOM changes or
+	// site-level scraping failures. Callers should surface these to operators.
+	Warnings []ScrapeWarning
 }
 
 // ── Year resolution ──────────────────────────────────────────────────────────

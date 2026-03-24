@@ -16,6 +16,9 @@ func SetupCompanyRoutes(relationController *controllers.CompanyRelationControlle
 		path := strings.TrimPrefix(r.URL.Path, "/api/companies/")
 		if strings.HasSuffix(path, "/job-positions") {
 			relationController.GetCompanyJobPositions(w, r)
+		} else if !strings.Contains(path, "/") {
+			// /api/companies/{id}
+			relationController.GetCompanyByID(w, r)
 		} else {
 			http.NotFound(w, r)
 		}

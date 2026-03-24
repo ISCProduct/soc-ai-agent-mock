@@ -120,6 +120,50 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (c *ResumeController) ReviewStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	docIDStr := r.URL.Query().Get("document_id")
+	if docIDStr == "" {
+		http.Error(w, "document_id is required", http.StatusBadRequest)
+		return
+	}
+	docID, err := strconv.ParseUint(docIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid document_id", http.StatusBadRequest)
+		return
+	}
+
+	var payload struct {
+		CompanyName   string `json:"company_name"`
+		CandidateType string `json:"candidate_type"`
+		JobTitle      string `json:"job_title"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+	}
+
+	log.Printf(
+		"resume_review_stream: start document_id=%d company=%q job_title=%q",
+		docID, payload.CompanyName, payload.JobTitle,
+	)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	if err := c.resumeService.ReviewDocumentStream(r.Context(), uint(docID), payload.CompanyName, payload.JobTitle, payload.CandidateType, w); err != nil {
+		log.Printf("resume_review_stream: error document_id=%d err=%v", docID, err)
+	}
+}
+
 func (c *ResumeController) Annotated(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

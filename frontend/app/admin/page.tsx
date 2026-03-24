@@ -179,6 +179,38 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                APIコストモニタリング
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                OpenAI APIの日次・月次コストとモデル別内訳を可視化します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/costs">
+                コスト管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                スコアダッシュボード
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                ユーザー別の練習回数・平均スコア・スコア推移を一覧比較します。CSV エクスポート対応。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/dashboard">
+                ダッシュボードへ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       <Stack spacing={2}>

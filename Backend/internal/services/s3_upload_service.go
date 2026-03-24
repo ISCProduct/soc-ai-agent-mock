@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -51,10 +52,16 @@ func NewS3UploadService() (*S3UploadService, error) {
 
 // UploadFile uploads data to S3 and returns (s3Key, publicURL, error).
 func (s *S3UploadService) UploadFile(ctx context.Context, key, mimeType string, data []byte) (string, string, error) {
+	return s.UploadReader(ctx, key, mimeType, bytes.NewReader(data))
+}
+
+// UploadReader streams an io.Reader to S3 using multipart upload.
+// This avoids loading the entire file into memory and supports files larger than 32 MB.
+func (s *S3UploadService) UploadReader(ctx context.Context, key, mimeType string, r io.Reader) (string, string, error) {
 	_, err := s.uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
-		Body:        bytes.NewReader(data),
+		Body:        r,
 		ContentType: aws.String(mimeType),
 	})
 	if err != nil {

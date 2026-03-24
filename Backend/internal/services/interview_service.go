@@ -18,14 +18,15 @@ import (
 )
 
 type InterviewService struct {
-	sessionRepo  repository.InterviewSessionRepository
-	utterRepo    repository.InterviewUtteranceRepository
-	reportRepo   repository.InterviewReportRepository
-	userRepo     repository.UserRepository
-	emailService *EmailService
-	openaiClient *openai.Client
-	jobCh        chan uint
-	workerOnce   sync.Once
+	sessionRepo          repository.InterviewSessionRepository
+	utterRepo            repository.InterviewUtteranceRepository
+	reportRepo           repository.InterviewReportRepository
+	userRepo             repository.UserRepository
+	emailService         *EmailService
+	openaiClient         *openai.Client
+	realtimeUsageService *RealtimeUsageService
+	jobCh                chan uint
+	workerOnce           sync.Once
 }
 
 func NewInterviewService(
@@ -35,15 +36,17 @@ func NewInterviewService(
 	userRepo repository.UserRepository,
 	emailService *EmailService,
 	openaiClient *openai.Client,
+	realtimeUsageService *RealtimeUsageService,
 ) *InterviewService {
 	return &InterviewService{
-		sessionRepo:  sessionRepo,
-		utterRepo:    utterRepo,
-		reportRepo:   reportRepo,
-		userRepo:     userRepo,
-		emailService: emailService,
-		openaiClient: openaiClient,
-		jobCh:        make(chan uint, 100),
+		sessionRepo:          sessionRepo,
+		utterRepo:            utterRepo,
+		reportRepo:           reportRepo,
+		userRepo:             userRepo,
+		emailService:         emailService,
+		openaiClient:         openaiClient,
+		realtimeUsageService: realtimeUsageService,
+		jobCh:                make(chan uint, 100),
 	}
 }
 
@@ -142,7 +145,15 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 		session.EndedAt = &now
 	}
 	session.Status = "finished"
-	session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
+	if s.realtimeUsageService != nil {
+		if durationSec, cost, err := s.realtimeUsageService.CloseSession(sessionID, *session.EndedAt); err == nil && durationSec >= 0 {
+			session.EstimatedCostUSD = cost
+		} else {
+			session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
+		}
+	} else {
+		session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
+	}
 	if err := s.sessionRepo.Update(session); err != nil {
 		return nil, err
 	}
@@ -216,6 +227,10 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 }
 
 func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*InterviewDetailResponse, error) {
+	return s.GetSessionDetailWithRole(userID, sessionID, "student")
+}
+
+func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*InterviewDetailResponse, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -235,11 +250,159 @@ func (s *InterviewService) GetSessionDetail(userID uint, sessionID uint) (*Inter
 		}
 		report = nil
 	}
+	// 教員以外には教員用レポートを返さない
+	if report != nil && role != "teacher" {
+		sanitized := *report
+		sanitized.TeacherReportJSON = ""
+		report = &sanitized
+	}
 	return &InterviewDetailResponse{
 		Session:    *toSessionResponse(session),
 		Utterances: utterances,
 		Report:     report,
 	}, nil
+}
+
+func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.InterviewReport, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+	report, err := s.reportRepo.FindBySessionID(sessionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return report, nil
+}
+
+// PhraseSuggestion は面接回答中の弱い表現と言い換え候補を表す。
+type PhraseSuggestion struct {
+	Original    string   `json:"original"`
+	Suggestions []string `json:"suggestions"`
+}
+
+// GetPhraseSuggestions はセッションのユーザー発話を分析し、言い換え提案を返す。
+func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]PhraseSuggestion, error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return nil, errors.New("forbidden")
+	}
+	utterances, err := s.utterRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var userTexts []string
+	for _, u := range utterances {
+		if u.Role == "user" {
+			t := strings.TrimSpace(u.Text)
+			if t != "" {
+				userTexts = append(userTexts, t)
+			}
+		}
+	}
+	if len(userTexts) == 0 {
+		return []PhraseSuggestion{}, nil
+	}
+	transcript := strings.Join(userTexts, "\n")
+	systemPrompt := "あなたは就活面接コーチです。応募者の発言から改善すべき曖昧・抽象的・弱い表現を抽出し、より具体的・主体的・印象的な言い換えを提案してください。"
+	userPrompt := fmt.Sprintf(`以下は就活面接における応募者の発言です。
+改善が有効な表現を最大5件抽出し、それぞれに2〜3件の言い換え候補を提示してください。
+
+出力はJSONのみ（マークダウン不可）で以下の形式を厳守してください:
+{"suggestions": [{"original": "元の表現", "suggestions": ["言い換え1", "言い換え2"]}, ...]}
+
+応募者発言:
+%s`, transcript)
+
+	model := getEnv("INTERVIEW_REPORT_MODEL", "")
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 1000, model)
+	if err != nil {
+		return nil, err
+	}
+	raw = ExtractJSONObject(raw)
+	var payload struct {
+		Suggestions []PhraseSuggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse suggestions: %w", err)
+	}
+	return payload.Suggestions, nil
+}
+
+// InterviewTrendPoint は面接トレンド分析の1データポイント。
+type InterviewTrendPoint struct {
+	SessionID     uint      `json:"session_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	Logic         *float64  `json:"logic"`
+	Specificity   *float64  `json:"specificity"`
+	Ownership     *float64  `json:"ownership"`
+	Communication *float64  `json:"communication"`
+	Enthusiasm    *float64  `json:"enthusiasm"`
+}
+
+// GetTrend は指定ユーザーの完了済み面接セッションのスコア時系列を返す。
+// sessions は古い順（昇順）で返却されるため、フロントエンドでそのままグラフに使える。
+func (s *InterviewService) GetTrend(userID uint, limit int) ([]InterviewTrendPoint, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	// 新しい順で取得し、後で逆順にする（古い順でグラフ描画するため）
+	sessions, err := s.sessionRepo.ListFinishedByUser(userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	// 古い順に並べ替え
+	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
+		sessions[i], sessions[j] = sessions[j], sessions[i]
+	}
+
+	points := make([]InterviewTrendPoint, 0, len(sessions))
+	for _, session := range sessions {
+		report, err := s.reportRepo.FindBySessionID(session.ID)
+		if err != nil {
+			// レポート未生成のセッションはスキップ
+			continue
+		}
+		var scores map[string]float64
+		if err := json.Unmarshal([]byte(report.ScoresJSON), &scores); err != nil {
+			continue
+		}
+		pt := InterviewTrendPoint{
+			SessionID: session.ID,
+			CreatedAt: session.CreatedAt,
+		}
+		if v, ok := scores["logic"]; ok {
+			vv := v
+			pt.Logic = &vv
+		}
+		if v, ok := scores["specificity"]; ok {
+			vv := v
+			pt.Specificity = &vv
+		}
+		if v, ok := scores["ownership"]; ok {
+			vv := v
+			pt.Ownership = &vv
+		}
+		if v, ok := scores["communication"]; ok {
+			vv := v
+			pt.Communication = &vv
+		}
+		if v, ok := scores["enthusiasm"]; ok {
+			vv := v
+			pt.Enthusiasm = &vv
+		}
+		points = append(points, pt)
+	}
+	return points, nil
 }
 
 func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error) {
@@ -252,6 +415,15 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	}
 	if session.Status == "finished" {
 		return "", errors.New("session already finished")
+	}
+	if s.realtimeUsageService != nil {
+		allowed, active, maxAllowed, err := s.realtimeUsageService.CanOpenNewConnection()
+		if err != nil {
+			return "", err
+		}
+		if !allowed {
+			return "", fmt.Errorf("realtime capacity exceeded: active=%d limit=%d", active, maxAllowed)
+		}
 	}
 	lang := session.Language
 	if lang == "" {
@@ -285,6 +457,11 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	resp, err := s.openaiClient.CreateRealtimeClientSecret(ctx, req)
 	if err != nil {
 		return "", err
+	}
+	if s.realtimeUsageService != nil {
+		if err := s.realtimeUsageService.EnsureSessionStarted(userID, sessionID); err != nil {
+			return "", err
+		}
 	}
 	return resp.ClientSecret.Value, nil
 }
@@ -481,6 +658,37 @@ func (s *InterviewService) isAllowed(actorID uint, ownerID uint) bool {
 	return user.IsAdmin
 }
 
+// buildTranscript formats utterances into a plain-text transcript for the LLM prompt.
+// AI turns are labeled "Interviewer" and user turns are labeled "User".
+func BuildTranscript(utterances []models.InterviewUtterance) string {
+	var b strings.Builder
+	for _, u := range utterances {
+		role := "User"
+		if u.Role == "ai" {
+			role = "Interviewer"
+		}
+		b.WriteString(role)
+		b.WriteString(": ")
+		b.WriteString(strings.TrimSpace(u.Text))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// extractJSONObject strips surrounding markdown code fences and extracts the
+// outermost JSON object from an LLM response.
+// Some models wrap their output in ```json ... ``` even when instructed not to.
+func ExtractJSONObject(raw string) string {
+	s := strings.TrimSpace(raw)
+	if start := strings.Index(s, "{"); start > 0 {
+		s = s[start:]
+	}
+	if end := strings.LastIndex(s, "}"); end >= 0 && end < len(s)-1 {
+		s = s[:end+1]
+	}
+	return s
+}
+
 func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) error {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
@@ -498,26 +706,18 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	if len(utterances) == 0 {
 		// utterances が0件の場合は空レポートを保存して正常終了
 		empty := &models.InterviewReport{
-			SessionID:    sessionID,
-			SummaryText:  "発話データがありませんでした。",
-			ScoresJSON:   `{"logic":0,"specificity":0,"ownership":0}`,
-			EvidenceJSON: `{}`,
+			SessionID:         sessionID,
+			SummaryText:       "発話データがありませんでした。",
+			ScoresJSON:        `{"logic":0,"specificity":0,"ownership":0,"communication":0,"enthusiasm":0}`,
+			EvidenceJSON:      `{}`,
+			StrengthsJSON:     `[]`,
+			ImprovementsJSON:  `[]`,
+			TeacherReportJSON: `{}`,
 		}
 		return s.reportRepo.Upsert(empty)
 	}
-	var transcriptBuilder strings.Builder
-	for _, u := range utterances {
-		role := "User"
-		if u.Role == "ai" {
-			role = "Interviewer"
-		}
-		transcriptBuilder.WriteString(role)
-		transcriptBuilder.WriteString(": ")
-		transcriptBuilder.WriteString(strings.TrimSpace(u.Text))
-		transcriptBuilder.WriteString("\n")
-	}
-	transcript := transcriptBuilder.String()
-	systemPrompt := "あなたは就職面接の評価者です。面接ログを読んで、応募者の回答を客観的に評価し、JSONのみで返してください。"
+	transcript := BuildTranscript(utterances)
+	systemPrompt := buildReportSystemPrompt(lang)
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
 
@@ -525,50 +725,80 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 - logic（論理性）: 回答が筋道立っているか、主張に一貫性があるか
 - specificity（具体性）: 具体的なエピソードや数値が含まれているか
 - ownership（主体性）: 「私が〜した」という自分起点の表現があるか
+- communication（コミュニケーション力）: 簡潔・明確に伝えられているか、聞き返しが少ないか
+- enthusiasm（積極性・熱意）: 志望動機や意欲が伝わっているか
 
 ## 出力フォーマット（このキーと型を厳守してください）
 {
-  "summary": ["評価コメント1", "評価コメント2", "評価コメント3"],
-  "scores": {"logic": 3, "specificity": 2, "ownership": 4},
-  "evidence": {"logic": "論理性の根拠となった発言", "specificity": "具体性の根拠となった発言", "ownership": "主体性の根拠となった発言"}
+  "summary": "面接全体の総合評価コメント（2〜3文、生徒向けのやさしい言葉で）",
+  "scores": {"logic": 3, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
+  "evidence": {
+    "logic": "論理性の根拠となった発言",
+    "specificity": "具体性の根拠となった発言",
+    "ownership": "主体性の根拠となった発言",
+    "communication": "コミュニケーション力の根拠となった発言",
+    "enthusiasm": "積極性・熱意の根拠となった発言"
+  },
+  "strengths": ["強み1", "強み2", "強み3"],
+  "improvements": ["改善点1", "改善点2", "改善点3"],
+  "teacher": {
+    "overall_comment": "教員向け総評（指導観点・クラス内での位置づけ等）",
+    "detailed_evidence": {"logic": "詳細な根拠と指導ポイント", "specificity": "詳細な根拠と指導ポイント", "ownership": "詳細な根拠と指導ポイント"},
+    "coaching_points": ["具体的な改善指導ポイント1", "ポイント2", "ポイント3"],
+    "strengths_for_teacher": ["指導者が把握すべき強み1", "強み2"],
+    "next_steps": ["次回面接に向けた具体的な課題1", "課題2"]
+  }
 }
 
-※ summaryは最大5件で日本語の簡潔な文章。scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
+※ teacher以下は教員専用の詳細情報として出力してください。
 
 Interview transcript:
 %s`, lang, transcript)
 
 	model := getEnv("INTERVIEW_REPORT_MODEL", "")
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 1000, model)
+	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 	if err != nil {
 		return err
 	}
+	type teacherReport struct {
+		OverallComment      string            `json:"overall_comment"`
+		DetailedEvidence    map[string]string `json:"detailed_evidence"`
+		CoachingPoints      []string          `json:"coaching_points"`
+		StrengthsForTeacher []string          `json:"strengths_for_teacher"`
+		NextSteps           []string          `json:"next_steps"`
+	}
 	type reportPayload struct {
-		Summary  []string          `json:"summary"`
-		Scores   map[string]int    `json:"scores"`
-		Evidence map[string]string `json:"evidence"`
-	}
-	// markdown コードブロック除去（モデルによっては ```json ... ``` で包まれることがある）
-	cleaned := strings.TrimSpace(raw)
-	if idx := strings.Index(cleaned, "{"); idx > 0 {
-		cleaned = cleaned[idx:]
-	}
-	if idx := strings.LastIndex(cleaned, "}"); idx >= 0 && idx < len(cleaned)-1 {
-		cleaned = cleaned[:idx+1]
+		Summary      string            `json:"summary"`
+		Scores       map[string]int    `json:"scores"`
+		Evidence     map[string]string `json:"evidence"`
+		Strengths    []string          `json:"strengths"`
+		Improvements []string          `json:"improvements"`
+		Teacher      *teacherReport    `json:"teacher"`
 	}
 	var payload reportPayload
+	cleaned := ExtractJSONObject(raw)
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return fmt.Errorf("invalid report json: %w", err)
 	}
-	summaryText := strings.Join(payload.Summary, "\n")
 	scoresJSON, _ := json.Marshal(payload.Scores)
 	evidenceJSON, _ := json.Marshal(payload.Evidence)
+	strengthsJSON, _ := json.Marshal(payload.Strengths)
+	improvementsJSON, _ := json.Marshal(payload.Improvements)
+	teacherJSON := []byte("{}")
+	if payload.Teacher != nil {
+		teacherJSON, _ = json.Marshal(payload.Teacher)
+	}
 
 	report := &models.InterviewReport{
-		SessionID:    sessionID,
-		SummaryText:  summaryText,
-		ScoresJSON:   string(scoresJSON),
-		EvidenceJSON: string(evidenceJSON),
+		SessionID:         sessionID,
+		SummaryText:       payload.Summary,
+		ScoresJSON:        string(scoresJSON),
+		EvidenceJSON:      string(evidenceJSON),
+		StrengthsJSON:     string(strengthsJSON),
+		ImprovementsJSON:  string(improvementsJSON),
+		TeacherReportJSON: string(teacherJSON),
 	}
 	return s.reportRepo.Upsert(report)
 }

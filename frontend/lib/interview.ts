@@ -42,11 +42,22 @@ export type InterviewUtterance = {
   created_at: string
 }
 
+export type TeacherReport = {
+  overall_comment: string
+  detailed_evidence: Record<string, string>
+  coaching_points: string[]
+  strengths_for_teacher: string[]
+  next_steps: string[]
+}
+
 export type InterviewReport = {
   session_id: number
   summary_text: string
   scores_json: string
   evidence_json: string
+  strengths_json?: string
+  improvements_json?: string
+  teacher_report_json?: string  // 教員のみ返却
   created_at: string
   updated_at: string
 }
@@ -55,6 +66,21 @@ export type InterviewDetail = {
   session: InterviewSession
   utterances: InterviewUtterance[]
   report?: InterviewReport
+}
+
+export type InterviewTrendPoint = {
+  session_id: number
+  created_at: string
+  logic: number | null
+  specificity: number | null
+  ownership: number | null
+  communication: number | null
+  enthusiasm: number | null
+}
+
+export type PhraseSuggestion = {
+  original: string
+  suggestions: string[]
 }
 
 export const interviewApi = {
@@ -97,8 +123,16 @@ export const interviewApi = {
     if (!res.ok) throw new Error(await res.text())
   },
 
-  async getDetail(sessionId: number, userId: number): Promise<InterviewDetail> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}`)
+  async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
+    const roleParam = role ? `&role=${role}` : ''
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`)
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+
+  async getReport(sessionId: number, userId: number): Promise<InterviewReport | null> {
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`)
+    if (res.status === 404) return null
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
@@ -120,6 +154,21 @@ export const interviewApi = {
     return data.client_secret
   },
 
+  async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    return data.suggestions as PhraseSuggestion[]
+  },
+
+  async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
+    const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
+    const res = await fetch(`${BACKEND_URL}/api/interviews/trend${params}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    return data.points as InterviewTrendPoint[]
+  },
+
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/send-report`, {
       method: 'POST',
@@ -130,16 +179,40 @@ export const interviewApi = {
     return res.json()
   },
 
-  async uploadVideo(sessionId: number, userId: number, blob: Blob): Promise<{ video_id: number; status: string }> {
-    const form = new FormData()
-    form.append('user_id', String(userId))
-    form.append('video', blob, `interview_${sessionId}.webm`)
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/upload-video`, {
-      method: 'POST',
-      body: form,
+  uploadVideo(
+    sessionId: number,
+    userId: number,
+    blob: Blob,
+    onProgress?: (percent: number) => void,
+  ): Promise<{ video_id: number; status: string }> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('user_id', String(userId))
+      form.append('video', blob, `interview_${sessionId}.webm`)
+
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${BACKEND_URL}/api/interviews/${sessionId}/upload-video`)
+
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 100))
+          }
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText))
+        } else {
+          reject(new Error(xhr.responseText || `アップロードに失敗しました (HTTP ${xhr.status})`))
+        }
+      }
+      xhr.onerror = () => reject(new Error('ネットワークエラーが発生しました。接続を確認してください'))
+      xhr.ontimeout = () => reject(new Error('アップロードがタイムアウトしました'))
+      xhr.timeout = 30 * 60 * 1000 // 30分
+      xhr.send(form)
     })
-    if (!res.ok) throw new Error(await res.text())
-    return res.json()
   },
 }
 

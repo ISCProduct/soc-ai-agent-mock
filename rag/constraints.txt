@@ -1,12 +1,51 @@
-embedchain==0.1.114
-langchain==0.2.17
-langchain-community==0.2.19
-langchain-core==0.2.43
-langchain-openai==0.1.25
-langchain-text-splitters==0.2.4
-chromadb==0.4.24
-numpy<2.0
-litellm==1.44.22
-openai==1.66.0
-tiktoken==0.7.0
-httpx==0.27.2
+# ============================================================
+# RAG サービス 依存バージョン制約ファイル
+#
+# このファイルは `pip install -r requirements.txt -c constraints.txt` で使用される。
+# 直接依存・推移的依存のバージョン上限/下限を制御し、
+# 破壊的変更やセキュリティ問題を防ぐための制約を記述する。
+#
+# 更新履歴:
+#   - 2024: 初期固定 (LangChain 0.2.x, chromadb 0.4.x)
+#   - 2026-03: langchain 0.3.x へ更新、chromadb 0.5.x へ更新 (#135)
+# ============================================================
+
+# --- LangChain エコシステム ---
+# crewai の推移的依存。crewai 0.60+ は langchain 0.3.x をサポート済み。
+# 0.4.x 以降は API 破壊的変更の可能性があるため上限を設定。
+langchain>=0.3.0,<0.4
+langchain-community>=0.3.0,<0.4
+langchain-core>=0.3.0,<0.4
+# langchain-openai 0.2.x が langchain 0.3.x に対応するバージョン系列
+langchain-openai>=0.2.0,<0.4
+langchain-text-splitters>=0.3.0,<0.4
+
+# --- ベクトルストア ---
+# main.py で PersistentClient / get_or_create_collection / upsert / query を直接利用。
+# これらの API は 0.5.x でも互換性あり。
+# chromadb 0.4.x には修正済みの潜在的脆弱性が含まれる可能性があるため 0.5.x 以降に移行。
+# 1.0 以降は破壊的変更のリスクがあるため上限を設定。
+chromadb>=0.5.0,<1.0
+
+# --- 数値計算 ---
+# numpy 2.0 以降で chromadb および一部パッケージとの互換性問題が報告されているため上限を維持。
+numpy<3.0
+
+# --- LLM プロキシ ---
+# litellm は crewai の推移的依存。メジャーバージョン固定で API 互換性を保証。
+litellm>=1.44.22,<2.0
+
+# --- OpenAI SDK ---
+# Dockerfile 内の検証スクリプトが client.responses API の存在を確認しており、
+# この API は openai>=1.66.0 で利用可能。メジャーバージョン変更時は要検証。
+openai>=1.66.0,<2.0
+
+# --- トークナイザー ---
+# tiktoken: OpenAI エンコーダーとのバイト互換を保つため 0.7.x に固定。
+# 0.8.x 以降はエンコーディング変更の可能性あり、アップグレード時は動作確認が必要。
+tiktoken>=0.7.0,<0.13
+
+# --- HTTP クライアント ---
+# httpx 0.28.x 以降で openai SDK との互換性問題が生じた実績があるため 0.27.x に固定。
+# openai SDK 側で httpx>=0.28 対応が確認されたら上限を緩和可能。
+httpx>=0.27.0,<0.28

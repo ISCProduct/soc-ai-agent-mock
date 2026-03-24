@@ -18,16 +18,23 @@ type Company = {
   name: string
   industry: string
   location: string
+  employee_count?: number
   employees: string
   description: string
   matchScore: number
   tags: string[]
+  tech_stack?: string
   techStack: string[]
+  infra_stack?: string
+  cicd_tools?: string
+  development_style?: string
   projectTypes: string[]
   salary: string
   benefits: string[]
   culture: string[]
+  founded_year?: number
   founded: string
+  website_url?: string
   website: string
   size: string
   parentCompany?: string
@@ -35,6 +42,16 @@ type Company = {
   partnerships?: string[]
   capitalStructure?: {
     shareholders: { name: string; percentage: number }[]
+  }
+}
+
+function parseJsonArray(s?: string): string[] {
+  if (!s) return []
+  try {
+    const parsed = JSON.parse(s)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return s.split(',').map((x) => x.trim()).filter(Boolean)
   }
 }
 
@@ -67,6 +84,18 @@ export default function CompanyDetailPage() {
 
         if (response.ok) {
           const data = await response.json()
+          // DB形式のフィールドをUI向けに補完
+          data.techStack = parseJsonArray(data.tech_stack)
+          data.matchScore = data.matchScore ?? 0
+          data.tags = data.tags ?? []
+          data.projectTypes = data.projectTypes ?? []
+          data.salary = data.salary ?? ''
+          data.benefits = data.benefits ?? []
+          data.culture = data.culture ? (Array.isArray(data.culture) ? data.culture : [data.culture]) : []
+          data.founded = data.founded_year ? `${data.founded_year}年` : ''
+          data.website = data.website_url ?? ''
+          data.employees = data.employee_count ? `${data.employee_count}名` : ''
+          data.size = data.employee_count ? `${data.employee_count}名規模` : ''
           setCompany(data)
         } else {
           console.error('Failed to fetch company details:', response.statusText)
@@ -216,12 +245,46 @@ export default function CompanyDetailPage() {
                 技術スタック
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {company.techStack.map((tech, index) => (
-                  <Badge key={index} variant="outline">{tech}</Badge>
-                ))}
-              </div>
+            <CardContent className="space-y-3">
+              {company.techStack.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">言語・フレームワーク</p>
+                  <div className="flex flex-wrap gap-2">
+                    {company.techStack.map((tech, index) => (
+                      <Badge key={index} variant="outline">{tech}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {parseJsonArray(company.infra_stack).length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">インフラ</p>
+                  <div className="flex flex-wrap gap-2">
+                    {parseJsonArray(company.infra_stack).map((item, index) => (
+                      <Badge key={index} variant="secondary">{item}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {parseJsonArray(company.cicd_tools).length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">CI/CD</p>
+                  <div className="flex flex-wrap gap-2">
+                    {parseJsonArray(company.cicd_tools).map((item, index) => (
+                      <Badge key={index} variant="secondary">{item}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {company.development_style && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">開発手法</p>
+                  <Badge>{company.development_style}</Badge>
+                </div>
+              )}
+              {company.techStack.length === 0 && !company.infra_stack && !company.cicd_tools && (
+                <p className="text-sm text-muted-foreground">技術情報未登録</p>
+              )}
             </CardContent>
           </Card>
 

@@ -79,6 +79,10 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.StartTurn(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/report") {
+		c.GetReport(w, r)
+		return
+	}
 	if strings.HasSuffix(path, "/send-report") {
 		c.SendReport(w, r)
 		return
@@ -87,7 +91,117 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 		c.UploadVideo(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/phrase-suggestions") {
+		c.GetPhraseSuggestions(w, r)
+		return
+	}
 	c.Get(w, r)
+}
+
+// GetTrend は GET /api/interviews/trend?user_id=X&limit=N を処理し、
+// 完了済みセッションのスコア時系列を返す。
+func (c *InterviewController) GetTrend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	points, err := c.interviewService.GetTrend(uint(userID), limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"points": points,
+	})
+}
+
+func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/report")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	report, err := c.interviewService.GetReport(uint(userID), sessionID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "forbidden" {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if report == nil {
+		http.Error(w, "report not yet available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+func (c *InterviewController) GetPhraseSuggestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/phrase-suggestions")
+	if err != nil {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	suggestions, err := c.interviewService.GetPhraseSuggestions(r.Context(), uint(userID), sessionID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "forbidden" {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"suggestions": suggestions,
+	})
 }
 
 func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +236,9 @@ func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(map[string]string{"message": "レポートをメールで送信しました"})
 }
 
+// maxVideoSize は受け付ける動画の最大サイズ（500 MB）
+const maxVideoSize = 500 << 20
+
 func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -133,11 +250,18 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 32 MB limit
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+	if c.videoRepo == nil || c.s3Service == nil {
+		http.Error(w, "video upload service not configured", http.StatusServiceUnavailable)
 		return
 	}
+
+	// メモリには最大 10 MB を確保し、それ以上は一時ファイルに書き出す
+	// これにより 32 MB 超の動画もメモリ不足なく受信できる
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "リクエストの解析に失敗しました。ファイルが破損しているか、サイズが大きすぎます", http.StatusBadRequest)
+		return
+	}
+
 	userIDStr := r.FormValue("user_id")
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil || userID == 0 {
@@ -147,25 +271,20 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 
 	file, header, err := r.FormFile("video")
 	if err != nil {
-		http.Error(w, "video file required", http.StatusBadRequest)
+		http.Error(w, "動画ファイルが見つかりません", http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
-	if err != nil {
-		http.Error(w, "Failed to read video", http.StatusInternalServerError)
+
+	// ファイルサイズ上限チェック
+	if header.Size > maxVideoSize {
+		file.Close()
+		http.Error(w, fmt.Sprintf("動画ファイルが大きすぎます（上限 %d MB）。録画設定を下げて再度お試しください", maxVideoSize>>20), http.StatusRequestEntityTooLarge)
 		return
 	}
 
 	mimeType := header.Header.Get("Content-Type")
 	if mimeType == "" {
 		mimeType = "video/webm"
-	}
-
-	// Persist record first
-	if c.videoRepo == nil || c.s3Service == nil {
-		http.Error(w, "video upload service not configured", http.StatusServiceUnavailable)
-		return
 	}
 
 	now := time.Now()
@@ -176,26 +295,28 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 		SessionID:     sessionID,
 		UserID:        uint(userID),
 		FileName:      fileName,
-		FileSizeBytes: int64(len(data)),
+		FileSizeBytes: header.Size,
 		MimeType:      mimeType,
 		Status:        "uploading",
 	}
 	if err := c.videoRepo.Create(r.Context(), videoRecord); err != nil {
-		http.Error(w, "Failed to create video record", http.StatusInternalServerError)
+		file.Close()
+		http.Error(w, "動画レコードの作成に失敗しました", http.StatusInternalServerError)
 		return
 	}
 
-	// Upload to S3 asynchronously
-	go func(vid *models.InterviewVideo, fileData []byte, key string) {
+	// S3 へのアップロードを非同期で実行（io.Reader をそのまま渡してメモリを節約）
+	go func(vid *models.InterviewVideo, f io.ReadCloser, key string) {
+		defer f.Close()
 		ctx := context.Background()
-		fileID, s3URL, uploadErr := c.s3Service.UploadFile(ctx, key, vid.MimeType, fileData)
+		fileID, s3URL, uploadErr := c.s3Service.UploadReader(ctx, key, vid.MimeType, f)
 		uploadedAt := time.Now()
 		if uploadErr != nil {
-			c.videoRepo.UpdateStatus(ctx, vid.ID, "error", uploadErr.Error(), "", "", nil)
+			c.videoRepo.UpdateStatus(ctx, vid.ID, "error", fmt.Sprintf("S3へのアップロードに失敗しました: %v", uploadErr), "", "", nil)
 			return
 		}
 		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
-	}(videoRecord, data, s3Key)
+	}(videoRecord, file, s3Key)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -455,7 +576,11 @@ func (c *InterviewController) Get(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid user_id", http.StatusBadRequest)
 		return
 	}
-	resp, err := c.interviewService.GetSessionDetail(uint(userID), sessionID)
+	role := r.URL.Query().Get("role")
+	if role == "" {
+		role = "student"
+	}
+	resp, err := c.interviewService.GetSessionDetailWithRole(uint(userID), sessionID, role)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {

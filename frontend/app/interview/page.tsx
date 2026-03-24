@@ -1,13 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useRef, useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Box,
   Button,
   Chip,
   CircularProgress,
-  Divider,
   Drawer,
   IconButton,
   InputBase,
@@ -36,7 +35,9 @@ import ApartmentIcon from '@mui/icons-material/Apartment'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
+import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import ThreeAvatar from './components/ThreeAvatar'
+import InterviewSummary from './components/InterviewSummary'
 
 const PRIMARY = '#ec5b13'
 const BG_LIGHT = '#f8f6f6'
@@ -85,8 +86,9 @@ const POSITIONS: Position[] = [
   { id: 'qa', title: 'テスト・品質保証（QA）', department: 'SIer / QA', icon: '✅', questions: 6, category: 'sier' },
 ]
 
-export default function InterviewPage() {
+function InterviewContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState<'selection' | 'lobby' | 'connecting' | 'connected' | 'error' | 'finished'>('selection')
@@ -119,11 +121,15 @@ export default function InterviewPage() {
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
   const [webSearchLoading, setWebSearchLoading] = useState(false)
   const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
+  const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[] } | null>(null)
+  const [hintsLoading, setHintsLoading] = useState(false)
 
   const [isRecording, _setIsRecording] = useState(false)
   const [turnPending, _setTurnPending] = useState(false)
 
   const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0)
+  const [videoSizeWarning, setVideoSizeWarning] = useState<string | null>(null)
 
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -134,6 +140,8 @@ export default function InterviewPage() {
   const videoChunksRef = useRef<Blob[]>([])
   const historyRef = useRef<{ role: string; content: string }[]>([])
   const aiAudioRef = useRef<HTMLAudioElement | null>(null)
+  const aiAudioCtxRef = useRef<AudioContext | null>(null)
+  const aiLevelRafRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sessionStartRef = useRef<number | null>(null)
@@ -154,6 +162,20 @@ export default function InterviewPage() {
     setUser(storedUser)
     setLoading(false)
   }, [router])
+
+  // マッチング結果から遷移した場合: URL パラメータで企業を事前選択してロビーへ
+  useEffect(() => {
+    const companyName = searchParams.get('company_name')
+    const industry = searchParams.get('industry')
+    const companyId = searchParams.get('company_id')
+    if (!companyName || loading) return
+    setInterviewCompany({
+      id: companyId ? parseInt(companyId, 10) : 0,
+      name: companyName,
+      industry: industry || undefined,
+    })
+    setStatus('lobby')
+  }, [loading, searchParams])
 
   // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
@@ -176,6 +198,25 @@ export default function InterviewPage() {
     }, companySearch ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 企業別面接傾向ヒント取得
+  useEffect(() => {
+    if (!interviewCompany?.name) { setCompanyHints(null); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      setHintsLoading(true)
+      fetch('/api/companies/interview-hints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_name: interviewCompany.name, position: selectedPosition.title }),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (!cancelled && data) setCompanyHints(data) })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setHintsLoading(false) })
+    }, 600)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [interviewCompany?.name, selectedPosition.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // WEB検索
   useEffect(() => {
@@ -244,7 +285,8 @@ export default function InterviewPage() {
   useEffect(() => {
     if (!handsFreeMode || status !== 'connected' || !streamRef.current) return
     const VAD_THRESHOLD = 0.015   // 発話検知の音量閾値 (RMS)
-    const SILENCE_MS = 1500       // この無音時間が続いたら自動送信
+    const SILENCE_MS = 2500       // この無音時間が続いたら自動送信（長めに設定して途切れ防止）
+    const MIN_RECORDING_MS = 1000 // 録音開始後この時間は自動停止しない（息継ぎなどで誤停止しない）
     const audioCtx = new AudioContext()
     const source = audioCtx.createMediaStreamSource(streamRef.current)
     const analyser = audioCtx.createAnalyser()
@@ -252,6 +294,7 @@ export default function InterviewPage() {
     source.connect(analyser)
     const buf = new Float32Array(analyser.fftSize)
     let silenceStart: number | null = null
+    let recordingStartTime: number | null = null
     let rafId: number
     const tick = () => {
       rafId = requestAnimationFrame(tick)
@@ -261,15 +304,22 @@ export default function InterviewPage() {
       if (speaking) {
         silenceStart = null
         if (!isRecordingRef.current && !turnPendingRef.current && !aiSpeakingRef.current) {
+          recordingStartTime = Date.now()
           startRecording()
         }
       } else if (isRecordingRef.current) {
+        // 録音開始直後の短い無音（息継ぎ等）では止めない
+        const elapsed = recordingStartTime ? Date.now() - recordingStartTime : Infinity
+        if (elapsed < MIN_RECORDING_MS) return
         if (silenceStart === null) {
           silenceStart = Date.now()
         } else if (Date.now() - silenceStart > SILENCE_MS) {
           silenceStart = null
+          recordingStartTime = null
           stopRecording()
         }
+      } else {
+        silenceStart = null
       }
     }
     rafId = requestAnimationFrame(tick)
@@ -277,15 +327,15 @@ export default function InterviewPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handsFreeMode, status])
 
-  const formatSeconds = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  const parseJsonSafe = (v?: string) => { try { return v ? JSON.parse(v) : null } catch { return null } }
-
   const cleanupConnection = () => {
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
     }
     if (aiAudioRef.current) { aiAudioRef.current.pause(); aiAudioRef.current.src = '' }
+    if (aiLevelRafRef.current !== null) { cancelAnimationFrame(aiLevelRafRef.current); aiLevelRafRef.current = null }
+    if (aiAudioCtxRef.current) { aiAudioCtxRef.current.close().catch(() => {}); aiAudioCtxRef.current = null }
+    setAiLevel(0)
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
     setIsRecording(false); setTurnPending(false); setAiSpeaking(false)
   }
@@ -302,61 +352,54 @@ export default function InterviewPage() {
     }, 1000)
   }
 
-  const parseStartError = (error: any): string => {
-    const msg: string = error?.message || ''
-    if (msg.includes('NotAllowedError') || msg.toLowerCase().includes('denied'))
-      return 'マイクとカメラへのアクセスが拒否されました。ブラウザのアドレスバー横から権限を許可してください。'
-    if (msg.includes('NotFoundError'))
-      return 'マイクまたはカメラが見つかりません。デバイスが正しく接続されているか確認してください。'
-    if (msg.toLowerCase().includes('unauthorized') || msg.includes('401'))
-      return 'AIサービスへの接続に失敗しました。（OpenAI APIキーを確認してください）'
-    return msg || '接続に失敗しました。ネットワークを確認して再試行してください。'
-  }
-
-  const parseMultipart = async (res: Response): Promise<{ meta: Record<string, string>; audio: Blob }> => {
-    const ct = res.headers.get('content-type') || ''
-    const m = ct.match(/boundary=([^\s;]+)/)
-    if (!m) throw new Error('No boundary in multipart response')
-    const boundary = '--' + m[1]
-    const buf = await res.arrayBuffer()
-    const bytes = new Uint8Array(buf)
-
-    const findPattern = (needle: Uint8Array, from: number): number => {
-      outer: for (let i = from; i <= bytes.length - needle.length; i++) {
-        for (let j = 0; j < needle.length; j++) { if (bytes[i + j] !== needle[j]) continue outer }
-        return i
-      }
-      return -1
-    }
-    const enc = new TextEncoder()
-    const boundaryBytes = enc.encode(boundary)
-    const crlfcrlf = enc.encode('\r\n\r\n')
-
-    const b1 = findPattern(boundaryBytes, 0)
-    const h1End = findPattern(crlfcrlf, b1 + boundaryBytes.length)
-    const b2 = findPattern(boundaryBytes, h1End + 4)
-    const jsonBytes = bytes.slice(h1End + 4, b2 - 2)
-    const meta = JSON.parse(new TextDecoder().decode(jsonBytes).trim())
-
-    const h2End = findPattern(crlfcrlf, b2 + boundaryBytes.length)
-    const endBound = enc.encode(boundary + '--')
-    const bEnd = findPattern(endBound, h2End + 4)
-    const audioEnd = bEnd !== -1 ? bEnd - 2 : bytes.length
-    const audio = new Blob([bytes.slice(h2End + 4, audioEnd)], { type: 'audio/mpeg' })
-
-    return { meta, audio }
-  }
-
   const playAudioBlob = (blob: Blob): Promise<void> => {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(blob)
-      const el = aiAudioRef.current || new Audio()
+      // Always create a fresh Audio element so createMediaElementSource can be called each time
+      const el = new Audio()
       aiAudioRef.current = el
       el.src = url
       setAiSpeaking(true)
-      el.onended = () => { setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.onerror = () => { setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.play().catch(() => { setAiSpeaking(false); resolve() })
+
+      // Set up AudioContext for real-time amplitude analysis (drives aiLevel / lipsync)
+      let rafId: number | null = null
+      try {
+        if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
+          aiAudioCtxRef.current = new AudioContext()
+        }
+        const ctx = aiAudioCtxRef.current
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+
+        const source   = ctx.createMediaElementSource(el)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 512
+        analyser.smoothingTimeConstant = 0.6
+        source.connect(analyser)
+        analyser.connect(ctx.destination)
+
+        const timeData = new Uint8Array(analyser.fftSize)
+        const trackLevel = () => {
+          analyser.getByteTimeDomainData(timeData)
+          let sum = 0
+          for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
+          const rms = Math.sqrt(sum / timeData.length)
+          setAiLevel(Math.min(1, rms * 6))
+          rafId = requestAnimationFrame(trackLevel)
+        }
+        rafId = requestAnimationFrame(trackLevel)
+        aiLevelRafRef.current = rafId
+      } catch { /* AudioContext not supported – lipsync disabled */ }
+
+      const cleanup = () => {
+        if (rafId !== null) cancelAnimationFrame(rafId)
+        if (aiLevelRafRef.current !== null) cancelAnimationFrame(aiLevelRafRef.current)
+        aiLevelRafRef.current = null
+        setAiLevel(0)
+      }
+
+      el.onended = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
+      el.onerror = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
+      el.play().catch(() => { cleanup(); setAiSpeaking(false); resolve() })
     })
   }
 
@@ -375,7 +418,7 @@ export default function InterviewPage() {
       }),
     })
     if (!res.ok) throw new Error(await res.text())
-    const { meta, audio } = await parseMultipart(res)
+    const { meta, audio } = await parseMultipartResponse(res)
     const aiText: string = meta.ai_text || ''
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
@@ -424,7 +467,13 @@ export default function InterviewPage() {
         try {
           const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'
           videoChunksRef.current = []
-          const vr = new MediaRecorder(stream, { mimeType })
+          // ビットレートを制限して 10 分録画でも約 25 MB 以内に収める
+          // video: 300 kbps + audio: 32 kbps ≈ 332 kbps → 10 分 ≈ 24.9 MB
+          const vr = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: 300_000,
+            audioBitsPerSecond: 32_000,
+          })
           vr.ondataavailable = (e) => { if (e.data.size > 0) videoChunksRef.current.push(e.data) }
           vr.start(1000)
           videoRecorderRef.current = vr
@@ -435,7 +484,7 @@ export default function InterviewPage() {
       await doStartTurn(created.id, user.user_id)
     } catch (error: any) {
       setStatus('error')
-      setErrorMessage(parseStartError(error))
+      setErrorMessage(parseMediaError(error))
       cleanupConnection()
     }
   }
@@ -470,9 +519,20 @@ export default function InterviewPage() {
 
       // Upload video asynchronously
       if (videoBlob) {
+        const MB = 1024 * 1024
+        const sizeMB = (videoBlob.size / MB).toFixed(1)
+        if (videoBlob.size > 200 * MB) {
+          setVideoSizeWarning(`動画サイズが ${sizeMB} MB と非常に大きいです。アップロードに時間がかかる場合があります。`)
+        }
         setVideoUploadStatus('uploading')
-        interviewApi.uploadVideo(currentSession.id, currentUser.user_id, videoBlob)
-          .then(() => setVideoUploadStatus('done'))
+        setVideoUploadProgress(0)
+        interviewApi.uploadVideo(
+          currentSession.id,
+          currentUser.user_id,
+          videoBlob,
+          (percent) => setVideoUploadProgress(percent),
+        )
+          .then(() => { setVideoUploadStatus('done'); setVideoSizeWarning(null) })
           .catch(() => setVideoUploadStatus('error'))
       }
     }
@@ -497,7 +557,7 @@ export default function InterviewPage() {
   const setAiSpeaking = (v: boolean) => { aiSpeakingRef.current = v; _setAiSpeaking(v) }
 
   const startRecording = () => {
-    if (!streamRef.current || isRecording || turnPending) return
+    if (!streamRef.current || isRecordingRef.current || turnPendingRef.current) return
     const audioTracks = streamRef.current.getAudioTracks()
     if (audioTracks.length === 0) return
     const micStream = new MediaStream(audioTracks)
@@ -538,7 +598,7 @@ export default function InterviewPage() {
         body: formData,
       })
       if (!res.ok) throw new Error(await res.text())
-      const { meta, audio } = await parseMultipart(res)
+      const { meta, audio } = await parseMultipartResponse(res)
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
       if (userText) {
@@ -578,8 +638,6 @@ export default function InterviewPage() {
   const isActive = status === 'connecting' || status === 'connected'
   const isConnected = status === 'connected'
   const progress = Math.min(100, Math.round(((interviewLimits.maxMinutes * 60 - remainingSeconds) / (interviewLimits.maxMinutes * 60)) * 100))
-  const scores = report ? parseJsonSafe(report.scores_json) : null
-  const evidence = report ? parseJsonSafe(report.evidence_json) : null
   const isFemale = avatarGender === 'female'
   const companyName = interviewCompany?.name || 'AI面接練習'
   const latestAiText = partialAi || (utterances.filter(u => u.role === 'ai').slice(-1)[0]?.text ?? '')
@@ -905,6 +963,52 @@ export default function InterviewPage() {
                   </Stack>
                 </Paper>
 
+                {/* 企業別面接傾向ヒント */}
+                {interviewCompany && (
+                  <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #fcd34d', bgcolor: '#fffbeb' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <LightbulbIcon sx={{ fontSize: 18, color: '#d97706' }} />
+                      <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#92400e' }}>
+                        {interviewCompany.name} の面接傾向
+                      </Typography>
+                    </Box>
+                    {hintsLoading ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CircularProgress size={14} sx={{ color: '#d97706' }} />
+                        <Typography sx={{ fontSize: 12, color: '#92400e' }}>傾向を調査中...</Typography>
+                      </Box>
+                    ) : companyHints && (companyHints.style_tags.length > 0 || companyHints.top_questions.length > 0) ? (
+                      <Stack spacing={1.5}>
+                        {companyHints.style_tags.length > 0 && (
+                          <Box>
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>面接スタイル</Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {companyHints.style_tags.map((tag, i) => (
+                                <Chip key={i} label={tag} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, fontSize: 11, border: '1px solid #fcd34d' }} />
+                              ))}
+                            </Box>
+                          </Box>
+                        )}
+                        {companyHints.top_questions.length > 0 && (
+                          <Box>
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>よく聞かれる質問</Typography>
+                            <Stack spacing={0.5}>
+                              {companyHints.top_questions.map((q, i) => (
+                                <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                                  <Typography sx={{ fontSize: 11, fontWeight: 700, color: PRIMARY, minWidth: 16 }}>{i + 1}.</Typography>
+                                  <Typography sx={{ fontSize: 12, color: '#78350f', lineHeight: 1.5 }}>{q}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
+                      </Stack>
+                    ) : (
+                      <Typography sx={{ fontSize: 12, color: '#92400e' }}>企業を選択すると面接傾向を表示します。</Typography>
+                    )}
+                  </Paper>
+                )}
+
                 <Button
                   variant="contained"
                   fullWidth
@@ -1025,6 +1129,13 @@ export default function InterviewPage() {
 
             {/* Join panel */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'center', lg: 'flex-start' }, textAlign: { xs: 'center', lg: 'left' } }}>
+              {searchParams.get('company_name') && (
+                <Box sx={{ mb: 2, px: 2, py: 1, bgcolor: '#e8f5e9', borderRadius: 2, border: '1px solid #a5d6a7', width: '100%', maxWidth: 340 }}>
+                  <Typography sx={{ fontSize: 13, color: '#2e7d32', fontWeight: 600 }}>
+                    {interviewCompany?.name}（{interviewCompany?.industry || '業種未設定'}）向けの面接練習を始めます
+                  </Typography>
+                </Box>
+              )}
               <Typography variant="h4" sx={{ fontWeight: 400, color: '#202124', mb: 1 }}>
                 準備はできましたか？
               </Typography>
@@ -1107,41 +1218,7 @@ export default function InterviewPage() {
 
           {reportStatus === 'ready' && report && (
             <Stack spacing={2}>
-              <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-                <Typography sx={{ color: PRIMARY, fontWeight: 700, mb: 1 }}>要約</Typography>
-                <Typography variant="body2" sx={{ color: '#bdc1c6', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
-                  {report.summary_text || '要約がありません'}
-                </Typography>
-              </Paper>
-              <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-                <Typography sx={{ color: PRIMARY, fontWeight: 700, mb: 1.5 }}>評価スコア</Typography>
-                {scores ? (
-                  <Stack spacing={1}>
-                    {Object.entries(scores).map(([k, v]) => (
-                      <Box key={k} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ color: '#bdc1c6' }}>{k}</Typography>
-                        <Chip label={String(v)} size="small" sx={{ bgcolor: '#3c4043', color: '#e8eaed', fontWeight: 700 }} />
-                      </Box>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Typography variant="body2" sx={{ color: '#bdc1c6', whiteSpace: 'pre-line' }}>{report.scores_json}</Typography>
-                )}
-              </Paper>
-              {evidence && (
-                <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-                  <Typography sx={{ color: PRIMARY, fontWeight: 700, mb: 1.5 }}>根拠</Typography>
-                  <Stack spacing={1.5}>
-                    {Object.entries(evidence).map(([k, v]) => (
-                      <Box key={k}>
-                        <Typography variant="body2" sx={{ color: '#9aa0a6', fontWeight: 600 }}>{k}</Typography>
-                        <Typography variant="body2" sx={{ color: '#bdc1c6', lineHeight: 1.6 }}>{String(v)}</Typography>
-                        <Divider sx={{ mt: 1, borderColor: 'rgba(255,255,255,0.06)' }} />
-                      </Box>
-                    ))}
-                  </Stack>
-                </Paper>
-              )}
+              <InterviewSummary report={report} userId={user?.user_id} theme="dark" />
               <Button
                 variant="outlined"
                 fullWidth
@@ -1174,11 +1251,23 @@ export default function InterviewPage() {
           {/* Video upload status */}
           {videoUploadStatus !== 'idle' && (
             <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
-              <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6' }}>
-                {videoUploadStatus === 'uploading' && '動画をGoogle Driveにアップロード中...'}
+              {videoSizeWarning && (
+                <Typography variant="caption" sx={{ color: '#fdd663', display: 'block', mb: 1 }}>
+                  ⚠ {videoSizeWarning}
+                </Typography>
+              )}
+              <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6', mb: videoUploadStatus === 'uploading' ? 1 : 0 }}>
+                {videoUploadStatus === 'uploading' && `動画をアップロード中... ${videoUploadProgress}%`}
                 {videoUploadStatus === 'done' && '✓ 動画のアップロードが完了しました'}
-                {videoUploadStatus === 'error' && '動画のアップロードに失敗しました'}
+                {videoUploadStatus === 'error' && '動画のアップロードに失敗しました。ネットワーク接続を確認してください'}
               </Typography>
+              {videoUploadStatus === 'uploading' && (
+                <LinearProgress
+                  variant="determinate"
+                  value={videoUploadProgress}
+                  sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
+                />
+              )}
             </Paper>
           )}
         </Box>
@@ -1273,12 +1362,6 @@ export default function InterviewPage() {
               </Typography>
             </Box>
 
-            {/* Subtitle overlay */}
-            {captionsVisible && latestAiText && (
-              <Box sx={{ position: 'absolute', bottom: 48, left: '50%', transform: 'translateX(-50%)', maxWidth: '85%', bgcolor: 'rgba(0,0,0,0.72)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
-                <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
-              </Box>
-            )}
 
             {/* Error overlay */}
             {status === 'error' && (
@@ -1299,6 +1382,13 @@ export default function InterviewPage() {
               </Box>
             )}
           </Box>
+
+          {/* Subtitle below avatar frame */}
+          {captionsVisible && latestAiText && (
+            <Box sx={{ mx: 1, mt: -0.5, mb: 0.5, bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
+              <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
+            </Box>
+          )}
 
           {/* User camera tile */}
           <Box sx={{ position: 'relative', aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden', bgcolor: '#3c4043', boxShadow: `0 0 0 2px rgba(236,91,19,0.3), 0 8px 32px rgba(0,0,0,0.4)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1561,4 +1651,12 @@ function getNextAvatarGender(): 'male' | 'female' {
   } catch {
     return 'male'
   }
+}
+
+export default function InterviewPage() {
+  return (
+    <Suspense fallback={null}>
+      <InterviewContent />
+    </Suspense>
+  )
 }

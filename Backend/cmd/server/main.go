@@ -11,6 +11,7 @@ import (
 	"Backend/internal/services"
 	"log"
 	"net/http"
+	"os"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -28,7 +29,30 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// checkAnnotationFont はサーバー起動時に PDF アノテーション用フォントの存在を確認し、
+// 設定に問題がある場合は警告ログを出力する。
+// フォントが存在しない場合もサーバー起動は継続するが、PDF 注釈が劣化する旨を明示する。
+func checkAnnotationFont() {
+	fontPath := os.Getenv("ANNOTATION_FONT_PATH")
+	if fontPath == "" {
+		log.Println("WARNING: ANNOTATION_FONT_PATH が設定されていません。" +
+			"フォールバックフォントを使用します（日本語注釈が正常に表示されない可能性があります）。" +
+			"環境変数 ANNOTATION_FONT_PATH にフォントパスを設定してください。")
+		return
+	}
+	if _, err := os.Stat(fontPath); os.IsNotExist(err) {
+		log.Printf("WARNING: ANNOTATION_FONT_PATH のフォントが見つかりません: %q\n"+
+			"PDF注釈の日本語レビューページが生成されない場合があります。\n"+
+			"Dockerfileで fonts-noto-cjk がインストールされているか確認してください。", fontPath)
+		return
+	}
+	log.Printf("INFO: PDF アノテーションフォント確認済み: %q", fontPath)
+}
+
 func main() {
+	// PDF アノテーションフォントの存在チェック（起動時警告）
+	checkAnnotationFont()
+
 	// 設定を読み込む（環境変数の読み込みはconfig.LoadConfig内で実施）
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -99,12 +123,21 @@ func main() {
 	// GitHub連携
 	githubRepo := repositories.NewGitHubRepository(db)
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
+	// APIコストモニタリング
+	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
+	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
+	apiCostService := services.NewAPICostService(apiCallLogRepo)
+	realtimeUsageService := services.NewRealtimeUsageService(realtimeUsageRepo, emailService)
+	// OpenAI APIコール時にトークン使用量をロギング
+	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
+		apiCostService.LogCall(model, promptTokens, completionTokens)
+	}
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
-	githubService := services.NewGitHubService(githubRepo, skillScoreService)
+	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
@@ -122,7 +155,7 @@ func main() {
 		matchRepo,
 		nil,
 	)
-	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient)
+	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	interviewService.StartWorker()
 
 	// コントローラー層の初期化
@@ -131,16 +164,17 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil)
+	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil, aiClient)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
+	// gBizINFO 公式 API を使った企業データ収集パイプライン
+	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
+	gbizToken := os.Getenv("GBIZINFO_API_TOKEN")
 	companyGraphPipeline := &scraper.Pipeline{
-		Mynavi:     scraper.NewMynaviScraper(""),
-		Rikunabi:   scraper.NewRikunabiScraper(),
-		CareerTasu: scraper.NewCareerTasuScraper(),
-		Threshold:  0.75,
+		GBiz:      scraper.NewGBizClient("", gbizToken),
+		Threshold: 0.75,
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)
@@ -154,26 +188,40 @@ func main() {
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
+	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
+	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
+	esRewriteController := controllers.NewESRewriteController(aiClient)
+	scheduleRepo := repositories.NewScheduleRepository(db)
+	scheduleService := services.NewScheduleService(scheduleRepo)
+	scheduleController := controllers.NewScheduleController(scheduleService)
+	esReviewController := controllers.NewESReviewController()
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, userRepo)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, userRepo)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
+	routes.SetupESRoutes(esRewriteController, esReviewController)
+	routes.SetupScheduleRoutes(scheduleController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
 
 	// ヘルスチェックエンドポイント
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
+	// /health は後方互換のため維持
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+		w.Write([]byte(`{"status":"ok"}`))
+	}
+	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/healthz", healthHandler)
 
 	// サーバー起動
 	port := cfg.ServerPort

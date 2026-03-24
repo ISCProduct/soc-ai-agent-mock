@@ -217,15 +217,31 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 	}
 
 	// フロントエンド用のレスポンス形式に変換
+	type CategoryScores struct {
+		Technical     float64 `json:"technical"`
+		Teamwork      float64 `json:"teamwork"`
+		Leadership    float64 `json:"leadership"`
+		Creativity    float64 `json:"creativity"`
+		Stability     float64 `json:"stability"`
+		Growth        float64 `json:"growth"`
+		WorkLife      float64 `json:"work_life"`
+		Challenge     float64 `json:"challenge"`
+		Detail        float64 `json:"detail"`
+		Communication float64 `json:"communication"`
+	}
+
 	type CompanyRecommendation struct {
-		ID           int      `json:"id"`
-		CategoryName string   `json:"category_name"` // 企業名
-		Score        int      `json:"score"`         // マッチスコア
-		Reason       string   `json:"reason"`        // マッチ理由
-		Industry     string   `json:"industry"`
-		Location     string   `json:"location"`
-		Employees    string   `json:"employees"`
-		TechStack    []string `json:"tech_stack"`
+		ID             int            `json:"id"`
+		MatchID        uint           `json:"match_id"`      // マッチングレコードID（お気に入り操作に使用）
+		CategoryName   string         `json:"category_name"` // 企業名
+		Score          int            `json:"score"`         // マッチスコア
+		Reason         string         `json:"reason"`        // マッチ理由
+		Industry       string         `json:"industry"`
+		Location       string         `json:"location"`
+		Employees      string         `json:"employees"`
+		TechStack      []string       `json:"tech_stack"`
+		CategoryScores CategoryScores `json:"category_scores"`
+		IsFavorited    bool           `json:"is_favorited"`
 	}
 
 	type RecommendationResponse struct {
@@ -261,6 +277,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 		items = append(items, CompanyRecommendation{
 			ID:           int(match.Company.ID),
+			MatchID:      match.ID,
 			CategoryName: match.Company.Name,
 			Score:        int(match.MatchScore),
 			Reason:       services.BuildMatchReason(match, userScores),
@@ -268,6 +285,19 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 			Location:     match.Company.Location,
 			Employees:    employeeCount,
 			TechStack:    techStack,
+			IsFavorited:  match.IsFavorited,
+			CategoryScores: CategoryScores{
+				Technical:     match.TechnicalMatch,
+				Teamwork:      match.TeamworkMatch,
+				Leadership:    match.LeadershipMatch,
+				Creativity:    match.CreativityMatch,
+				Stability:     match.StabilityMatch,
+				Growth:        match.GrowthMatch,
+				WorkLife:      match.WorkLifeMatch,
+				Challenge:     match.ChallengeMatch,
+				Detail:        match.DetailMatch,
+				Communication: match.CommunicationMatch,
+			},
 		})
 	}
 
@@ -279,6 +309,30 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// ToggleFavorite お気に入りをトグル (POST /api/chat/favorite)
+func (c *ChatController) ToggleFavorite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		MatchID uint `json:"match_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
+		http.Error(w, "match_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := c.matchingService.ToggleFavorite(req.MatchID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 // GetAnalysisSummary 4分析スコアと進捗を取得

@@ -1,10 +1,11 @@
+import json
 import logging
 import math
 import os
 import re
 import threading
 import time
-from typing import List, Optional, Tuple
+from typing import Generator, List, Optional, Tuple
 
 import chromadb
 import tiktoken
@@ -12,6 +13,7 @@ from crewai import Agent, Task, Crew, Process
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import RatelimitException
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 import openai as openai_module
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -401,13 +403,145 @@ def run_crewai(
     return str(crew.kickoff())
 
 
+class CompanyHintsRequest(BaseModel):
+    company_name: str = Field(min_length=1)
+    position: str = Field(default="")
+
+
+class CompanyHintsResponse(BaseModel):
+    style_tags: List[str]
+    top_questions: List[str]
+    cached: bool = False
+
+
+def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
+    """Chat Completions API の web search 専用モデルで面接傾向を調査する。
+    参照: https://platform.openai.com/docs/guides/tools-web-search
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    client = OpenAI(api_key=api_key)
+    # web search 専用モデル (Chat Completions API) を使用
+    # 対応モデル: gpt-4o-search-preview, gpt-4o-mini-search-preview
+    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o-search-preview")
+    role_text = position or "一般職"
+    prompt = (
+        f"以下の企業の面接について、実際の選考体験・口コミをウェブで調べて日本語で整理してください。\n\n"
+        f"企業名: {company_name}\n"
+        f"職種: {role_text}\n\n"
+        "以下の2点を簡潔にまとめてください:\n"
+        "1. 面接スタイルの特徴（例: ケース面接の有無、深掘り質問の傾向、グループディスカッションの有無など）\n"
+        "2. よく聞かれる質問トップ5\n\n"
+        "情報が見つからない場合は「情報なし」と返してください。"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800,
+        )
+        text = response.choices[0].message.content or ""
+        logger.info("hints web search finished company=%s chars=%d model=%s", company_name, len(text), model)
+        return text.strip() if text.strip() else None
+    except Exception as exc:
+        logger.warning("hints web search failed company=%s model=%s error=%s", company_name, model, exc)
+        return None
+
+
+def _parse_hints_from_text(company_name: str, position: str, research_text: str) -> CompanyHintsResponse:
+    """調査テキストから構造化ヒントを抽出する。"""
+    import json as _json
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return CompanyHintsResponse(style_tags=[], top_questions=[])
+    client = OpenAI(api_key=api_key)
+    # 構造化JSON抽出には通常の chat モデルを使用（search-preview は json_object 非対応）
+    model = os.getenv("OPENAI_HINTS_PARSE_MODEL", "gpt-4o")
+    role_text = position or "一般職"
+    system_prompt = (
+        "あなたは就活生向けの面接アドバイザーです。"
+        "提供されたリサーチ結果をもとに、以下の2項目をJSON形式で返してください。\n"
+        "1. style_tags: 面接スタイルの特徴を示す短いタグ（例: ケース面接あり, 志望動機深掘り, グループディスカッション, 逆質問重視）を最大5件\n"
+        "2. top_questions: よく聞かれる質問トップ5（日本語の質問文として）\n"
+        "JSONのみを返し、説明文は不要です。フォーマット: {\"style_tags\": [...], \"top_questions\": [...]}"
+    )
+    user_prompt = (
+        f"企業名: {company_name}\n"
+        f"職種: {role_text}\n\n"
+        f"リサーチ結果:\n{research_text[:3000]}"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=600,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        data = _json.loads(raw)
+        return CompanyHintsResponse(
+            style_tags=data.get("style_tags", [])[:5],
+            top_questions=data.get("top_questions", [])[:5],
+        )
+    except Exception as exc:
+        logger.warning("hints parse failed error=%s", exc)
+        return CompanyHintsResponse(style_tags=[], top_questions=[])
+
+
+@app.post("/company/hints", response_model=CompanyHintsResponse)
+def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
+    role_label = request.position or "一般職"
+    cache_key = "hints::{company}::{role}".format(
+        company=request.company_name, role=role_label
+    )
+
+    # キャッシュヒット: そのまま構造化して返す
+    retrieved = get_cached_context(
+        cache_key, query=f"{request.company_name} 面接 よく聞かれる質問"
+    )
+    if retrieved:
+        result = _parse_hints_from_text(request.company_name, role_label, "\n\n".join(retrieved))
+        result.cached = True
+        return result
+
+    # 1. OpenAI responses API + web_search（最新モデル）で調査
+    research_text = _run_hints_web_search(request.company_name, role_label)
+
+    # 2. responses API が使えない場合は DuckDuckGo フォールバック
+    if not research_text and ALLOW_DDG_FALLBACK:
+        query = f"{request.company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
+        results, rate_limited = run_search(query, limit=6)
+        if results:
+            docs = build_context(results)
+            research_text = "\n\n".join(docs)
+        elif rate_limited:
+            logger.warning("duckduckgo rate limited for company hints company=%s", request.company_name)
+
+    if research_text:
+        set_cached_context(cache_key, [research_text])
+
+    return _parse_hints_from_text(request.company_name, role_label, research_text or "")
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/resume/review", response_model=ReviewResponse)
-def review_resume(request: ReviewRequest) -> ReviewResponse:
+# /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
+# /health は後方互換のため維持
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok"}
+
+
+def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
+    """RAGコンテキストを収集し (docs, context_source) を返す。"""
     role_label = request.job_title or "指定なし"
     cache_key = "{company}::{role}".format(company=request.company_name, role=role_label)
     context_source = "none"
@@ -454,6 +588,90 @@ def review_resume(request: ReviewRequest) -> ReviewResponse:
                     retrieved = docs[:5]
                 context_source = "duckduckgo"
 
+    return retrieved, context_source
+
+
+@app.post("/resume/review/stream")
+def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
+    """RAGレポートをSSEでストリーミング配信するエンドポイント。"""
+    role_label = request.job_title or "指定なし"
+
+    # コンテキスト収集（キャッシュ/DeepResearch/DDG）
+    retrieved, context_source = _gather_context(request)
+
+    source_labels = {
+        "deep_research": "OpenAI Deep Research（o3-deep-research）",
+        "duckduckgo": "DuckDuckGo ウェブ検索",
+        "cache": "chromadb キャッシュ（以前の検索結果）",
+        "none": "事前学習データのみ（外部検索なし）",
+    }
+    source_label = source_labels.get(context_source, context_source)
+
+    def generate() -> Generator[str, None, None]:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            yield "data: {}\n\n".format(json.dumps({"type": "error", "message": "OPENAI_API_KEY not set"}, ensure_ascii=False))
+            return
+
+        model = os.getenv("OPENAI_REVIEW_MODEL", "gpt-4o-mini")
+        context_block = "\n\n".join(retrieved) if retrieved else "（外部情報なし）"
+
+        prompt = (
+            "以下の企業の採用観点に照らして、候補者の履歴書のレビューレポートを日本語で作成してください。\n\n"
+            "【企業名】{company}\n"
+            "【職種】{role}\n"
+            "【企業情報（参考）】\n{context}\n\n"
+            "【履歴書テキスト】\n{resume}\n\n"
+            "以下のフォーマットに従って出力してください:\n\n"
+            "【企業別レビュー報告書】\n---\n"
+            "#### ■ 対象企業\n{company}\n\n"
+            "#### ■ この企業が求めている核心的要素\n- ...\n\n"
+            "#### ■ 履歴書の最適化アドバイス\n"
+            "- **強みの再定義**: ...\n"
+            "- **不足している情報の補足**: ...\n\n"
+            "#### ■ 職種別アドバイス（{role}）\n"
+            "この職種特有の評価ポイントを3点以上、具体的に記述してください。\n\n"
+            "#### ■ 修正後の自己PRイメージ\n...\n\n"
+            "#### ■ 情報の信頼度・参照元\n"
+            "- 情報ソース: {source}\n"
+            "- 注意: 外部情報に基づく内容は変化する可能性があります。最新情報は企業公式サイトで確認してください。\n"
+        ).format(
+            company=request.company_name,
+            role=role_label,
+            context=context_block,
+            resume=request.resume_text[:10000],
+            source=source_label,
+        )
+
+        try:
+            client = OpenAI(api_key=api_key)
+            stream = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "あなたはプロのキャリアアドバイザーです。"},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+                max_tokens=1500,
+                temperature=0.3,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield "data: {}\n\n".format(json.dumps({"type": "chunk", "text": delta.content}, ensure_ascii=False))
+            yield "data: {}\n\n".format(json.dumps({"type": "done"}, ensure_ascii=False))
+        except Exception as exc:
+            logger.error("review_stream generate error: %s", exc)
+            yield "data: {}\n\n".format(json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False))
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.post("/resume/review", response_model=ReviewResponse)
+def review_resume(request: ReviewRequest) -> ReviewResponse:
+    role_label = request.job_title or "指定なし"
+    retrieved, context_source = _gather_context(request)
+
     report = run_crewai(
         resume_text=request.resume_text,
         company_name=request.company_name,
@@ -463,3 +681,115 @@ def review_resume(request: ReviewRequest) -> ReviewResponse:
     )
 
     return ReviewResponse(report=report)
+
+
+# ── ES添削エンドポイント ──────────────────────────────────────────────────────
+
+
+class ESReviewRequest(BaseModel):
+    es_text: str = Field(min_length=1)
+    question_type: str = Field(default="その他")
+    company_name: str = Field(default="")
+
+
+class ESReviewResponse(BaseModel):
+    specificity_score: int            # 1-10: 具体性
+    star_score: int                   # 1-10: STAR法準拠
+    company_fit_score: Optional[int]  # 1-10: 企業適合性（企業名なしは null）
+    length_balance_score: int         # 1-10: 文字数バランス
+    feedback: str                     # 全体フィードバック文
+    improved_text: str                # 改善後テキスト
+
+
+def _run_es_review(
+    es_text: str,
+    question_type: str,
+    company_name: str,
+    context_docs: List[str],
+) -> ESReviewResponse:
+    import json as _json
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
+    client = OpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
+    has_company = bool(company_name.strip())
+    context_text = "\n\n".join(context_docs) if context_docs else ""
+    company_section = (
+        f"\n\n【企業情報】\n{context_text[:2000]}" if context_text else ""
+    )
+    company_fit_key = (
+        '"company_fit_score": <1-10の整数: 企業の価値観・求める人物像との適合度>'
+        if has_company
+        else '"company_fit_score": null'
+    )
+    system_prompt = (
+        "あなたは就職活動の専門アドバイザーです。"
+        "学生のES文章を添削し、以下のJSONのみを返してください。説明文は不要です。"
+    )
+    user_prompt = (
+        f"【質問種別】{question_type}\n"
+        f"【ES文章】\n{es_text}"
+        + (f"\n\n【志望企業】{company_name}" if has_company else "")
+        + company_section
+        + f"""
+
+以下のJSONフォーマットで添削結果を返してください:
+{{
+  "specificity_score": <1-10の整数: 具体的な数値・エピソード・固有名詞が含まれているか>,
+  "star_score": <1-10の整数: Situation/Task/Action/Resultの構造が揃っているか>,
+  {company_fit_key},
+  "length_balance_score": <1-10の整数: 文字数・各要素のバランスが適切か>,
+  "feedback": "<具体性・STAR準拠・企業適合性・文字数について200字以内でアドバイス>",
+  "improved_text": "<元の文章を改善したバージョン（元の文字数の110〜130%を目安）>"
+}}"""
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1200,
+            response_format={"type": "json_object"},
+        )
+        data = _json.loads(resp.choices[0].message.content or "{}")
+        company_fit = data.get("company_fit_score")
+        if company_fit is not None:
+            company_fit = max(1, min(10, int(company_fit)))
+        return ESReviewResponse(
+            specificity_score=max(1, min(10, int(data.get("specificity_score", 5)))),
+            star_score=max(1, min(10, int(data.get("star_score", 5)))),
+            company_fit_score=company_fit,
+            length_balance_score=max(1, min(10, int(data.get("length_balance_score", 5)))),
+            feedback=str(data.get("feedback", "")),
+            improved_text=str(data.get("improved_text", "")),
+        )
+    except Exception as exc:
+        logger.warning("es review failed error=%s", exc)
+        raise HTTPException(status_code=500, detail=f"ES review failed: {exc}")
+
+
+@app.post("/es/review", response_model=ESReviewResponse)
+def es_review(request: ESReviewRequest) -> ESReviewResponse:
+    context_docs: List[str] = []
+    if request.company_name.strip():
+        cache_key = "{company}::es_review".format(company=request.company_name)
+        context_docs = get_cached_context(
+            cache_key, query=f"{request.company_name} 求める人物像 採用 価値観"
+        )
+        if not context_docs and ALLOW_DDG_FALLBACK:
+            query = f"{request.company_name} 求める人物像 大切にしている価値観 採用"
+            results, _ = run_search(query, limit=5)
+            if results:
+                context_docs = build_context(results)
+                set_cached_context(cache_key, context_docs)
+
+    return _run_es_review(
+        es_text=request.es_text,
+        question_type=request.question_type,
+        company_name=request.company_name,
+        context_docs=context_docs,
+    )
