@@ -231,6 +231,22 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
 
                 <Divider sx={{mb: 2}}/>
 
+                {/* 今日やること（推奨フロー） */}
+                {progress.overall < 100 && (
+                    <Box sx={{ mb: 2, p: 1.5, bgcolor: '#fff8f5', borderRadius: 1, border: '1px solid #ffcc99' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec5b13', display: 'block', mb: 0.5 }}>
+                            今日やること
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555' }}>
+                            {progress.overall === 0
+                                ? '① 自己分析チャットを始めましょう'
+                                : progress.overall < 80
+                                    ? '① チャットを続けて分析を完成させましょう'
+                                    : '② マッチング結果を確認しましょう'}
+                        </Typography>
+                    </Box>
+                )}
+
                 <Typography variant="h6" sx={{fontWeight: 600, mb: 1}}>
                     AI分析進捗
                 </Typography>
