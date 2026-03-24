@@ -125,10 +125,12 @@ func main() {
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
+	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
 	apiCostService := services.NewAPICostService(apiCallLogRepo)
+	realtimeUsageService := services.NewRealtimeUsageService(realtimeUsageRepo, emailService)
 	// OpenAI APIコール時にトークン使用量をロギング
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
@@ -153,7 +155,7 @@ func main() {
 		matchRepo,
 		nil,
 	)
-	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient)
+	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	interviewService.StartWorker()
 
 	// コントローラー層の初期化
@@ -186,7 +188,7 @@ func main() {
 	realtimeController := controllers.NewRealtimeController(interviewService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
-	adminCostsController := controllers.NewAdminCostsController(apiCostService)
+	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)

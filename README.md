@@ -89,6 +89,10 @@ OPENAI_REALTIME_MODEL=gpt-realtime
 OPENAI_REALTIME_VOICE=alloy
 OPENAI_REALTIME_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_REALTIME_MAX_OUTPUT_TOKENS=120
+REALTIME_MAX_CONCURRENT_CONNECTIONS=30
+REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200
+# REALTIME_ALERT_EMAILS=ops@example.com,admin@example.com
+# REALTIME_ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx/yyy/zzz
 
 # 面接レポート
 INTERVIEW_REPORT_MODEL=gpt-4o-mini
@@ -270,7 +274,7 @@ tiktoken==0.7.0
 | 面接 | `POST /api/interviews/{id}/start` | セッション開始 |
 | 面接 | `POST /api/interviews/{id}/upload-video` | 動画 S3 アップロード（32MB 上限） |
 | 面接 | `POST /api/interviews/{id}/send-report` | レポートメール送信 |
-| Realtime | `GET /api/realtime/token` | WebRTC トークン取得 |
+| Realtime | `POST /api/realtime/token` | WebRTC トークン取得 |
 | 職務経歴書 | `POST /api/resume/upload` | 職務経歴書アップロード |
 | 職務経歴書 | `GET /api/resume/review` | RAG レビュー取得 |
 | 企業 | `GET /api/companies` | 企業一覧・検索 |

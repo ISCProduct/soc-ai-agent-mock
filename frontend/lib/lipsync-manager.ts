@@ -46,8 +46,8 @@ export class LipsyncManager {
   private audioContext: AudioContext | null = null
   private analyser: AnalyserNode | null = null
   private sourceNode: MediaStreamAudioSourceNode | null = null
-  private freqData: Uint8Array | null = null
-  private timeData: Uint8Array | null = null
+  private freqData: Uint8Array<ArrayBuffer> | null = null
+  private timeData: Uint8Array<ArrayBuffer> | null = null
   private animationFrameId: number | null = null
 
   // Current viseme state — smoothed toward target each frame
