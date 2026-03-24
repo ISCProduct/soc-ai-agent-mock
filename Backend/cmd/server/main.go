@@ -136,6 +136,7 @@ func main() {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
 	}
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
+	authService.SetDB(db)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
 	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)

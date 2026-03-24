@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
+	"Backend/internal/models"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -12,16 +13,59 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type AuthService struct {
 	userRepo     repository.UserRepository
 	pendingRepo  repository.PendingRegistrationRepository
 	emailService *EmailService
+	db           *gorm.DB
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
 	return &AuthService{userRepo: userRepo, pendingRepo: pendingRepo, emailService: emailService}
+}
+
+// SetDB はアカウント削除に使用する DB を設定する
+func (s *AuthService) SetDB(db *gorm.DB) {
+	s.db = db
+}
+
+// DeleteAccount ユーザーアカウントとその全データを削除する（個人情報保護法第28条対応）
+func (s *AuthService) DeleteAccount(userID uint) error {
+	if s.db == nil {
+		return errors.New("database not configured")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// チャット履歴・重みスコア
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ChatMessage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserWeightScore{}).Error; err != nil {
+			return err
+		}
+		// マッチング結果
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserCompanyMatch{}).Error; err != nil {
+			return err
+		}
+		// 面接セッション・発話・レポート・動画
+		var sessionIDs []uint
+		tx.Model(&models.InterviewSession{}).Where("user_id = ?", userID).Pluck("id", &sessionIDs)
+		if len(sessionIDs) > 0 {
+			tx.Where("session_id IN ?", sessionIDs).Delete(&models.InterviewUtterance{})
+			tx.Where("session_id IN ?", sessionIDs).Delete(&models.InterviewReport{})
+			tx.Where("session_id IN ?", sessionIDs).Delete(&models.InterviewVideo{})
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.InterviewSession{}).Error; err != nil {
+			return err
+		}
+		// ユーザー本体
+		if err := tx.Delete(&models.User{}, userID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // RegisterRequest ユーザー登録リクエスト
