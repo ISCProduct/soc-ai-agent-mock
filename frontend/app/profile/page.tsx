@@ -16,6 +16,10 @@ import {
   Typography,
   Alert,
   Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material'
 import PersonIcon from '@mui/icons-material/Person'
 import SchoolIcon from '@mui/icons-material/School'
@@ -40,6 +44,8 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
   const [isFirstTime, setIsFirstTime] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -98,6 +104,24 @@ export default function ProfilePage() {
       setError(err instanceof Error ? err.message : '保存に失敗しました')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    if (!user) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.text()
+        setError(err || 'アカウント削除に失敗しました')
+        return
+      }
+      authService.logout?.()
+      router.replace('/login?deleted=1')
+    } finally {
+      setDeleting(false)
+      setDeleteDialogOpen(false)
     }
   }
 
@@ -330,6 +354,59 @@ export default function ProfilePage() {
           </Box>
         </Box>
       </Container>
+
+      {/* アカウント管理セクション */}
+      <Container maxWidth="lg" sx={{ pb: 6 }}>
+        <Divider sx={{ my: 4 }} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+          <Box>
+            <Typography variant="body2" color="text.secondary">
+              プライバシーポリシー・データ利用について
+            </Typography>
+            <Button size="small" onClick={() => router.push('/privacy')} sx={{ p: 0, minWidth: 0, textDecoration: 'underline' }}>
+              プライバシーポリシーを確認
+            </Button>
+          </Box>
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            アカウントを削除する
+          </Button>
+        </Box>
+      </Container>
+
+      {/* アカウント削除確認ダイアログ */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>アカウントを削除しますか？</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            この操作は取り消せません。以下のデータがすべて完全に削除されます。
+          </Typography>
+          <Typography variant="body2" component="ul" sx={{ pl: 2, mt: 1, color: 'text.secondary' }}>
+            <li>チャット履歴・就職軸スコア</li>
+            <li>マッチング結果</li>
+            <li>面接練習の録画・レポート</li>
+            <li>職務経歴書</li>
+            <li>アカウント情報</li>
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+            キャンセル
+          </Button>
+          <Button
+            onClick={handleDeleteAccount}
+            color="error"
+            variant="contained"
+            disabled={deleting}
+          >
+            {deleting ? '削除中...' : '削除する'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 保存成功トースト */}
       <Snackbar

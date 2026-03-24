@@ -7,7 +7,13 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Drawer,
+  FormControlLabel,
+  Checkbox,
   IconButton,
   InputBase,
   LinearProgress,
@@ -148,6 +154,8 @@ function InterviewContent() {
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
   // ハンズフリーVAD用
   const [handsFreeMode, setHandsFreeMode] = useState(false)
+  const [consentDialogOpen, setConsentDialogOpen] = useState(false)
+  const [consentGiven, setConsentGiven] = useState(false)
   const isRecordingRef = useRef(false)
   const turnPendingRef = useRef(false)
   const aiSpeakingRef = useRef(false)
@@ -426,6 +434,14 @@ function InterviewContent() {
       try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
     }
     await playAudioBlob(audio)
+  }
+
+  const handleJoinWithConsent = () => {
+    if (!consentGiven) {
+      setConsentDialogOpen(true)
+      return
+    }
+    handleJoin()
   }
 
   const handleJoin = async () => {
@@ -1146,7 +1162,7 @@ function InterviewContent() {
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%', maxWidth: 340 }}>
                 <Button
                   variant="contained"
-                  onClick={handleJoin}
+                  onClick={handleJoinWithConsent}
                   sx={{
                     flex: 1,
                     bgcolor: '#1a73e8',
@@ -1637,6 +1653,47 @@ function InterviewContent() {
       </Box>
 
       <audio ref={aiAudioRef} />
+
+      {/* 録画同意ダイアログ */}
+      <Dialog open={consentDialogOpen} onClose={() => setConsentDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>面接練習を開始する前に</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            面接練習では、より良いフィードバックのために以下のデータを収集します。
+          </Typography>
+          <Typography variant="body2" component="ul" sx={{ pl: 2, mb: 2, color: 'text.secondary' }}>
+            <li>音声・動画の録画（フィードバック生成のみに使用）</li>
+            <li>会話のテキスト（評価スコア算出に使用）</li>
+          </Typography>
+          <Typography variant="body2" color="error.main" sx={{ mb: 2 }}>
+            ※ これらのデータは企業には提供されません。サービス内でのみ使用します。
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            録画データは面接セッション終了後90日で自動削除されます。
+            詳細は<Button size="small" sx={{ p: 0, minWidth: 0, textDecoration: 'underline', fontSize: 'inherit' }}
+              onClick={() => window.open('/privacy', '_blank')}>プライバシーポリシー</Button>をご確認ください。
+          </Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={consentGiven}
+                onChange={(e) => setConsentGiven(e.target.checked)}
+              />
+            }
+            label="上記の内容に同意して面接練習を始める"
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setConsentDialogOpen(false)}>キャンセル</Button>
+          <Button
+            variant="contained"
+            disabled={!consentGiven}
+            onClick={() => { setConsentDialogOpen(false); handleJoin() }}
+          >
+            面接に参加
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
