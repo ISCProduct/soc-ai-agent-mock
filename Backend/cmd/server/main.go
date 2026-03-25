@@ -123,6 +123,8 @@ func main() {
 	// GitHub連携
 	githubRepo := repositories.NewGitHubRepository(db)
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
+	// 応募・選考ステータス
+	appStatusRepo := repositories.NewUserApplicationStatusRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
 	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
@@ -198,6 +200,8 @@ func main() {
 	scheduleService := services.NewScheduleService(scheduleRepo)
 	scheduleController := controllers.NewScheduleController(scheduleService)
 	esReviewController := controllers.NewESReviewController()
+	appService := services.NewApplicationService(appStatusRepo, matchRepo)
+	appController := controllers.NewApplicationController(appService)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -209,6 +213,7 @@ func main() {
 	routes.SetupGitHubRoutes(githubController)
 	routes.SetupESRoutes(esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(scheduleController)
+	routes.SetupApplicationRoutes(appController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
