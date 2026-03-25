@@ -27,6 +27,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&CompanyWeightProfile{},
 		&UserCompanyMatch{},
 		&UserApplicationStatus{},
+		&CompanyProfileUpdateHistory{},
 		&CompanyReview{},
 		&CompanyBenefit{},
 		&GBizCompanyProfile{},
