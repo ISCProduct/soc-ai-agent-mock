@@ -149,16 +149,6 @@ type UserApplicationStatus struct {
 	User      User    `gorm:"foreignKey:UserID"`
 	CompanyID uint    `gorm:"not null;index:idx_user_company_app"`
 	Company   Company `gorm:"foreignKey:CompanyID"`
-<<<<<<< feature/#202-dynamic-company-profile
-	MatchID   uint    `gorm:"not null;index"`
-
-	// applied / document_passed / interview / offered / accepted / declined / rejected
-	Status string `gorm:"type:varchar(50);not null;default:'applied'"`
-	Notes  string `gorm:"type:text"`
-
-	AppliedAt       *time.Time
-	StatusUpdatedAt *time.Time
-=======
 	MatchID   uint    `gorm:"not null;index"` // UserCompanyMatch との紐付け
 
 	// 選考ステータス
@@ -169,13 +159,11 @@ type UserApplicationStatus struct {
 
 	AppliedAt       *time.Time // 応募日
 	StatusUpdatedAt *time.Time // ステータス最終更新日
->>>>>>> main
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-<<<<<<< feature/#202-dynamic-company-profile
 // CompanyProfileUpdateHistory 企業プロファイル更新履歴（ロールバック用）
 type CompanyProfileUpdateHistory struct {
 	ID        uint    `gorm:"primaryKey"`
@@ -195,8 +183,6 @@ type CompanyProfileUpdateHistory struct {
 	CreatedAt time.Time
 }
 
-=======
->>>>>>> main
 // CompanyReview 企業レビュー（オプション機能）
 type CompanyReview struct {
 	ID        uint    `gorm:"primaryKey"`
