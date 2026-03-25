@@ -17,6 +17,7 @@ func SetupAdminRoutes(
 	adminInterviewController *controllers.AdminInterviewController,
 	adminDashboardController *controllers.AdminDashboardController,
 	adminCostsController *controllers.AdminCostsController,
+	profileRecalcController *controllers.AdminProfileRecalculationController,
 	userRepo *repositories.UserRepository,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
@@ -55,4 +56,8 @@ func SetupAdminRoutes(
 	http.HandleFunc("/api/admin/costs/summary", auth(adminCostsController.Summary))
 	http.HandleFunc("/api/admin/costs/daily", auth(adminCostsController.Daily))
 	http.HandleFunc("/api/admin/costs/monthly", auth(adminCostsController.Monthly))
+
+	// Profile recalculation
+	http.HandleFunc("/api/admin/profile-recalculation", auth(profileRecalcController.Route))
+	http.HandleFunc("/api/admin/profile-recalculation/", auth(profileRecalcController.Route))
 }
