@@ -142,6 +142,28 @@ type UserCompanyMatch struct {
 	UpdatedAt time.Time
 }
 
+// UserApplicationStatus ユーザーの応募・選考ステータス管理
+type UserApplicationStatus struct {
+	ID        uint    `gorm:"primaryKey"`
+	UserID    uint    `gorm:"not null;index:idx_user_company_app"`
+	User      User    `gorm:"foreignKey:UserID"`
+	CompanyID uint    `gorm:"not null;index:idx_user_company_app"`
+	Company   Company `gorm:"foreignKey:CompanyID"`
+	MatchID   uint    `gorm:"not null;index"` // UserCompanyMatch との紐付け
+
+	// 選考ステータス
+	// applied: 応募済み / document_passed: 書類通過 / interview: 面接中 /
+	// offered: 内定 / accepted: 内定承諾 / declined: 辞退 / rejected: 不合格
+	Status string `gorm:"type:varchar(50);not null;default:'applied'"`
+	Notes  string `gorm:"type:text"` // メモ・備考
+
+	AppliedAt       *time.Time // 応募日
+	StatusUpdatedAt *time.Time // ステータス最終更新日
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // CompanyReview 企業レビュー（オプション機能）
 type CompanyReview struct {
 	ID        uint    `gorm:"primaryKey"`
