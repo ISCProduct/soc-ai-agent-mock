@@ -29,11 +29,17 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Message }
 
 type ResumeService struct {
-	repo       repository.ResumeRepository
-	storageDir string
-	aiClient   *openai.Client
-	s3         *s3Storage
-	s3Err      error
+	repo         repository.ResumeRepository
+	storageDir   string
+	aiClient     *openai.Client
+	s3           *s3Storage
+	s3Err        error
+	crossFeature *CrossFeatureIntegrationService
+}
+
+// SetCrossFeatureService 機能間連携サービスを注入する（オプション）
+func (s *ResumeService) SetCrossFeatureService(cf *CrossFeatureIntegrationService) {
+	s.crossFeature = cf
 }
 
 func NewResumeService(repo repository.ResumeRepository, storageDir string, aiClient *openai.Client) *ResumeService {
@@ -179,6 +185,13 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	}
 	if err := s.repo.ReplaceReviewItems(review.ID, items); err != nil {
 		return nil, nil, err
+	}
+
+	// スコア更新（クロス機能連携）
+	if s.crossFeature != nil {
+		if err := s.crossFeature.UpdateScoresFromResumeReview(doc.UserID, doc.SessionID, review, items); err != nil {
+			fmt.Printf("[Resume] crossFeature score update failed: %v\n", err)
+		}
 	}
 
 	annotatedPath, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)

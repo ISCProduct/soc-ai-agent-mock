@@ -25,6 +25,7 @@ type InterviewService struct {
 	emailService         *EmailService
 	openaiClient         *openai.Client
 	realtimeUsageService *RealtimeUsageService
+	crossFeature         *CrossFeatureIntegrationService
 	jobCh                chan uint
 	workerOnce           sync.Once
 }
@@ -48,6 +49,11 @@ func NewInterviewService(
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, 100),
 	}
+}
+
+// SetCrossFeatureService 機能間連携サービスを注入する（オプション）
+func (s *InterviewService) SetCrossFeatureService(cf *CrossFeatureIntegrationService) {
+	s.crossFeature = cf
 }
 
 func (s *InterviewService) StartWorker() {
@@ -518,7 +524,13 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType), history)
+	systemPrompt := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType)
+	if s.crossFeature != nil {
+		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
+			systemPrompt = profileCtx + "\n" + systemPrompt
+		}
+	}
+	aiText, err := s.openaiClient.ChatInterview(ctx, systemPrompt, history)
 	if err != nil {
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
@@ -553,7 +565,13 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		companyInfo = s.lookupCompanyProfile(ctx, companyName)
 	}
 
-	aiText, err := s.openaiClient.ChatInterview(ctx, buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType), []map[string]string{
+	systemPromptStart := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType)
+	if s.crossFeature != nil {
+		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
+			systemPromptStart = profileCtx + "\n" + systemPromptStart
+		}
+	}
+	aiText, err := s.openaiClient.ChatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
@@ -800,7 +818,19 @@ Interview transcript:
 		ImprovementsJSON:  string(improvementsJSON),
 		TeacherReportJSON: string(teacherJSON),
 	}
-	return s.reportRepo.Upsert(report)
+	if err := s.reportRepo.Upsert(report); err != nil {
+		return err
+	}
+
+	// 面接スコアを UserWeightScore に反映（crossFeature が設定済みの場合のみ）
+	if s.crossFeature != nil {
+		chatSessionID := fmt.Sprintf("interview-%d", session.UserID)
+		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, chatSessionID, report); err != nil {
+			// スコア反映失敗はレポート生成を失敗扱いにしない
+			fmt.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+		}
+	}
+	return nil
 }
 
 // SendReportEmail 面接レポートをメールで送信

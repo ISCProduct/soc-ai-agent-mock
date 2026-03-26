@@ -82,3 +82,16 @@ func (r *UserWeightScoreRepository) CountByUserAndSession(userID uint, sessionID
 		Count(&count).Error
 	return count, err
 }
+
+// FindLatestByUser ユーザーの最新セッションのスコアを取得する
+func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.UserWeightScore, error) {
+	// 最新の session_id を特定
+	var latest models.UserWeightScore
+	err := r.db.Where("user_id = ?", userID).
+		Order("updated_at DESC").
+		First(&latest).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.FindByUserAndSession(userID, latest.SessionID)
+}
