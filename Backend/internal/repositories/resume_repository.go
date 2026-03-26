@@ -64,6 +64,14 @@ func (r *ResumeRepository) ReplaceReviewItems(reviewID uint, items []models.Resu
 	return r.db.Create(&items).Error
 }
 
+func (r *ResumeRepository) FindDocumentsByUserID(userID uint) ([]models.ResumeDocument, error) {
+	var docs []models.ResumeDocument
+	if err := r.db.Where("user_id = ?", userID).Find(&docs).Error; err != nil {
+		return nil, err
+	}
+	return docs, nil
+}
+
 func (r *ResumeRepository) FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error) {
 	var items []models.ResumeReviewItem
 	if err := r.db.Where("review_id = ?", reviewID).

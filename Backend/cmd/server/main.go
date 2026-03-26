@@ -162,6 +162,11 @@ func main() {
 	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	interviewService.StartWorker()
 
+	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
+	crossFeatureService := services.NewCrossFeatureIntegrationService(userWeightScoreRepo)
+	interviewService.SetCrossFeatureService(crossFeatureService)
+	resumeService.SetCrossFeatureService(crossFeatureService)
+
 	// コントローラー層の初期化
 	authController := controllers.NewAuthController(authService)
 	oauthController := controllers.NewOAuthController(oauthService)
@@ -205,6 +210,7 @@ func main() {
 	esReviewController := controllers.NewESReviewController()
 	appService := services.NewApplicationService(appStatusRepo, matchRepo)
 	appController := controllers.NewApplicationController(appService)
+	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController)
@@ -217,6 +223,7 @@ func main() {
 	routes.SetupESRoutes(esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(scheduleController)
 	routes.SetupApplicationRoutes(appController)
+	routes.SetupUserRoutes(integratedProfileController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
