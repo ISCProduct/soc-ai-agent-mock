@@ -208,6 +208,8 @@ func main() {
 	scheduleService := services.NewScheduleService(scheduleRepo)
 	scheduleController := controllers.NewScheduleController(scheduleService)
 	esReviewController := controllers.NewESReviewController()
+	appService := services.NewApplicationService(appStatusRepo, matchRepo)
+	appController := controllers.NewApplicationController(appService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 
 	// ルーティング設定
@@ -220,6 +222,7 @@ func main() {
 	routes.SetupGitHubRoutes(githubController)
 	routes.SetupESRoutes(esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(scheduleController)
+	routes.SetupApplicationRoutes(appController)
 	routes.SetupUserRoutes(integratedProfileController)
 	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
 
