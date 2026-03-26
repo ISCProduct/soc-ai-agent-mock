@@ -18,6 +18,7 @@ func SetupAdminRoutes(
 	adminDashboardController *controllers.AdminDashboardController,
 	adminCostsController *controllers.AdminCostsController,
 	profileRecalcController *controllers.AdminProfileRecalculationController,
+	scoreValidationController *controllers.AdminScoreValidationController,
 	userRepo *repositories.UserRepository,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
@@ -60,4 +61,7 @@ func SetupAdminRoutes(
 	// Profile recalculation
 	http.HandleFunc("/api/admin/profile-recalculation", auth(profileRecalcController.Route))
 	http.HandleFunc("/api/admin/profile-recalculation/", auth(profileRecalcController.Route))
+
+	// Score validation (correlation, calibration, A/B test)
+	http.HandleFunc("/api/admin/score-validation/", auth(scoreValidationController.Route))
 }

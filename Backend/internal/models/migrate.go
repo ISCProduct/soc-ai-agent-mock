@@ -56,6 +56,10 @@ func AutoMigrate(db *gorm.DB) error {
 		&ScheduleEvent{},
 		// APIコストモニタリング
 		&APICallLog{},
+		// スコア精度検証・A/Bテスト
+		&QuestionVariant{},
+		&VariantAssignment{},
+		&ScoreCalibrationWeight{},
 		// GitHub連携
 		&GitHubProfile{},
 		&GitHubRepo{},
