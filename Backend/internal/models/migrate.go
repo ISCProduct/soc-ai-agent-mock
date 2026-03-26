@@ -56,6 +56,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&ScheduleEvent{},
 		// APIコストモニタリング
 		&APICallLog{},
+		// 集合知レコメンド
+		&CollectiveInsightLog{},
+		&AnonymizedBehaviorSummary{},
 		// スコア精度検証・A/Bテスト
 		&QuestionVariant{},
 		&VariantAssignment{},
