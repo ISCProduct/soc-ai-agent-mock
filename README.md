@@ -1,73 +1,149 @@
 # SOC AI Agent
 
-小規模のフルスタックリポジトリ（フロントエンド + バックエンド）。
-このリポジトリは、求人／企業マッチングや会話型 AI を組み合わせたプロトタイプ的な実装です。
-
-**重要**: この README は開発メンバー向けのセットアップ手順・依存関係・テスト・品質管理をまとめたものです。
+求人・企業マッチングと会話型AIを組み合わせたフルスタックSaaSプロトタイプ。
+チャット分析・音声面接・職務経歴書レビュー・選考管理のデータが互いに連携し、精度が自己改善する**AIフライホイール**構造を持ちます。
 
 **開発メンバー**
 
 - **バックエンド**: 大橋 和幸
 - **フロントエンド**: 原 拓哉
 
-**概要**
+---
 
-- **目的**: 求人／企業マッチングのプロトタイプと、OpenAI を用いた会話エージェントの統合を示す。フロントは Next.js、バックエンドは Go（GORM + MySQL）で構成。
+## 目次
 
-**ディレクトリ構成**
+- [アーキテクチャ概要](#アーキテクチャ概要)
+- [AIフライホイール](#aiフライホイール)
+- [主な機能](#主な機能)
+- [技術スタック](#技術スタック)
+- [ディレクトリ構成](#ディレクトリ構成)
+- [環境変数](#環境変数)
+- [ローカル開発](#ローカル開発)
+- [Docker Compose](#docker-compose)
+- [主要APIエンドポイント](#主要apiエンドポイント)
+- [品質管理](#品質管理)
+- [よくあるトラブル](#よくあるトラブル)
+- [Wiki・運用ドキュメント](#wikiwikiの場所)
+
+---
+
+## アーキテクチャ概要
 
 ```
-/
-├── Backend/                 # Go バックエンドサービス
-│   ├── cmd/                 # 実行エントリポイント（server / api / migrate / seed / crawl / cli）
-│   ├── internal/            # 設定・コントローラ・サービス・リポジトリ等
-│   └── storage/             # ローカルファイルストレージ（開発用）
-├── frontend/                # Next.js (TypeScript) アプリケーション
-│   ├── app/                 # ページ・API ルートハンドラ
-│   ├── components/          # 共通コンポーネント
-│   └── e2e/                 # Playwright E2E テスト
-├── rag/                     # 職務経歴書レビュー RAG サービス（Python / FastAPI / CrewAI）
-├── tools/
-│   └── company-graph/       # 企業関係スクレイピングパイプライン（Go）
-├── infra/                   # インフラ設定（ECS）
-├── mcp/                     # MCP サーバー設定
-├── mysql/                   # MySQL 設定（ローカル Docker 用）
-└── compose.yml              # Docker Compose 定義
+                      ┌─────────────────────────────┐
+                      │        Next.js Frontend        │
+                      │  (App Router / MUI v7 / 3D)   │
+                      └───────────────┬───────────────┘
+                                      │ HTTP / WebRTC
+                      ┌───────────────▼───────────────┐
+                      │       Go Backend (net/http)     │
+                      │  DDD: entity / repo / svc / ctl │
+                      └──┬──────────┬──────────┬───────┘
+                         │          │          │
+              ┌──────────▼──┐  ┌────▼────┐  ┌─▼──────────────┐
+              │  MySQL 8.0   │  │ AWS S3  │  │ FastAPI RAG     │
+              │  (GORM)      │  │ (動画・  │  │ (Python/CrewAI) │
+              └─────────────┘  │  PDF)   │  └────────────────┘
+                               └─────────┘
 ```
 
-**技術スタック**
+---
 
-- **Backend**: Go 1.25 / GORM (MySQL driver) / AWS SDK v2 / `go-openai`
-- **Frontend**: Next.js 16 / React 19 / TypeScript / MUI v7 / Radix UI / React Flow / Three.js
-- **RAG**: Python / FastAPI / CrewAI / OpenAI Embeddings
-- **CI / 実行環境**: Docker / Docker Compose / Playwright E2E
+## AIフライホイール
 
-**主な機能**
+5つの機能が生成するデータが互いを強化し合う自己改善サイクルです。
+
+```
+  チャット分析スコア
+       │
+       ├──→ マッチング精度向上 ──→ 応募・選考データ蓄積 (#201)
+       │                                    │
+       │◄── 企業プロファイル動的更新 (#202) ◄──┘
+       │
+       ├──→ 面接AIコンテキスト注入 (#204)
+       │         │
+       │         └──→ 面接スコア → チャットスコア更新 (#204)
+       │
+       ├──→ 職務経歴書レビューコンテキスト注入 (#204)
+       │         │
+       │         └──→ レビュースコア → チャットスコア更新 (#204)
+       │
+       ├──→ スコア精度検証・キャリブレーション (#203)
+       │
+       └──→ 集合知レコメンド (類似ユーザーの選考通過パターン) (#205)
+```
+
+| Issue | 機能 | 概要 |
+|-------|------|------|
+| #201 | 選考結果フィードバックループ | 応募・選考ステータスをマッチングスコアに反映 |
+| #202 | 企業プロファイル動的更新 | 通過実績ユーザーのスコアで企業重みを自動調整 |
+| #203 | スコア精度検証基盤 | 通過率との相関分析・A/Bテスト・キャリブレーション |
+| #204 | 機能間データ連携 | 面接/職務経歴書のスコアをチャット分析に双方向反映 |
+| #205 | 集合知レコメンド | 類似スコアユーザーの通過企業を匿名集計してレコメンド |
+
+---
+
+## 主な機能
 
 | 機能 | 概要 |
 |------|------|
-| AI チャット分析 | OpenAI を用いた職種・興味分析と企業マッチング |
-| 音声面接練習 | OpenAI Realtime API による会話 + 3D アバター（Three.js + wawa-lipsync） |
-| 面接動画管理 | 面接動画を AWS S3 にアップロード・管理。管理者が Presigned URL で閲覧 |
-| 職務経歴書レビュー | RAG サービス（DuckDuckGo + OpenAI Embeddings）によるフィードバック生成 |
-| 企業関係図 | Mynavi / Rikunabi / CareerTasu / gBizINFO スクレイピング + React Flow 可視化 |
-| 管理者ダッシュボード | ユーザー・企業・求人・クロール・監査ログの CRUD 管理 |
-| OAuth 認証 | Google / GitHub OAuth2 + メール・パスワード認証 |
-| メールレポート | 分析・面接レポートをメール配信 |
+| AI チャット分析 | 4フェーズ・10カテゴリのスコアリングによる企業マッチング |
+| 音声面接練習 | OpenAI Realtime API + 3D アバター（Three.js / wawa-lipsync） |
+| 面接動画管理 | AWS S3 アップロード・管理者 Presigned URL 閲覧 |
+| 職務経歴書レビュー | RAG（DuckDuckGo + OpenAI Embeddings）によるフィードバック生成 |
+| 選考管理 | 応募→書類通過→面接→内定の選考ステータス管理 |
+| 集合知レコメンド | 類似スコアユーザーの通過企業を匿名集計してレコメンド |
+| スコア精度検証 | 通過率相関・A/Bテスト・自動キャリブレーション |
+| 企業プロファイル自動更新 | 採用通過実績からCompanyWeightProfileを動的調整 |
+| 企業関係図 | gBizINFO + React Flow 可視化 |
+| 選考スケジュール管理 | 面接日程・締切の一元管理 |
+| GitHub連携 | GitHubプロフィール・言語統計からスキルスコア算出 |
+| 管理者ダッシュボード | ユーザー・企業・コスト・監査ログのCRUD |
+| OAuth 認証 | Google / GitHub OAuth2 + メール・パスワード |
+| メールレポート | 分析・面接レポートのメール配信 |
 
 ---
 
-**必須前提ソフトウェア**
+## 技術スタック
 
-- macOS / Linux / Windows + WSL
-- Go >= 1.25
-- Node.js 18 以上（Next.js 16 の要件）
-- npm / pnpm / yarn（ここでは `npm` を例示）
-- Docker / Docker Compose（コンテナで動かす場合）
+- **Backend**: Go 1.25 / GORM (MySQL) / AWS SDK v2 / `go-openai`
+- **Frontend**: Next.js 16 / React 19 / TypeScript / MUI v7 / Radix UI / React Flow / Three.js
+- **RAG**: Python / FastAPI / CrewAI / OpenAI Embeddings
+- **CI / 実行環境**: Docker / Docker Compose / GitHub Actions / Playwright E2E
 
 ---
 
-**環境変数（バックエンド） — 例 `.env`**
+## ディレクトリ構成
+
+```
+/
+├── Backend/
+│   ├── cmd/server/          # サーバーエントリポイント
+│   ├── domain/              # エンティティ・リポジトリI/F・マッパー
+│   ├── internal/
+│   │   ├── controllers/     # HTTPハンドラ
+│   │   ├── services/        # ビジネスロジック
+│   │   ├── repositories/    # DBアクセス
+│   │   ├── models/          # GORMモデル・AutoMigrate
+│   │   ├── routes/          # ルーティング
+│   │   └── middleware/      # 認証ミドルウェア
+│   └── test/                # 統合テスト
+├── frontend/
+│   ├── app/                 # Next.js App Router ページ
+│   ├── components/          # 共通コンポーネント
+│   └── e2e/                 # Playwright E2E テスト
+├── rag/                     # 職務経歴書RAGサービス (Python/FastAPI)
+├── docs/wiki/               # 運用ドキュメント・Wiki
+├── infra/                   # ECS インフラ設定
+├── mysql/                   # MySQL ローカル設定
+└── compose.yml              # Docker Compose 定義
+```
+
+---
+
+## 環境変数
+
+### バックエンド（`.env`）
 
 ```env
 # MySQL
@@ -91,8 +167,6 @@ OPENAI_REALTIME_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_REALTIME_MAX_OUTPUT_TOKENS=120
 REALTIME_MAX_CONCURRENT_CONNECTIONS=30
 REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200
-# REALTIME_ALERT_EMAILS=ops@example.com,admin@example.com
-# REALTIME_ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx/yyy/zzz
 
 # 面接レポート
 INTERVIEW_REPORT_MODEL=gpt-4o-mini
@@ -116,8 +190,6 @@ GITHUB_CLIENT_SECRET=xxxxxxxxxxxxxxxx
 AWS_REGION=ap-northeast-1
 AWS_S3_BUCKET=your-bucket
 AWS_S3_PREFIX=interview-videos
-# AWS_ACCESS_KEY_ID=xxxxxxxxxxxxxxxxxxxx
-# AWS_SECRET_ACCESS_KEY=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
 
 # PDF アノテーション
 # ANNOTATION_FONT_PATH=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
@@ -126,9 +198,7 @@ AWS_S3_PREFIX=interview-videos
 RAG_REVIEW_URL=http://rag-review:9000
 ```
 
-※ `Backend/internal/config/config.go` および各サービスで読み込まれる環境変数名を使用しています。
-
-**環境変数（フロントエンド） — 例 `.env.local`**
+### フロントエンド（`.env.local`）
 
 ```env
 NEXT_PUBLIC_BACKEND_URL=http://localhost:80
@@ -139,178 +209,148 @@ NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD=0.18
 
 ---
 
-**ローカル開発: データベース（簡易）**
+## ローカル開発
 
-Docker を使って MySQL を単体で起動する例:
-
-```sh
-docker run --name soc-mysql -e MYSQL_ROOT_PASSWORD=root \
-  -e MYSQL_DATABASE=app_db -e MYSQL_USER=app_user -e MYSQL_PASSWORD=app_pass \
-  -p 3306:3306 -d mysql:8.0
-```
-
-または、リポジトリの `compose.yml` を使って一括起動:
-
-```sh
-docker compose up -d --build
-```
-
----
-
-**バックエンド: ローカル実行**
+### バックエンド
 
 ```sh
 cd Backend
-
-# 依存取得
 go mod download
-
-# マイグレーション
-go run ./cmd/migrate
-
-# サーバ起動（開発）
-go run ./cmd/server
-
-# クローリング単発実行
-go run ./cmd/crawl
+go run ./cmd/server   # サーバー起動
 ```
 
-**開発用シードデータ**
-
-```sh
-go run ./cmd/seed
-go run ./cmd/seed-large  # 大量データ用（時間がかかる）
-```
-
----
-
-**フロントエンド: ローカル実行**
+### フロントエンド
 
 ```sh
 cd frontend
-
-# 依存インストール
 npm install
-
-# 開発サーバ起動
-npm run dev
-# ブラウザで http://localhost:3000 を確認
-
-# 本番ビルド
-npm run build
+npm run dev   # http://localhost:3000
 ```
 
----
-
-**フロントの E2E / テスト**
-
-Playwright テストは `frontend/e2e` にあります。
+### Docker Compose（推奨）
 
 ```sh
-cd frontend
-npx playwright install  # 初回のみ
-npx playwright test
-```
-
----
-
-**Docker Compose サービス構成**
-
-| サービス | 役割 | ポート | プロファイル |
-|---------|------|--------|------------|
-| `app` | Go バックエンド API | 8080 | （常時） |
-| `db` | MySQL 8.0 | 3306 | （常時） |
-| `frontend` | Next.js フロントエンド | 3000 | （常時） |
-| `company-graph` | 企業スクレイピングパイプライン | 9100 | `company-graph` |
-| `rag-review` | 職務経歴書 RAG レビュー | 9000 | `rag` |
-
-**重いサービスを後回しにする手順**
-
-`rag-review` は依存が重いため、初回は後回しにできます。
-
-```sh
-# まず軽量サービスのみ起動
 docker compose up -d --build
+```
 
-# 後から rag-review をビルド・起動
-docker compose --profile rag build rag-review
+重いサービス（RAG）を後から起動する場合:
+
+```sh
 docker compose --profile rag up -d rag-review
-
-# 企業グラフサービスを起動する場合
-docker compose --profile company-graph up -d company-graph
-```
-
-**rag-review の依存バージョン固定（`rag/constraints.txt`）**
-
-`pip install` が遅い / 失敗する場合はこちらを使用してください:
-
-```
-embedchain==0.1.114
-langchain==0.2.17
-langchain-community==0.2.19
-langchain-core==0.2.43
-langchain-openai==0.1.25
-langchain-text-splitters==0.2.4
-chromadb==0.4.24
-litellm==1.44.22
-openai==1.40.6
-tiktoken==0.7.0
 ```
 
 ---
 
-**主要 API エンドポイント一覧**
+## Docker Compose
 
-| カテゴリ | エンドポイント例 | 概要 |
-|---------|----------------|------|
-| 認証 | `POST /api/auth/register` | メール登録 |
-| 認証 | `POST /api/auth/login` | ログイン |
-| 認証 | `GET /api/auth/google` | Google OAuth 開始 |
-| 認証 | `GET /api/auth/github` | GitHub OAuth 開始 |
-| チャット | `POST /api/chat/messages` | チャットメッセージ送信 |
-| チャット | `GET /api/chat/scores` | 分析スコア取得 |
-| チャット | `POST /api/chat/send-report` | メールレポート送信 |
-| 面接 | `POST /api/interviews` | セッション作成 |
-| 面接 | `POST /api/interviews/{id}/start` | セッション開始 |
-| 面接 | `POST /api/interviews/{id}/upload-video` | 動画 S3 アップロード（32MB 上限） |
-| 面接 | `POST /api/interviews/{id}/send-report` | レポートメール送信 |
-| Realtime | `POST /api/realtime/token` | WebRTC トークン取得 |
-| 職務経歴書 | `POST /api/resume/upload` | 職務経歴書アップロード |
-| 職務経歴書 | `GET /api/resume/review` | RAG レビュー取得 |
-| 企業 | `GET /api/companies` | 企業一覧・検索 |
-| 管理者 | `GET /api/admin/interviews` | 面接セッション一覧 |
-| 管理者 | `GET /api/admin/interviews/{id}/videos/{vid}/url` | 動画 Presigned URL（15分有効） |
-| 管理者 | `GET /api/admin/audit-logs` | 監査ログ閲覧 |
-| 管理者 | `POST /api/admin/crawl/run` | クロール実行 |
+| サービス | 役割 | ポート |
+|---------|------|--------|
+| `app` | Go バックエンド API | 8080 |
+| `db` | MySQL 8.0 | 3306 |
+| `frontend` | Next.js | 3000 |
+| `rag-review` | 職務経歴書 RAG | 9000 |
+| `company-graph` | 企業スクレイピング | 9100 |
 
 ---
 
-**面接練習デモ手順（10分）**
+## 主要APIエンドポイント
 
-1. バックエンドとフロントを起動
-2. ログイン後、左メニューの「面接練習」を開く
-3. `Start` を押して面接を開始（音声が出るのでミュートに注意）
-4. 10分またはコスト上限で自動終了。`Stop` でも終了可能
-5. 終了後、レポートが生成されるまで数十秒待つ
+### 認証
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/auth/register` | メール登録 |
+| POST | `/api/auth/login` | ログイン |
+| GET | `/api/auth/google` | Google OAuth |
+| GET | `/api/auth/github` | GitHub OAuth |
+
+### チャット分析
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/chat/messages` | メッセージ送信・スコア更新 |
+| GET | `/api/chat/scores` | 分析スコア取得（10カテゴリ） |
+| POST | `/api/chat/send-report` | メールレポート送信 |
+
+### 面接
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/interviews` | セッション作成 |
+| POST | `/api/interviews/{id}/start` | 開始（AIコンテキスト注入済み） |
+| POST | `/api/interviews/{id}/upload-video` | 動画S3アップロード |
+| POST | `/api/interviews/{id}/send-report` | レポートメール送信 |
+| POST | `/api/realtime/token` | WebRTCトークン取得 |
+
+### 職務経歴書
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/resume/upload` | アップロード |
+| GET | `/api/resume/review` | RAGレビュー取得 |
+
+### 選考管理（#201）
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/applications` | 応募登録 |
+| GET | `/api/applications` | 選考一覧取得 |
+| PUT | `/api/applications/{id}` | ステータス更新 |
+
+### 統合プロファイル（#204）
+| メソッド | パス | 概要 |
+|---------|------|------|
+| GET | `/api/user/profile` | チャット/面接/職務経歴書の統合プロファイル |
+
+### 集合知レコメンド（#205）
+| メソッド | パス | 概要 |
+|---------|------|------|
+| GET | `/api/collective-insights/recommendations` | 類似ユーザー通過企業レコメンド |
+| GET | `/api/collective-insights/top-companies` | 通過率上位企業 |
+| PUT | `/api/collective-insights/consent` | 集合知参加同意設定 |
+| POST | `/api/collective-insights/actions` | 行動ログ記録 |
+
+### 管理者
+| メソッド | パス | 概要 |
+|---------|------|------|
+| GET | `/api/admin/dashboard/users` | ユーザー一覧 |
+| GET | `/api/admin/interviews` | 面接セッション一覧 |
+| POST | `/api/admin/profile-recalculation/run` | 企業プロファイル再計算（#202） |
+| GET | `/api/admin/score-validation/correlation` | スコア通過率相関（#203） |
+| POST | `/api/admin/score-validation/calibration/run` | キャリブレーション実行（#203） |
+| POST | `/api/admin/score-validation/variants` | A/Bテストバリアント作成（#203） |
+| POST | `/api/admin/collective-insights/rebuild-summaries` | 集合知サマリー再集計（#205） |
+| GET | `/api/admin/costs/summary` | APIコストサマリー |
+| GET | `/api/admin/audit-logs` | 監査ログ |
 
 ---
 
-**品質管理（推奨ワークフロー）**
+## 品質管理
 
-- **Go コード**: `gofmt` / `go vet` を CI で実行。可能なら `golangci-lint` を導入。
-- **フロント**: `npm run lint`（ESLint）/ `prettier` でフォーマット統一。
-- **テスト**: フロントの Playwright E2E を CI で走らせる。バックエンドのユニットテスト追加を推奨。
-- **PR ルール**: すべての PR に対して Lint と E2E を通過させる（GitHub Actions 推奨）。
+- **Go**: `go vet` / `go test ./...` を CI で実行
+- **Frontend**: `npm run lint`（ESLint）
+- **E2E**: Playwright（`frontend/e2e/`）
+- **PR ルール**: Lint + Go Unit Tests を通過させてからマージ
+
+---
+
+## よくあるトラブル
+
+| 症状 | 対処 |
+|------|------|
+| DB接続エラー | `.env` の `DB_HOST` / 資格情報を確認。MySQL起動確認 |
+| OpenAIキーエラー | `OPENAI_API_KEY` を設定 |
+| OAuth動作不良 | `BASE_URL` / クライアントID / コールバックURLを確認 |
+| S3アップロード失敗 | `AWS_S3_BUCKET` と IAM権限（`s3:PutObject` / `s3:GetObject`）を確認 |
+| フロントビルド失敗 | Node.js 18以上を使用 |
+| rag-review起動失敗 | `rag/constraints.txt` の固定バージョンで `pip install` |
 
 ---
 
-**よくあるトラブルと対処**
+## Wiki・運用ドキュメント
 
-- **DB 接続エラー**: `.env` の `DB_HOST` / `DB_PORT` / 資格情報を確認。MySQL がコンテナで動いているか確認。
-- **OpenAI キーがない**: `OPENAI_API_KEY` を設定しないとバックエンドは初期化時にエラーを返します。
-- **OAuth が動かない**: `BASE_URL` / `GOOGLE_CLIENT_ID` / `GITHUB_CLIENT_ID` 等を確認。コールバック URL がプロバイダー側の設定と一致しているか確認。
-- **S3 アップロード失敗**: `AWS_REGION` / `AWS_S3_BUCKET` と IAM 権限（`s3:PutObject` / `s3:GetObject`）を確認。
-- **フロントのビルド失敗**: Node バージョンを確認（18 以上推奨）。
-- **rag-review が起動しない**: `pip install` 失敗の場合は `rag/constraints.txt` の固定バージョンを使用。
+詳細な運用ドキュメントは [`docs/wiki/`](./docs/wiki/) を参照してください。
 
----
+| ドキュメント | 内容 |
+|------------|------|
+| [Home](./docs/wiki/Home.md) | 概要・ナビゲーション |
+| [AIフライホイール設計](./docs/wiki/flywheel.md) | データ連携の設計思想・フロー |
+| [API リファレンス](./docs/wiki/api-reference.md) | 全エンドポイント詳細 |
+| [運用手順書](./docs/wiki/operations.md) | デプロイ・監視・バッチ・障害対応 |
+| [データプライバシー設計](./docs/wiki/data-privacy.md) | 匿名化・同意管理の設計 |
+| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | スコア精度検証・改善手順 |
