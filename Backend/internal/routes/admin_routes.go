@@ -19,6 +19,7 @@ func SetupAdminRoutes(
 	adminCostsController *controllers.AdminCostsController,
 	profileRecalcController *controllers.AdminProfileRecalculationController,
 	scoreValidationController *controllers.AdminScoreValidationController,
+	collectiveInsightController *controllers.CollectiveInsightController,
 	userRepo *repositories.UserRepository,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
@@ -64,4 +65,7 @@ func SetupAdminRoutes(
 
 	// Score validation (correlation, calibration, A/B test)
 	http.HandleFunc("/api/admin/score-validation/", auth(scoreValidationController.Route))
+
+	// Collective insight batch
+	http.HandleFunc("/api/admin/collective-insights/rebuild-summaries", auth(collectiveInsightController.RebuildSummaries))
 }
