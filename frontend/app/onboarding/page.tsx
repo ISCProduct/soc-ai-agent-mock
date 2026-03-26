@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Box,
@@ -18,6 +18,7 @@ import ChatIcon from '@mui/icons-material/Chat'
 import BusinessIcon from '@mui/icons-material/Business'
 import MicIcon from '@mui/icons-material/Mic'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
 const STEPS = [
   {
@@ -48,7 +49,19 @@ const STEPS = [
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const [activeStep] = useState(0)
+  const [activeStep, setActiveStep] = useState(0)
+  const [completedSteps, setCompletedSteps] = useState<boolean[]>([false, false, false])
+
+  useEffect(() => {
+    const hasChatSession = !!(localStorage.getItem('chat_session_id') || localStorage.getItem('currentSessionId'))
+    const hasResults = hasChatSession // マッチング結果はチャット完了後に閲覧可能
+    const hasInterview = !!localStorage.getItem('interview_session_id')
+    const completed = [hasChatSession, hasResults, hasInterview]
+    setCompletedSteps(completed)
+    // 最初の未完了ステップをアクティブに設定
+    const nextStep = completed.findIndex((c) => !c)
+    setActiveStep(nextStep === -1 ? STEPS.length - 1 : nextStep)
+  }, [])
 
   const handleStart = (path: string) => {
     localStorage.setItem('onboarding_completed', 'true')
@@ -90,38 +103,52 @@ export default function OnboardingPage() {
 
         {/* ステップカード */}
         <Stack spacing={2} sx={{ mb: 5 }}>
-          {STEPS.map((step, idx) => (
-            <Card
-              key={step.title}
-              variant="outlined"
-              sx={{
-                border: idx === 0 ? '2px solid #ec5b13' : '1px solid #e0e0e0',
-                bgcolor: idx === 0 ? '#fff8f5' : '#fff',
-                opacity: idx > 0 ? 0.65 : 1,
-              }}
-            >
-              <CardContent sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, py: 2.5 }}>
-                <Box sx={{ mt: 0.5, flexShrink: 0 }}>{step.icon}</Box>
-                <Box sx={{ flex: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{step.title}</Typography>
-                    <Chip label={step.tag} size="small" sx={{ fontSize: 11, height: 20 }} />
+          {STEPS.map((step, idx) => {
+            const isActive = idx === activeStep
+            const isDone = completedSteps[idx]
+            return (
+              <Card
+                key={step.title}
+                variant="outlined"
+                sx={{
+                  border: isDone ? '2px solid #388e3c' : isActive ? '2px solid #ec5b13' : '1px solid #e0e0e0',
+                  bgcolor: isDone ? '#f1f8f1' : isActive ? '#fff8f5' : '#fff',
+                }}
+              >
+                <CardContent sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, py: 2.5 }}>
+                  <Box sx={{ mt: 0.5, flexShrink: 0 }}>
+                    {isDone ? <CheckCircleIcon sx={{ fontSize: 32, color: '#388e3c' }} /> : step.icon}
                   </Box>
-                  <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>{step.description}</Typography>
-                </Box>
-                {idx === 0 && (
+                  <Box sx={{ flex: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{step.title}</Typography>
+                      {isDone ? (
+                        <Chip label="完了" size="small" color="success" sx={{ fontSize: 11, height: 20 }} />
+                      ) : (
+                        <Chip label={step.tag} size="small" sx={{ fontSize: 11, height: 20 }} />
+                      )}
+                    </Box>
+                    <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>{step.description}</Typography>
+                  </Box>
                   <Button
-                    variant="contained"
+                    variant={isDone ? 'outlined' : isActive ? 'contained' : 'outlined'}
                     endIcon={<ArrowForwardIcon />}
                     onClick={() => handleStart(step.path)}
-                    sx={{ flexShrink: 0, bgcolor: '#ec5b13', '&:hover': { bgcolor: '#c44d0e' }, textTransform: 'none', borderRadius: 9999 }}
+                    sx={{
+                      flexShrink: 0,
+                      ...(isActive && !isDone
+                        ? { bgcolor: '#ec5b13', '&:hover': { bgcolor: '#c44d0e' }, color: '#fff' }
+                        : {}),
+                      textTransform: 'none',
+                      borderRadius: 9999,
+                    }}
                   >
-                    {step.action}
+                    {isDone ? 'もう一度' : step.action}
                   </Button>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            )
+          })}
         </Stack>
 
         <Box sx={{ textAlign: 'center' }}>

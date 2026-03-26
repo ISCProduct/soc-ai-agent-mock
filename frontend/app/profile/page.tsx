@@ -139,15 +139,13 @@ export default function ProfilePage() {
             <Typography variant="h6" fontWeight="bold" color="primary">
               プロフィール
             </Typography>
-            {!isFirstTime && (
-              <Button
-                startIcon={<ArrowBackIcon />}
-                onClick={() => router.push('/')}
-                size="small"
-              >
-                ホームへ戻る
-              </Button>
-            )}
+            <Button
+              startIcon={<ArrowBackIcon />}
+              onClick={() => router.push('/')}
+              size="small"
+            >
+              ホームへ戻る
+            </Button>
           </Box>
         </Container>
       </Box>
