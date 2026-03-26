@@ -109,6 +109,7 @@ func main() {
 	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
 	companyQueryRepo := repositories.NewCompanyQueryRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
+	profileRecalcRepo := repositories.NewProfileRecalculationRepository(db)
 	// 埋め込み・マッチング
 	userEmbeddingRepo := repositories.NewUserEmbeddingRepository(db)
 	jobEmbeddingRepo := repositories.NewJobCategoryEmbeddingRepository(db)
@@ -123,6 +124,8 @@ func main() {
 	// GitHub連携
 	githubRepo := repositories.NewGitHubRepository(db)
 	skillScoreRepo := repositories.NewSkillScoreRepository(db)
+	// 応募・選考ステータス
+	appStatusRepo := repositories.NewUserApplicationStatusRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
 	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
@@ -196,6 +199,8 @@ func main() {
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService)
+	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
+	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
@@ -209,7 +214,7 @@ func main() {
 	routes.SetupAuthRoutes(authController, oauthController)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, userRepo)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, userRepo)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)

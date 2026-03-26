@@ -142,6 +142,47 @@ type UserCompanyMatch struct {
 	UpdatedAt time.Time
 }
 
+// UserApplicationStatus ユーザーの応募・選考ステータス管理
+type UserApplicationStatus struct {
+	ID        uint    `gorm:"primaryKey"`
+	UserID    uint    `gorm:"not null;index:idx_user_company_app"`
+	User      User    `gorm:"foreignKey:UserID"`
+	CompanyID uint    `gorm:"not null;index:idx_user_company_app"`
+	Company   Company `gorm:"foreignKey:CompanyID"`
+	MatchID   uint    `gorm:"not null;index"` // UserCompanyMatch との紐付け
+
+	// 選考ステータス
+	// applied: 応募済み / document_passed: 書類通過 / interview: 面接中 /
+	// offered: 内定 / accepted: 内定承諾 / declined: 辞退 / rejected: 不合格
+	Status string `gorm:"type:varchar(50);not null;default:'applied'"`
+	Notes  string `gorm:"type:text"` // メモ・備考
+
+	AppliedAt       *time.Time // 応募日
+	StatusUpdatedAt *time.Time // ステータス最終更新日
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// CompanyProfileUpdateHistory 企業プロファイル更新履歴（ロールバック用）
+type CompanyProfileUpdateHistory struct {
+	ID        uint    `gorm:"primaryKey"`
+	CompanyID uint    `gorm:"not null;index"`
+	Company   Company `gorm:"foreignKey:CompanyID"`
+
+	// 更新前プロファイル（JSON）
+	PreviousProfile string `gorm:"type:text;not null"`
+	// 更新後プロファイル（JSON）
+	NewProfile string `gorm:"type:text;not null"`
+
+	// 更新トリガー: "auto_batch" / "admin_manual"
+	Trigger string `gorm:"type:varchar(50);not null;default:'auto_batch'"`
+	// 再計算に使用した通過実績件数
+	SampleCount int `gorm:"not null;default:0"`
+
+	CreatedAt time.Time
+}
+
 // CompanyReview 企業レビュー（オプション機能）
 type CompanyReview struct {
 	ID        uint    `gorm:"primaryKey"`

@@ -72,6 +72,8 @@ interface Company {
   techStack: string[]
   categoryScores?: CategoryScores
   isFavorited?: boolean
+  isApplied?: boolean
+  applicationId?: number
 }
 
 const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
@@ -164,6 +166,7 @@ function ResultsContent() {
   const [diagramLoading, setDiagramLoading] = useState(false)
   const [emailSending, setEmailSending] = useState(false)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
+  const [applyingId, setApplyingId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -261,6 +264,8 @@ function ResultsContent() {
               techStack: rec.tech_stack || [],
               categoryScores: rec.category_scores || undefined,
               isFavorited: rec.is_favorited || false,
+            isApplied: rec.is_applied || false,
+            applicationId: rec.application_id || undefined,
             }
           })
           console.log('[Results] Mapped companies:', mappedCompanies)
@@ -351,6 +356,37 @@ function ResultsContent() {
       }
     } finally {
       setFavoritingId(null)
+    }
+  }
+
+  const handleApply = async (e: React.MouseEvent, company: Company) => {
+    e.stopPropagation()
+    if (!company.matchId || company.isApplied || applyingId !== null) return
+    setApplyingId(company.matchId)
+    try {
+      const res = await fetch('/api/applications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: Number(userId),
+          company_id: Number(company.id),
+          match_id: company.matchId,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setCompanies(prev => prev.map(c =>
+          c.matchId === company.matchId
+            ? { ...c, isApplied: true, applicationId: data.id }
+            : c
+        ))
+        setSnackbar({ open: true, message: `${company.name} に応募しました`, severity: 'success' })
+      } else {
+        const err = await res.json()
+        setSnackbar({ open: true, message: err.error || '応募に失敗しました', severity: 'error' })
+      }
+    } finally {
+      setApplyingId(null)
     }
   }
 
@@ -1230,6 +1266,15 @@ function ResultsContent() {
                     >
                       ES・職務経歴書を添削
                     </Button>
+                    <Button
+                      variant={company.isApplied ? 'contained' : 'outlined'}
+                      size="small"
+                      color="primary"
+                      disabled={company.isApplied || applyingId === company.matchId}
+                      onClick={(e) => handleApply(e, company)}
+                    >
+                      {company.isApplied ? '応募済み' : applyingId === company.matchId ? '応募中...' : '応募する'}
+                    </Button>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>
@@ -1240,9 +1285,16 @@ function ResultsContent() {
           </Stack>
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
-            <Stack direction="row" spacing={2} justifyContent="center">
+            <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap">
               <Button variant="contained" startIcon={<Email />} onClick={handleSendEmail} disabled={emailSending}>
                 {emailSending ? '送信中...' : '結果をメールで受け取る'}
+              </Button>
+              <Button
+                variant="outlined"
+                size="large"
+                onClick={() => router.push(`/applications?user_id=${userId}`)}
+              >
+                選考管理を見る
               </Button>
               <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={handleReset}>
                 最初からやり直す

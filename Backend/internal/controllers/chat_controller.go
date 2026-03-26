@@ -242,6 +242,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		TechStack      []string       `json:"tech_stack"`
 		CategoryScores CategoryScores `json:"category_scores"`
 		IsFavorited    bool           `json:"is_favorited"`
+		IsApplied      bool           `json:"is_applied"`
 	}
 
 	type RecommendationResponse struct {
@@ -286,6 +287,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 			Employees:    employeeCount,
 			TechStack:    techStack,
 			IsFavorited:  match.IsFavorited,
+			IsApplied:    match.IsApplied,
 			CategoryScores: CategoryScores{
 				Technical:     match.TechnicalMatch,
 				Teamwork:      match.TeamworkMatch,
