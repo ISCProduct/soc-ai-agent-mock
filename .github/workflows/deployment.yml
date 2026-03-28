@@ -5,93 +5,96 @@ on:
     branches:
       - main
 
+permissions:
+  id-token: write   # OIDC トークン取得に必要
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-
-      # ECR
-      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-      ECR_REPOSITORY_FRONTEND: ${{ secrets.ECR_REPOSITORY_FRONTEND }}
-      ECR_REPOSITORY_BACKEND: ${{ secrets.ECR_REPOSITORY_BACKEND }}
+      AWS_REGION: ap-northeast-1
       IMAGE_TAG: ${{ github.sha }}
-
-      # ECS
-      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-      ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
-      ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      # ── OIDC による IAM ロール引き受け（アクセスキー不要）──
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # =========================
-      # Buildx のセットアップ
-      # =========================
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # =========================
-      # フロントエンドのビルドとプッシュ
-      # =========================
-      - name: Build frontend image
-        working-directory: ./frontend
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
-            --push .
-
-      # =========================
-      # バックエンドのビルドとプッシュ
-      # =========================
-      - name: Build backend image
+      # ── バックエンドのビルド & プッシュ ──────────────────────
+      - name: Build and push backend image
         working-directory: ./Backend
         run: |
           docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
+            -t ${{ steps.login-ecr.outputs.registry }}/soc-backend:${{ env.IMAGE_TAG }} \
+            -t ${{ steps.login-ecr.outputs.registry }}/soc-backend:latest \
             --push .
 
-      # =========================
-      # タスク定義の更新（フロント）
-      # =========================
-      - name: Render task definition (frontend)
-        id: render-frontend
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: .aws/task-definition-template.json
-          container-name: soc-frontend
-          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
+      # ── フロントエンドのビルド & プッシュ ────────────────────
+      - name: Build and push frontend image
+        working-directory: ./frontend
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -t ${{ steps.login-ecr.outputs.registry }}/soc-frontend:${{ env.IMAGE_TAG }} \
+            -t ${{ steps.login-ecr.outputs.registry }}/soc-frontend:latest \
+            --push .
 
-      # =========================
-      # タスク定義の更新（バックエンド）
-      # =========================
-      - name: Render task definition (backend)
+      # ── バックエンド: タスク定義更新 & デプロイ ──────────────
+      - name: Download backend task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ secrets.ECS_BACKEND_TASK_FAMILY }} \
+            --query taskDefinition > /tmp/backend-task-def.json
+
+      - name: Render backend task definition
         id: render-backend
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          task-definition: /tmp/backend-task-def.json
           container-name: soc-backend
-          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ env.IMAGE_TAG }}
+          image: ${{ steps.login-ecr.outputs.registry }}/soc-backend:${{ env.IMAGE_TAG }}
 
-      # =========================
-      # ECS デプロイ
-      # =========================
-      - name: Deploy to Amazon ECS
+      - name: Deploy backend to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
+          service: ${{ secrets.ECS_BACKEND_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      # ── フロントエンド: タスク定義更新 & デプロイ ────────────
+      - name: Download frontend task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ secrets.ECS_FRONTEND_TASK_FAMILY }} \
+            --query taskDefinition > /tmp/frontend-task-def.json
+
+      - name: Render frontend task definition
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: /tmp/frontend-task-def.json
+          container-name: soc-frontend
+          image: ${{ steps.login-ecr.outputs.registry }}/soc-frontend:${{ env.IMAGE_TAG }}
+
+      - name: Deploy frontend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          service: ${{ secrets.ECS_FRONTEND_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true

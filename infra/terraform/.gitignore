@@ -1,0 +1,24 @@
+# Terraform ステートファイル（S3 バックエンドを使用するため除外）
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+*.tfstate.*
+
+# 実際の変数ファイル（シークレットを含む可能性がある）
+terraform.tfvars
+*.auto.tfvars
+
+# クラッシュログ
+crash.log
+crash.*.log
+
+# Override ファイル
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform plan ファイル
+*.tfplan
